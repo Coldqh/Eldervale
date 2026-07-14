@@ -1,4 +1,4 @@
-const CACHE = 'eldervale-v1';
+const CACHE = 'eldervale-v2';
 const ROOT = '/Eldervale/';
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll([ROOT, `${ROOT}manifest.webmanifest`, `${ROOT}crest.svg`]))));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));

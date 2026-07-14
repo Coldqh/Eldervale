@@ -1,31 +1,33 @@
 # Eldervale
 
-Eldervale is a browser-first procedural fantasy world simulation. It generates named inhabitants, kingdoms, settlements, armies, wars, monsters, dragons, artifacts, books, dungeons and a causal event chronicle.
+Eldervale — браузерная процедурная симуляция живого фэнтези-мира. Она создаёт именных жителей, государства, поселения, армии, войны, чудовищ, драконов, артефакты, книги, подземелья и связанную хронику событий.
 
-## Run locally
+## Локальный запуск
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+## Сборка
 
 ```bash
 npm run build
 ```
 
-The project is configured for GitHub Pages at `/Eldervale/` and includes a PWA manifest, service worker and responsive mobile layout designed around iPhone 14 Pro.
+Проект настроен для GitHub Pages по адресу `/Eldervale/`. В него входят PWA-манифест, сервис-воркер и адаптивный интерфейс, рассчитанный прежде всего на iPhone 14 Pro, но работающий также на ноутбуках и ПК.
 
-## First playable foundation
+## Текущая основа
 
-- deterministic world generation from a seed;
-- terrain and political map layers;
-- every generated resident has an identity record;
-- rulers, heroes, armies, wars and settlement conquest;
-- dragon and monster attacks with casualties and damaged settlements;
-- royal hero dispatches and monster hunts;
-- books, artifacts and dungeons with connected provenance;
-- monthly, yearly and decade simulation steps;
-- local autosave plus JSON export/import;
-- desktop and mobile interfaces.
+- детерминированная генерация мира по ключу;
+- карта рельефа, владений, опасности и населения;
+- личная запись для каждого созданного жителя;
+- правители, герои, армии, войны и захват поселений;
+- нападения драконов и чудовищ с жертвами и разрушениями;
+- отправка героев правителями на охоту за чудовищами;
+- книги, артефакты и подземелья со связанным происхождением;
+- симуляция месяца, года и десятилетия;
+- фоновая генерация и симуляция через Web Worker;
+- сохранение в IndexedDB с экспортом и импортом JSON;
+- полностью русский интерфейс;
+- отдельная удобная прокрутка вкладок на телефоне и ПК.

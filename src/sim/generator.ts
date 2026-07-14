@@ -6,17 +6,17 @@ import { RNG, hashSeed, noise2D } from './rng';
 import { kingdomName, monsterName, personName, placeName } from './names';
 
 const colors = ['#9f4d46', '#4c7396', '#6d8752', '#9a7741', '#735d8f', '#3f8a80', '#a45f78', '#7d6b55', '#587284', '#8d8248'];
-const cultures = ['River Crown', 'Old Stone', 'Green Oath', 'Sun Coast', 'Ashen Banner', 'Moonwood', 'Iron Hearth', 'Golden Steppe'];
-const religions = ['The Seven Lamps', 'The Verdant Court', 'The First Flame', 'The Silent Stars', 'The Deep Father', 'The Wheel of Dawn'];
+const cultures = ['Речная Корона', 'Старый Камень', 'Зелёная Клятва', 'Солнечный Берег', 'Пепельное Знамя', 'Лунный Лес', 'Железный Очаг', 'Золотая Степь'];
+const religions = ['Семь Светильников', 'Зелёный Двор', 'Первое Пламя', 'Молчаливые Звёзды', 'Глубинный Отец', 'Колесо Рассвета'];
 const professions = ['farmer', 'miller', 'hunter', 'guard', 'blacksmith', 'carpenter', 'herbalist', 'merchant', 'scribe', 'priest', 'soldier', 'fisher', 'miner', 'weaver', 'brewer', 'healer'];
-const ambitions = ['raise a prosperous family', 'become a master artisan', 'earn a noble title', 'travel beyond the known roads', 'write a lasting book', 'defend the homeland', 'grow wealthy', 'discover an ancient ruin', 'serve the gods', 'avenge an old wrong'];
+const ambitions = ['создать крепкую семью', 'стать великим мастером', 'получить дворянский титул', 'уйти за пределы известных дорог', 'написать книгу, которую запомнят', 'защитить родную землю', 'разбогатеть', 'найти древние руины', 'служить богам', 'отомстить за старую обиду'];
 const buildingPools: Record<Settlement['type'], string[]> = {
-  hamlet: ['well', 'grain shed', 'wayside shrine', 'communal oven'],
-  village: ['inn', 'smithy', 'mill', 'chapel', 'market green'],
-  town: ['guildhall', 'stone bridge', 'temple', 'barracks', 'brewery', 'library'],
-  city: ['royal keep', 'great market', 'cathedral', 'arsenal', 'academy', 'city walls'],
-  fortress: ['citadel', 'armory', 'training yard', 'granary', 'watchtowers'],
-  port: ['docks', 'lighthouse', 'fish market', 'shipyard', 'customs house'],
+  hamlet: ['колодец', 'зерновой сарай', 'придорожное святилище', 'общая печь'],
+  village: ['трактир', 'кузница', 'мельница', 'часовня', 'торговая площадь'],
+  town: ['дом гильдии', 'каменный мост', 'храм', 'казармы', 'пивоварня', 'библиотека'],
+  city: ['королевская цитадель', 'большой рынок', 'собор', 'арсенал', 'академия', 'городские стены'],
+  fortress: ['цитадель', 'оружейная', 'учебный двор', 'амбар', 'сторожевые башни'],
+  port: ['доки', 'маяк', 'рыбный рынок', 'верфь', 'таможня'],
 };
 
 function terrainAt(x: number, y: number, width: number, height: number, seed: number): { terrain: Terrain; elevation: number; moisture: number } {
@@ -70,25 +70,25 @@ function historicalEvent(id: number, rng: RNG, year: number, kingdoms: Kingdom[]
   const settlement = rng.pick(settlements.filter(s => s.kingdomId === kingdom.id).length ? settlements.filter(s => s.kingdomId === kingdom.id) : settlements);
   if (kind === 'dragon' && monsters.some(m => m.species === 'dragon')) {
     const monster = rng.pick(monsters.filter(m => m.species === 'dragon'));
-    return { id, year, month: rng.int(1, 12), kind, title: `${monster.name} descended upon ${settlement.name}`, description: `The dragon burned granaries near ${settlement.name}. ${kingdom.name} raised a bounty and fortified the roads.`, entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }], importance: 4 };
+    return { id, year, month: rng.int(1, 12), kind, title: `${monster.name} обрушился на ${settlement.name}`, description: `Дракон сжёг амбары у ${settlement.name}. ${kingdom.name} назначило награду и укрепило дороги.`, entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }], importance: 4 };
   }
   if (kind === 'artifact' && artifacts.length) {
     const artifact = rng.pick(artifacts);
-    return { id, year, month: rng.int(1, 12), kind, title: `${artifact.name} changed hands`, description: `The ${artifact.type} was carried through ${settlement.name}, adding another disputed chapter to its provenance.`, entityRefs: [{ kind: 'artifact', id: artifact.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
+    return { id, year, month: rng.int(1, 12), kind, title: `${artifact.name} сменил владельца`, description: `Артефакт провезли через ${settlement.name}, и его история получила новую спорную главу.`, entityRefs: [{ kind: 'artifact', id: artifact.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
   }
   if (kind === 'book' && books.length) {
     const book = rng.pick(books);
-    return { id, year, month: rng.int(1, 12), kind, title: `Copies of “${book.title}” spread`, description: `Scribes in ${settlement.name} copied the work. Its claims began shaping local opinion.`, entityRefs: [{ kind: 'book', id: book.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
+    return { id, year, month: rng.int(1, 12), kind, title: `Распространились копии «${book.title}»`, description: `Писцы в ${settlement.name} переписали труд. Его утверждения начали влиять на местные взгляды.`, entityRefs: [{ kind: 'book', id: book.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
   }
   if (kind === 'war') {
     const rival = rng.pick(kingdoms.filter(k => k.id !== kingdom.id));
-    return { id, year, month: rng.int(1, 12), kind, title: `Border bloodshed between ${kingdom.name} and ${rival.name}`, description: `A disputed road and unpaid tolls led to raids, reprisals and a brief mustering of levies.`, entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'kingdom', id: rival.id }], importance: 3 };
+    return { id, year, month: rng.int(1, 12), kind, title: `Кровопролитие на границе ${kingdom.name} и ${rival.name}`, description: `Спорная дорога и неуплаченные пошлины привели к набегам, ответным ударам и сбору ополчения.`, entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'kingdom', id: rival.id }], importance: 3 };
   }
   const templates: Record<string, [string, string]> = {
-    politics: [`Succession dispute in ${kingdom.name}`, `A noble faction challenged the royal court, weakening authority around ${settlement.name}.`],
-    monster: [`Beasts gathered near ${settlement.name}`, `Hunters reported organized attacks on farms and isolated travelers.`],
-    settlement: [`${settlement.name} entered a new age`, `New walls, workshops and fields changed the settlement's place in the region.`],
-    trade: [`The road to ${settlement.name} prospered`, `Caravans brought tools, grain and stories from distant territories.`],
+    politics: [`Спор о наследовании в ${kingdom.name}`, `Знатный род бросил вызов двору и ослабил власть вокруг ${settlement.name}.`],
+    monster: [`Существа собираются у ${settlement.name}`, `Охотники сообщили о согласованных нападениях на фермы и одиноких путников.`],
+    settlement: [`${settlement.name} вступил в новую эпоху`, `Новые стены, мастерские и поля изменили положение поселения в регионе.`],
+    trade: [`Дорога к ${settlement.name} процветает`, `Караваны привезли инструменты, зерно и вести из далёких земель.`],
   };
   const [title, description] = templates[kind] ?? templates.settlement;
   return { id, year, month: rng.int(1, 12), kind, title, description, entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }], importance: rng.int(1, 3) };
@@ -157,7 +157,7 @@ export function generateWorld(config: WorldConfig): WorldState {
         id: characterId++, name: personName(rng, rng.chance(0.88) ? kingdom.species : rng.pick(speciesList)), species: rng.chance(0.88) ? kingdom.species : rng.pick(speciesList),
         age, birthYear: config.historyYears - age, alive: true, settlementId: settlement.id, kingdomId: kingdom.id,
         profession: age < 14 ? 'child' : rng.pick(professions), renown: rng.int(0, 18), health: rng.int(58, 100), ambition: rng.pick(ambitions),
-        parentIds: [], childIds: [], titles: [], artifactIds: [], bookIds: [], kills: 0, biography: [`Born in ${settlement.name}.`],
+        parentIds: [], childIds: [], titles: [], artifactIds: [], bookIds: [], kills: 0, biography: [`Родился в ${settlement.name}.`],
       };
       characters.push(character);
       if (age >= 18) adults.push(character.id);
@@ -182,22 +182,22 @@ export function generateWorld(config: WorldConfig): WorldState {
   for (const kingdom of kingdoms) {
     const capitalPeople = characters.filter(c => c.settlementId === kingdom.capitalId && c.age >= 24);
     const ruler = capitalPeople.sort((a, b) => b.renown - a.renown)[0] ?? characters.find(c => c.kingdomId === kingdom.id)!;
-    ruler.titles.push(kingdom.species === 'orc' ? 'High Chieftain' : 'Sovereign');
+    ruler.titles.push(kingdom.species === 'orc' ? 'Верховный вождь' : 'Правитель');
     ruler.renown = Math.max(70, ruler.renown);
-    ruler.biography.push(`Ascended to rule ${kingdom.name}.`);
+    ruler.biography.push(`Взошёл на престол государства ${kingdom.name}.`);
     kingdom.rulerId = ruler.id;
   }
   const armies: Army[] = kingdoms.map((kingdom, i) => {
     const capital = settlements.find(s => s.id === kingdom.capitalId)!;
     const commander = characters.filter(c => c.kingdomId === kingdom.id && c.age >= 20).sort((a, b) => b.renown - a.renown)[1] ?? characters.find(c => c.kingdomId === kingdom.id)!;
-    commander.titles.push('Marshal'); commander.profession = 'soldier';
-    return { id: i + 1, name: `${capital.name} Host`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), status: 'garrison' };
+    commander.titles.push('Маршал'); commander.profession = 'soldier';
+    return { id: i + 1, name: `Войско ${capital.name}`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), status: 'garrison' };
   });
   const dungeons: Dungeon[] = [];
-  const dungeonOrigins = ['forgotten royal tomb', 'abandoned mine', 'ruined temple', 'sealed arcane observatory', 'fallen hill-fort', 'ancient underground city', 'smuggler catacombs'];
+  const dungeonOrigins = ['забытая царская гробница', 'заброшенная шахта', 'разрушенный храм', 'запечатанная магическая обсерватория', 'павшая горная крепость', 'древний подземный город', 'катакомбы контрабандистов'];
   const dungeonTiles = shuffled.filter(t => !t.settlementId).slice(config.settlementCount, config.settlementCount + Math.max(8, Math.round(config.settlementCount * 0.45)));
   dungeonTiles.forEach((tile, i) => {
-    const dungeon: Dungeon = { id: i + 1, name: `${placeName(rng)} ${rng.pick(['Depths', 'Vault', 'Barrow', 'Ruins', 'Halls'])}`, x: tile.x, y: tile.y, origin: rng.pick(dungeonOrigins), builtYear: rng.int(-500, config.historyYears - 30), danger: rng.int(2, 10), depth: rng.int(1, 8), currentInhabitants: rng.pick(['goblins', 'restless dead', 'bandits', 'giant vermin', 'cultists', 'unknown creatures']), artifactIds: [], history: [] };
+    const dungeon: Dungeon = { id: i + 1, name: `${rng.pick(['Глубины', 'Хранилище', 'Курган', 'Руины', 'Чертоги'])} ${placeName(rng)}`, x: tile.x, y: tile.y, origin: rng.pick(dungeonOrigins), builtYear: rng.int(-500, config.historyYears - 30), danger: rng.int(2, 10), depth: rng.int(1, 8), currentInhabitants: rng.pick(['гоблины', 'беспокойные мертвецы', 'разбойники', 'гигантские твари', 'культисты', 'неизвестные существа']), artifactIds: [], history: [] };
     dungeons.push(dungeon); tiles[tile.y * config.width + tile.x]!.dungeonId = dungeon.id;
   });
   const monsters: Monster[] = [];
@@ -212,33 +212,33 @@ export function generateWorld(config: WorldConfig): WorldState {
   }
   const artifacts: Artifact[] = [];
   const artifactCount = Math.max(8, Math.round(config.settlementCount * config.artifactDensity * 0.65));
-  const depictions = ['a crowned rider beneath seven stars', 'the fall of a red dragon', 'an elven queen planting the first silver tree', 'orc clans crossing a frozen river', 'a nameless saint closing a black gate', 'three moons over a burning fleet'];
+  const depictions = ['коронованный всадник под семью звёздами', 'падение красного дракона', 'эльфийская королева сажает первое серебряное дерево', 'оркские кланы переходят замёрзшую реку', 'безымянный святой закрывает чёрные врата', 'три луны над горящим флотом'];
   for (let i = 0; i < artifactCount; i += 1) {
     const creator = rng.pick(characters.filter(c => c.age >= 16));
     const owner = rng.pick(characters.filter(c => c.age >= 16));
-    const artifact: Artifact = { id: i + 1, name: `${rng.pick(['Crown', 'Blade', 'Chalice', 'Standard', 'Mask', 'Ring', 'Horn', 'Shield'])} of ${placeName(rng)}`, type: rng.pick(['weapon', 'regalia', 'ritual object', 'jewel', 'armor', 'instrument']), material: rng.pick(['silver', 'black iron', 'gold', 'dragonbone', 'moonstone', 'bronze', 'yew']), creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(1, config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions), history: [`Created by ${creator.name}.`, `Now held by ${owner.name}.`] };
+    const artifact: Artifact = { id: i + 1, name: `${rng.pick(['Корона', 'Клинок', 'Чаша', 'Знамя', 'Маска', 'Кольцо', 'Рог', 'Щит'])} ${placeName(rng)}`, type: rng.pick(['оружие', 'регалия', 'ритуальный предмет', 'драгоценность', 'доспех', 'инструмент']), material: rng.pick(['серебро', 'чёрное железо', 'золото', 'драконья кость', 'лунный камень', 'бронза', 'тис']), creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(1, config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions), history: [`Создан мастером ${creator.name}.`, `Сейчас принадлежит ${owner.name}.`] };
     artifacts.push(artifact); creator.artifactIds.push(artifact.id); owner.artifactIds.push(artifact.id);
     if (rng.chance(0.45)) rng.pick(dungeons).artifactIds.push(artifact.id);
   }
   const books: Book[] = [];
-  const subjects = ['dynastic history', 'dragons', 'herbal medicine', 'ancient machines', 'theology', 'warfare', 'distant islands', 'monsters', 'crafting', 'poetry'];
+  const subjects = ['история династий', 'драконы', 'травничество', 'древние машины', 'богословие', 'военное дело', 'далёкие острова', 'чудовища', 'ремесло', 'поэзия'];
   for (let i = 0; i < Math.max(10, Math.round(config.settlementCount * 0.75)); i += 1) {
     const author = rng.pick(characters.filter(c => c.age >= 20));
     const subject = rng.pick(subjects);
-    const book: Book = { id: i + 1, title: `${rng.pick(['On', 'A Chronicle of', 'The Hidden Truth of', 'Songs of', 'Observations Concerning'])} ${subject}`, authorId: author.id, yearWritten: rng.int(Math.max(1, config.historyYears - author.age), config.historyYears), language: kingdoms.find(k => k.id === author.kingdomId)!.culture, subject, reliability: rng.int(25, 98), summary: `A ${subject} work shaped by the author's experience in ${settlements.find(s => s.id === author.settlementId)!.name}.`, copies: rng.int(1, 45), settlementId: author.settlementId };
-    books.push(book); author.bookIds.push(book.id); author.biography.push(`Wrote “${book.title}”.`);
+    const book: Book = { id: i + 1, title: `${rng.pick(['О', 'Хроника:', 'Скрытая правда:', 'Песни о', 'Наблюдения о'])} ${subject}`, authorId: author.id, yearWritten: rng.int(Math.max(1, config.historyYears - author.age), config.historyYears), language: kingdoms.find(k => k.id === author.kingdomId)!.culture, subject, reliability: rng.int(25, 98), summary: `Труд о теме «${subject}», основанный на опыте автора в ${settlements.find(s => s.id === author.settlementId)!.name}.`, copies: rng.int(1, 45), settlementId: author.settlementId };
+    books.push(book); author.bookIds.push(book.id); author.biography.push(`Написал книгу «${book.title}».`);
   }
   const events: WorldEvent[] = [];
   let eventId = 1;
   for (const settlement of settlements) {
-    events.push({ id: eventId++, year: settlement.foundedYear, month: rng.int(1, 12), kind: 'settlement', title: `${settlement.name} was founded`, description: `${settlement.name} began as a ${settlement.type} under ${kingdoms.find(k => k.id === settlement.kingdomId)!.name}.`, entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 3 });
+    events.push({ id: eventId++, year: settlement.foundedYear, month: rng.int(1, 12), kind: 'settlement', title: `Основан ${settlement.name}`, description: `${settlement.name} возник под властью государства ${kingdoms.find(k => k.id === settlement.kingdomId)!.name}.`, entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 3 });
   }
   const historyEvents = Math.min(900, Math.max(80, Math.round(config.historyYears * 1.45)));
   for (let i = 0; i < historyEvents; i += 1) events.push(historicalEvent(eventId++, rng, rng.int(1, config.historyYears), kingdoms, settlements, monsters, artifacts, books));
   events.sort((a, b) => a.year - b.year || a.month - b.month);
   const wars: War[] = [];
   const world: WorldState = {
-    version: 1, config, name: `${placeName(rng)} World`, year: config.historyYears, month: 1,
+    version: 1, language: 'ru', config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
     tiles, kingdoms, settlements, characters, armies, monsters, artifacts, books, dungeons, wars, events,
     nextIds: { event: eventId, character: characterId, war: 1, artifact: artifacts.length + 1, book: books.length + 1 },
   };
@@ -246,6 +246,6 @@ export function generateWorld(config: WorldConfig): WorldState {
 }
 
 export const defaultConfig: WorldConfig = {
-  seed: 'Eldervale-First-Age', width: 54, height: 34, historyYears: 320, kingdomCount: 7,
+  seed: 'Eldervale-Первая-Эпоха', width: 54, height: 34, historyYears: 320, kingdomCount: 7,
   settlementCount: 30, populationScale: 0.72, magic: 0.38, warlike: 0.48, monsterDensity: 1, artifactDensity: 1,
 };

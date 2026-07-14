@@ -186,6 +186,7 @@ export interface WorldEvent {
 
 export interface WorldState {
   version: 1;
+  language?: 'ru';
   config: WorldConfig;
   name: string;
   year: number;

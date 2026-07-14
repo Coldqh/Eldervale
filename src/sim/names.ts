@@ -15,7 +15,7 @@ const ends: Record<Species, string[]> = {
 };
 const placeStarts = ['Alder', 'Ash', 'Black', 'Bright', 'Cinder', 'Dawn', 'Deep', 'Dragon', 'Dun', 'Elder', 'Frost', 'Gold', 'Green', 'Grey', 'High', 'Iron', 'Moon', 'Oak', 'Raven', 'Red', 'River', 'Silver', 'Stone', 'Storm', 'Sun', 'Thorn', 'White', 'Wolf'];
 const placeEnds = ['barrow', 'bridge', 'brook', 'burg', 'dale', 'fall', 'ford', 'gate', 'haven', 'heim', 'hold', 'keep', 'march', 'mere', 'moor', 'port', 'reach', 'rest', 'shire', 'stead', 'vale', 'watch', 'wick'];
-const kingdomForms = ['Kingdom', 'Crown', 'Marches', 'Realm', 'Dominion', 'Highlands', 'Confederacy', 'Thrones'];
+const kingdomForms = ['Королевство', 'Корона', 'Марки', 'Держава', 'Владение', 'Нагорье', 'Союз', 'Престолы'];
 
 export function personName(rng: RNG, species: Species): string {
   return `${rng.pick(starts[species])}${rng.pick(ends[species])}`;
@@ -24,9 +24,9 @@ export function placeName(rng: RNG): string {
   return `${rng.pick(placeStarts)}${rng.pick(placeEnds)}`;
 }
 export function kingdomName(rng: RNG): string {
-  return `${rng.pick(kingdomForms)} of ${placeName(rng)}`;
+  return `${rng.pick(kingdomForms)} ${placeName(rng)}`;
 }
 export function monsterName(rng: RNG, species: string): string {
-  const titles = ['the Ashen', 'the Red', 'the Hollow', 'the Ancient', 'the Devourer', 'the Pale', 'the Unbound', 'the Mountain-Breaker', 'the Crown-Eater'];
-  return `${personName(rng, rng.pick(['human', 'elf', 'orc', 'dwarf'] as Species[]))} ${rng.pick(titles)}, ${species}`;
+  const titles = ['Пепельный', 'Красный', 'Пустой', 'Древний', 'Пожиратель', 'Бледный', 'Освобождённый', 'Ломатель Гор', 'Пожиратель Корон'];
+  return `${personName(rng, rng.pick(['human', 'elf', 'orc', 'dwarf'] as Species[]))} ${rng.pick(titles)}`;
 }
