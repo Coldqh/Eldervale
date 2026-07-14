@@ -1,7 +1,8 @@
 import type {
-  Army, Artifact, Book, Character, Dungeon, Kingdom, Monster, Settlement, Species,
-  Terrain, Tile, War, WorldConfig, WorldEvent, WorldState,
+  Army, Artifact, Book, Character, Dynasty, Dungeon, EntityRef, Kingdom, Monster, Relationship,
+  Settlement, Species, Terrain, Tile, TradeRoute, War, WorldConfig, WorldEvent, WorldState,
 } from '../types';
+import { APP_VERSION } from '../version';
 import { RNG, hashSeed, noise2D } from './rng';
 import { kingdomName, monsterName, personName, placeName } from './names';
 
@@ -10,6 +11,12 @@ const cultures = ['Речная Корона', 'Старый Камень', 'З�
 const religions = ['Семь Светильников', 'Зелёный Двор', 'Первое Пламя', 'Молчаливые Звёзды', 'Глубинный Отец', 'Колесо Рассвета'];
 const professions = ['farmer', 'miller', 'hunter', 'guard', 'blacksmith', 'carpenter', 'herbalist', 'merchant', 'scribe', 'priest', 'soldier', 'fisher', 'miner', 'weaver', 'brewer', 'healer'];
 const ambitions = ['создать крепкую семью', 'стать великим мастером', 'получить дворянский титул', 'уйти за пределы известных дорог', 'написать книгу, которую запомнят', 'защитить родную землю', 'разбогатеть', 'найти древние руины', 'служить богам', 'отомстить за старую обиду'];
+const laws = ['королевский мир на дорогах', 'налог с рынков', 'воинская повинность', 'право убежища в храмах', 'запрет кровной мести в городах', 'десятина с рудников'];
+const resourcesByTerrain: Record<Terrain, string[]> = {
+  ocean: ['рыба'], coast: ['рыба', 'соль', 'жемчуг'], plains: ['зерно', 'лошади', 'лён'], forest: ['древесина', 'мёд', 'лекарственные травы'],
+  hills: ['овцы', 'камень', 'железо'], mountains: ['железо', 'серебро', 'драгоценные камни'], marsh: ['торф', 'тростник', 'целебные грибы'],
+  desert: ['соль', 'стекольный песок', 'пряности'], tundra: ['меха', 'рыба', 'янтарь'],
+};
 const buildingPools: Record<Settlement['type'], string[]> = {
   hamlet: ['колодец', 'зерновой сарай', 'придорожное святилище', 'общая печь'],
   village: ['трактир', 'кузница', 'мельница', 'часовня', 'торговая площадь'],
@@ -38,9 +45,7 @@ function terrainAt(x: number, y: number, width: number, height: number, seed: nu
   return { terrain: 'plains', elevation, moisture };
 }
 
-function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
+const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
 function settlementType(rng: RNG, tile: Tile): Settlement['type'] {
   if (tile.terrain === 'coast' && rng.chance(0.55)) return 'port';
@@ -59,193 +64,392 @@ function populationFor(type: Settlement['type'], rng: RNG, scale: number): numbe
   return Math.max(12, Math.round(rng.int(min, max) * scale));
 }
 
-function historicalEvent(id: number, rng: RNG, year: number, kingdoms: Kingdom[], settlements: Settlement[], monsters: Monster[], artifacts: Artifact[], books: Book[]): WorldEvent {
-  const kind = rng.weighted([
-    { value: 'politics' as const, weight: 20 }, { value: 'war' as const, weight: 15 },
-    { value: 'dragon' as const, weight: 9 }, { value: 'monster' as const, weight: 12 },
-    { value: 'artifact' as const, weight: 10 }, { value: 'book' as const, weight: 9 },
-    { value: 'settlement' as const, weight: 15 }, { value: 'trade' as const, weight: 10 },
-  ]);
-  const kingdom = rng.pick(kingdoms);
-  const settlement = rng.pick(settlements.filter(s => s.kingdomId === kingdom.id).length ? settlements.filter(s => s.kingdomId === kingdom.id) : settlements);
-  if (kind === 'dragon' && monsters.some(m => m.species === 'dragon')) {
-    const monster = rng.pick(monsters.filter(m => m.species === 'dragon'));
-    return { id, year, month: rng.int(1, 12), kind, title: `${monster.name} обрушился на ${settlement.name}`, description: `Дракон сжёг амбары у ${settlement.name}. ${kingdom.name} назначило награду и укрепило дороги.`, entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }], importance: 4 };
-  }
-  if (kind === 'artifact' && artifacts.length) {
-    const artifact = rng.pick(artifacts);
-    return { id, year, month: rng.int(1, 12), kind, title: `${artifact.name} сменил владельца`, description: `Артефакт провезли через ${settlement.name}, и его история получила новую спорную главу.`, entityRefs: [{ kind: 'artifact', id: artifact.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
-  }
-  if (kind === 'book' && books.length) {
-    const book = rng.pick(books);
-    return { id, year, month: rng.int(1, 12), kind, title: `Распространились копии «${book.title}»`, description: `Писцы в ${settlement.name} переписали труд. Его утверждения начали влиять на местные взгляды.`, entityRefs: [{ kind: 'book', id: book.id }, { kind: 'settlement', id: settlement.id }], importance: 2 };
-  }
-  if (kind === 'war') {
-    const rival = rng.pick(kingdoms.filter(k => k.id !== kingdom.id));
-    return { id, year, month: rng.int(1, 12), kind, title: `Кровопролитие на границе ${kingdom.name} и ${rival.name}`, description: `Спорная дорога и неуплаченные пошлины привели к набегам, ответным ударам и сбору ополчения.`, entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'kingdom', id: rival.id }], importance: 3 };
-  }
-  const templates: Record<string, [string, string]> = {
-    politics: [`Спор о наследовании в ${kingdom.name}`, `Знатный род бросил вызов двору и ослабил власть вокруг ${settlement.name}.`],
-    monster: [`Существа собираются у ${settlement.name}`, `Охотники сообщили о согласованных нападениях на фермы и одиноких путников.`],
-    settlement: [`${settlement.name} вступил в новую эпоху`, `Новые стены, мастерские и поля изменили положение поселения в регионе.`],
-    trade: [`Дорога к ${settlement.name} процветает`, `Караваны привезли инструменты, зерно и вести из далёких земель.`],
+function event(
+  id: number,
+  year: number,
+  month: number,
+  kind: WorldEvent['kind'],
+  title: string,
+  description: string,
+  cause: string,
+  consequences: string[],
+  entityRefs: EntityRef[],
+  importance: number,
+  traces: EntityRef[] = entityRefs,
+): WorldEvent {
+  return { id, year, month, kind, title, description, cause, consequences, traces, entityRefs, importance };
+}
+
+function createRelationships(rng: RNG, characters: Character[], settlements: Settlement[], historyYears: number): Relationship[] {
+  const relationships: Relationship[] = [];
+  let id = 1;
+  const add = (a: Character, b: Character, kind: Relationship['kind'], strength: number, reason: string, isPublic = true) => {
+    if (a.id === b.id || relationships.some(rel => (rel.characterAId === a.id && rel.characterBId === b.id) || (rel.characterAId === b.id && rel.characterBId === a.id))) return;
+    const relation: Relationship = { id: id++, characterAId: a.id, characterBId: b.id, kind, strength, sinceYear: rng.int(Math.max(1, historyYears - Math.min(a.age, b.age)), historyYears), public: isPublic, reason };
+    relationships.push(relation);
+    a.relationshipIds.push(relation.id);
+    b.relationshipIds.push(relation.id);
   };
-  const [title, description] = templates[kind] ?? templates.settlement;
-  return { id, year, month: rng.int(1, 12), kind, title, description, entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }], importance: rng.int(1, 3) };
+
+  for (const settlement of settlements) {
+    const locals = characters.filter(c => c.settlementId === settlement.id && c.age >= 18 && c.age <= 90);
+    const available = [...locals].sort((a, b) => a.id - b.id);
+    for (let i = 0; i + 1 < available.length; i += 2) {
+      const a = available[i]!;
+      const candidates = available.slice(i + 1).filter(b => !b.spouseId && Math.abs(a.age - b.age) < 26);
+      if (!a.spouseId && candidates.length && rng.chance(0.54)) {
+        const b = rng.pick(candidates);
+        a.spouseId = b.id;
+        b.spouseId = a.id;
+        add(a, b, 'любовь', rng.int(48, 95), `совместная жизнь в ${settlement.name}`);
+      }
+    }
+    const notable = locals.filter(c => c.renown > 8).slice(0, 22);
+    for (let i = 0; i < Math.min(8, Math.floor(notable.length / 2)); i += 1) {
+      const a = rng.pick(notable);
+      const b = rng.pick(notable.filter(item => item.id !== a.id));
+      const kind = rng.weighted<Relationship['kind']>([
+        { value: 'дружба', weight: 34 }, { value: 'верность', weight: 22 }, { value: 'долг', weight: 15 },
+        { value: 'соперничество', weight: 18 }, { value: 'ненависть', weight: 6 }, { value: 'страх', weight: 5 },
+      ]);
+      add(a, b, kind, rng.int(30, 90), kind === 'долг' ? 'неоплаченная услуга или заём' : `общая история в ${settlement.name}`, kind !== 'ненависть');
+    }
+  }
+
+  for (const child of characters.filter(c => c.parentIds.length)) {
+    for (const parentId of child.parentIds) {
+      const parent = characters.find(c => c.id === parentId);
+      if (parent) add(parent, child, 'родство', rng.int(55, 100), 'родитель и ребёнок');
+    }
+  }
+  return relationships;
+}
+
+function createDynasties(rng: RNG, kingdoms: Kingdom[], characters: Character[], historyYears: number): Dynasty[] {
+  const dynasties: Dynasty[] = [];
+  let id = 1;
+  for (const kingdom of kingdoms) {
+    const ruler = characters.find(c => c.id === kingdom.rulerId)!;
+    const familyIds = new Set<number>([ruler.id, ...ruler.parentIds, ...ruler.childIds]);
+    if (ruler.spouseId) familyIds.add(ruler.spouseId);
+    const dynasty: Dynasty = {
+      id: id++, name: `Дом ${ruler.name}`, founderId: ruler.parentIds[0] ?? ruler.id, currentHeadId: ruler.id,
+      memberIds: [...familyIds], kingdomId: kingdom.id, prestige: rng.int(60, 98), wealth: rng.int(700, 2800),
+      claimKingdomIds: [kingdom.id], history: [`Дом утвердился при дворе государства ${kingdom.name}.`],
+    };
+    dynasties.push(dynasty);
+    kingdom.dynastyId = dynasty.id;
+    for (const memberId of dynasty.memberIds) {
+      const member = characters.find(c => c.id === memberId);
+      if (member) member.dynastyId = dynasty.id;
+    }
+
+    const nobles = characters.filter(c => c.kingdomId === kingdom.id && c.age >= 25 && !c.dynastyId).sort((a, b) => b.renown - a.renown).slice(0, 2);
+    for (const noble of nobles) {
+      const members = new Set<number>([noble.id, ...noble.childIds]);
+      if (noble.spouseId) members.add(noble.spouseId);
+      const house: Dynasty = {
+        id: id++, name: `Дом ${noble.name}`, founderId: noble.id, currentHeadId: noble.id, memberIds: [...members], kingdomId: kingdom.id,
+        prestige: rng.int(28, 72), wealth: rng.int(250, 1400), claimKingdomIds: rng.chance(0.22) ? [kingdom.id] : [],
+        history: [`Род получил влияние в ${rng.int(Math.max(1, historyYears - 120), historyYears)} году.`],
+      };
+      dynasties.push(house);
+      for (const memberId of house.memberIds) {
+        const member = characters.find(c => c.id === memberId);
+        if (member && !member.dynastyId) member.dynastyId = house.id;
+      }
+    }
+  }
+  return dynasties;
+}
+
+function createTradeRoutes(rng: RNG, settlements: Settlement[], kingdoms: Kingdom[]): TradeRoute[] {
+  const routes: TradeRoute[] = [];
+  const used = new Set<string>();
+  for (const from of settlements) {
+    const nearest = settlements.filter(to => to.id !== from.id).sort((a, b) => distance(from, a) - distance(from, b)).slice(0, from.type === 'city' || from.type === 'port' ? 3 : 1);
+    for (const to of nearest) {
+      const key = [from.id, to.id].sort((a, b) => a - b).join(':');
+      if (used.has(key)) continue;
+      used.add(key);
+      const route: TradeRoute = {
+        id: routes.length + 1, name: `${from.name} — ${to.name}`, fromSettlementId: from.id, toSettlementId: to.id,
+        goods: [...new Set([from.resource, to.resource])], volume: rng.int(18, 86),
+        safety: Math.max(15, Math.round(92 - distance(from, to) * 4 - rng.int(0, 18))), active: true,
+        controlledByKingdomIds: [...new Set([from.kingdomId, to.kingdomId])],
+        history: [`Маршрут связал ${from.name} и ${to.name}.`],
+      };
+      routes.push(route);
+      from.tradeRouteIds.push(route.id);
+      to.tradeRouteIds.push(route.id);
+      if (from.kingdomId !== to.kingdomId) {
+        const a = kingdoms.find(k => k.id === from.kingdomId)!;
+        const b = kingdoms.find(k => k.id === to.kingdomId)!;
+        a.treasury += route.volume;
+        b.treasury += route.volume;
+      }
+    }
+  }
+  return routes;
 }
 
 export function generateWorld(config: WorldConfig): WorldState {
   const rng = new RNG(config.seed);
   const seed = hashSeed(config.seed);
   const tiles: Tile[] = [];
-  for (let y = 0; y < config.height; y += 1) {
-    for (let x = 0; x < config.width; x += 1) {
-      tiles.push({ x, y, ...terrainAt(x, y, config.width, config.height, seed) });
-    }
-  }
-  const land = tiles.filter(t => t.terrain !== 'ocean' && t.terrain !== 'mountains');
+  for (let y = 0; y < config.height; y += 1) for (let x = 0; x < config.width; x += 1) tiles.push({ x, y, ...terrainAt(x, y, config.width, config.height, seed) });
+
+  const land = tiles.filter(tile => tile.terrain !== 'ocean' && tile.terrain !== 'mountains');
+  const shuffled = [...land].sort((a, b) => noise2D(a.x, a.y, seed + 77) - noise2D(b.x, b.y, seed + 77));
   const selected: Tile[] = [];
-  const shuffled = [...land].sort(() => rng.next() - 0.5);
   for (const tile of shuffled) {
     if (selected.length >= config.settlementCount) break;
     if (selected.every(other => distance(tile, other) > 2.2)) selected.push(tile);
   }
-  const settlements: Settlement[] = selected.map((tile, i) => {
+
+  const settlements: Settlement[] = selected.map((tile, index) => {
     const type = settlementType(rng, tile);
     return {
-      id: i + 1, name: placeName(rng), x: tile.x, y: tile.y, kingdomId: 0,
+      id: index + 1, name: placeName(rng), x: tile.x, y: tile.y, kingdomId: 0,
       population: populationFor(type, rng, config.populationScale), prosperity: rng.int(35, 82),
       defense: rng.int(type === 'fortress' ? 65 : 18, type === 'city' ? 88 : 72), food: rng.int(55, 120),
       foundedYear: rng.int(1, Math.max(2, config.historyYears - 20)), type,
-      buildings: [...buildingPools[type]].sort(() => rng.next() - 0.5).slice(0, rng.int(2, Math.min(5, buildingPools[type].length))),
-      notableCharacterIds: [], damaged: 0,
+      buildings: [...buildingPools[type]].sort((a, b) => a.localeCompare(b)).slice(0, rng.int(2, Math.min(5, buildingPools[type].length))),
+      notableCharacterIds: [], damaged: 0, resource: rng.pick(resourcesByTerrain[tile.terrain]), shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18),
+      history: [],
     };
   });
+
   const kingdomCount = Math.max(2, Math.min(config.kingdomCount, settlements.length));
   const capitalChoices = [...settlements].sort((a, b) => b.population - a.population).slice(0, kingdomCount);
-  const speciesList: Species[] = ['human', 'elf', 'orc', 'dwarf'];
-  const kingdoms: Kingdom[] = capitalChoices.map((capital, i) => ({
-    id: i + 1, name: kingdomName(rng), color: colors[i % colors.length]!, species: rng.weighted([{ value: 'human', weight: 50 }, { value: 'elf', weight: 18 }, { value: 'orc', weight: 18 }, { value: 'dwarf', weight: 14 }]),
+  const kingdoms: Kingdom[] = capitalChoices.map((capital, index) => ({
+    id: index + 1, name: kingdomName(rng), color: colors[index % colors.length]!,
+    species: rng.weighted([{ value: 'human' as const, weight: 50 }, { value: 'elf' as const, weight: 18 }, { value: 'orc' as const, weight: 18 }, { value: 'dwarf' as const, weight: 14 }]),
     rulerId: 0, capitalId: capital.id, treasury: rng.int(600, 2400), armyStrength: rng.int(120, 480), stability: rng.int(45, 88), aggression: rng.int(15, 90),
-    culture: rng.pick(cultures), religion: rng.pick(religions), foundedYear: rng.int(1, Math.max(2, config.historyYears - 40)), enemies: [],
+    culture: rng.pick(cultures), religion: rng.pick(religions), foundedYear: rng.int(1, Math.max(2, config.historyYears - 40)), enemies: [], claims: [], diplomacy: [],
+    laws: [...laws].sort(() => rng.next() - .5).slice(0, rng.int(2, 4)),
   }));
+
   for (const settlement of settlements) {
     const nearest = kingdoms.reduce((best, kingdom) => {
-      const capital = settlements.find(s => s.id === kingdom.capitalId)!;
-      return distance(settlement, capital) < distance(settlement, settlements.find(s => s.id === best.capitalId)!) ? kingdom : best;
+      const capital = settlements.find(item => item.id === kingdom.capitalId)!;
+      const bestCapital = settlements.find(item => item.id === best.capitalId)!;
+      return distance(settlement, capital) < distance(settlement, bestCapital) ? kingdom : best;
     }, kingdoms[0]!);
     settlement.kingdomId = nearest.id;
+    settlement.history.push(`${settlement.name} основан под властью государства ${nearest.name}.`);
     tiles[settlement.y * config.width + settlement.x]!.settlementId = settlement.id;
   }
+
   for (const tile of tiles) {
     if (tile.terrain === 'ocean') continue;
     const nearest = kingdoms.reduce((best, kingdom) => {
-      const capital = settlements.find(s => s.id === kingdom.capitalId)!;
-      const bestCapital = settlements.find(s => s.id === best.capitalId)!;
+      const capital = settlements.find(item => item.id === kingdom.capitalId)!;
+      const bestCapital = settlements.find(item => item.id === best.capitalId)!;
       return distance(tile, capital) < distance(tile, bestCapital) ? kingdom : best;
     }, kingdoms[0]!);
     tile.kingdomId = nearest.id;
   }
+
+  for (const kingdom of kingdoms) {
+    for (const other of kingdoms.filter(item => item.id !== kingdom.id)) {
+      const score = rng.int(-55, 68);
+      kingdom.diplomacy.push({ kingdomId: other.id, score, status: score > 40 ? 'союз' : score < -28 ? 'напряжение' : 'мир', reason: score < 0 ? 'старые споры о границах и пошлинах' : 'торговля и династические связи' });
+    }
+  }
+
   const characters: Character[] = [];
   let characterId = 1;
+  const speciesList: Species[] = ['human', 'elf', 'orc', 'dwarf'];
   for (const settlement of settlements) {
-    const kingdom = kingdoms.find(k => k.id === settlement.kingdomId)!;
-    const adults: number[] = [];
-    for (let i = 0; i < settlement.population; i += 1) {
-      const age = rng.int(0, kingdom.species === 'elf' ? 180 : kingdom.species === 'dwarf' ? 110 : 78);
-      const character: Character = {
-        id: characterId++, name: personName(rng, rng.chance(0.88) ? kingdom.species : rng.pick(speciesList)), species: rng.chance(0.88) ? kingdom.species : rng.pick(speciesList),
-        age, birthYear: config.historyYears - age, alive: true, settlementId: settlement.id, kingdomId: kingdom.id,
-        profession: age < 14 ? 'child' : rng.pick(professions), renown: rng.int(0, 18), health: rng.int(58, 100), ambition: rng.pick(ambitions),
-        parentIds: [], childIds: [], titles: [], artifactIds: [], bookIds: [], kills: 0, biography: [`Родился в ${settlement.name}.`],
-      };
-      characters.push(character);
-      if (age >= 18) adults.push(character.id);
+    const kingdom = kingdoms.find(item => item.id === settlement.kingdomId)!;
+    for (let index = 0; index < settlement.population; index += 1) {
+      const species = rng.chance(.88) ? kingdom.species : rng.pick(speciesList);
+      const maxAge = species === 'elf' ? 180 : species === 'dwarf' ? 110 : 78;
+      const age = rng.int(0, maxAge);
+      characters.push({
+        id: characterId++, name: personName(rng, species), species, age, birthYear: config.historyYears - age, alive: true,
+        settlementId: settlement.id, kingdomId: kingdom.id, profession: age < 14 ? 'child' : rng.pick(professions), renown: rng.int(0, 18), health: rng.int(58, 100),
+        wealth: age < 14 ? 0 : rng.int(0, 180), loyalty: rng.int(25, 92), ambition: rng.pick(ambitions), parentIds: [], childIds: [], relationshipIds: [],
+        titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0, biography: [`Родился в ${settlement.name}.`],
+      });
     }
-    const local = characters.filter(c => c.settlementId === settlement.id);
-    for (const child of local.filter(c => c.age < 28)) {
-      const candidates = local.filter(c => c.age >= child.age + 18 && c.age <= child.age + 48);
-      if (candidates.length >= 1 && rng.chance(0.72)) {
+    const locals = characters.filter(character => character.settlementId === settlement.id);
+    for (const child of locals.filter(character => character.age < 28)) {
+      const candidates = locals.filter(character => character.age >= child.age + 18 && character.age <= child.age + 48);
+      if (candidates.length && rng.chance(.72)) {
         const parentA = rng.pick(candidates);
-        const parentBOptions = candidates.filter(c => c.id !== parentA.id);
-        child.parentIds = [parentA.id];
+        child.parentIds.push(parentA.id);
         parentA.childIds.push(child.id);
-        if (parentBOptions.length && rng.chance(0.82)) {
-          const parentB = rng.pick(parentBOptions);
+        const second = candidates.filter(character => character.id !== parentA.id);
+        if (second.length && rng.chance(.82)) {
+          const parentB = rng.pick(second);
           child.parentIds.push(parentB.id);
           parentB.childIds.push(child.id);
         }
       }
     }
-    settlement.notableCharacterIds = local.filter(c => c.age >= 16).sort((a, b) => b.renown - a.renown).slice(0, 8).map(c => c.id);
+    settlement.notableCharacterIds = locals.filter(character => character.age >= 16).sort((a, b) => b.renown - a.renown).slice(0, 8).map(character => character.id);
   }
+
   for (const kingdom of kingdoms) {
-    const capitalPeople = characters.filter(c => c.settlementId === kingdom.capitalId && c.age >= 24);
-    const ruler = capitalPeople.sort((a, b) => b.renown - a.renown)[0] ?? characters.find(c => c.kingdomId === kingdom.id)!;
+    const capitalPeople = characters.filter(character => character.settlementId === kingdom.capitalId && character.age >= 24);
+    const ruler = capitalPeople.sort((a, b) => b.renown - a.renown)[0] ?? characters.find(character => character.kingdomId === kingdom.id)!;
     ruler.titles.push(kingdom.species === 'orc' ? 'Верховный вождь' : 'Правитель');
     ruler.renown = Math.max(70, ruler.renown);
+    ruler.wealth += kingdom.treasury / 3;
     ruler.biography.push(`Взошёл на престол государства ${kingdom.name}.`);
     kingdom.rulerId = ruler.id;
   }
-  const armies: Army[] = kingdoms.map((kingdom, i) => {
-    const capital = settlements.find(s => s.id === kingdom.capitalId)!;
-    const commander = characters.filter(c => c.kingdomId === kingdom.id && c.age >= 20).sort((a, b) => b.renown - a.renown)[1] ?? characters.find(c => c.kingdomId === kingdom.id)!;
-    commander.titles.push('Маршал'); commander.profession = 'soldier';
-    return { id: i + 1, name: `Войско ${capital.name}`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), status: 'garrison' };
+
+  const relationships = createRelationships(rng, characters, settlements, config.historyYears);
+  const dynasties = createDynasties(rng, kingdoms, characters, config.historyYears);
+  const tradeRoutes = createTradeRoutes(rng, settlements, kingdoms);
+
+  const armies: Army[] = kingdoms.map((kingdom, index) => {
+    const capital = settlements.find(settlement => settlement.id === kingdom.capitalId)!;
+    const commander = characters.filter(character => character.kingdomId === kingdom.id && character.age >= 20).sort((a, b) => b.renown - a.renown)[1] ?? characters.find(character => character.kingdomId === kingdom.id)!;
+    commander.titles.push('Маршал');
+    commander.profession = 'soldier';
+    return { id: index + 1, name: `Войско ${capital.name}`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), supplies: rng.int(60, 100), status: 'garrison', campaignHistory: [] };
   });
+
   const dungeons: Dungeon[] = [];
   const dungeonOrigins = ['забытая царская гробница', 'заброшенная шахта', 'разрушенный храм', 'запечатанная магическая обсерватория', 'павшая горная крепость', 'древний подземный город', 'катакомбы контрабандистов'];
-  const dungeonTiles = shuffled.filter(t => !t.settlementId).slice(config.settlementCount, config.settlementCount + Math.max(8, Math.round(config.settlementCount * 0.45)));
-  dungeonTiles.forEach((tile, i) => {
-    const dungeon: Dungeon = { id: i + 1, name: `${rng.pick(['Глубины', 'Хранилище', 'Курган', 'Руины', 'Чертоги'])} ${placeName(rng)}`, x: tile.x, y: tile.y, origin: rng.pick(dungeonOrigins), builtYear: rng.int(-500, config.historyYears - 30), danger: rng.int(2, 10), depth: rng.int(1, 8), currentInhabitants: rng.pick(['гоблины', 'беспокойные мертвецы', 'разбойники', 'гигантские твари', 'культисты', 'неизвестные существа']), artifactIds: [], history: [] };
-    dungeons.push(dungeon); tiles[tile.y * config.width + tile.x]!.dungeonId = dungeon.id;
+  const dungeonTiles = shuffled.filter(tile => !tile.settlementId).slice(config.settlementCount, config.settlementCount + Math.max(8, Math.round(config.settlementCount * .45)));
+  dungeonTiles.forEach((tile, index) => {
+    const origin = rng.pick(dungeonOrigins);
+    const dungeon: Dungeon = {
+      id: index + 1, name: `${rng.pick(['Глубины', 'Хранилище', 'Курган', 'Руины', 'Чертоги'])} ${placeName(rng)}`, x: tile.x, y: tile.y,
+      origin, purpose: origin.includes('шахта') ? 'добыча руды' : origin.includes('гробница') ? 'погребение правителей' : origin.includes('крепость') ? 'защита старой границы' : 'ритуалы и тайные исследования',
+      builtYear: rng.int(-1200, config.historyYears - 30), danger: rng.int(2, 10), depth: rng.int(1, 8),
+      currentInhabitants: rng.pick(['гоблины', 'беспокойные мертвецы', 'разбойники', 'гигантские твари', 'культисты', 'неизвестные существа']),
+      ownerKingdomId: tile.kingdomId, discovered: rng.chance(.7), artifactIds: [], history: [`Место было создано как ${origin}.`],
+    };
+    dungeons.push(dungeon);
+    tiles[tile.y * config.width + tile.x]!.dungeonId = dungeon.id;
   });
+
   const monsters: Monster[] = [];
-  const monsterCount = Math.max(6, Math.round(config.settlementCount * config.monsterDensity * 0.45));
+  const monsterCount = Math.max(6, Math.round(config.settlementCount * config.monsterDensity * .45));
   const monsterSpecies = ['dragon', 'troll', 'wyvern', 'ogre', 'manticore', 'giant serpent', 'grave beast', 'forest horror'];
-  for (let i = 0; i < monsterCount; i += 1) {
-    const tile = rng.pick(shuffled.filter(t => !t.settlementId));
-    const species = i < Math.max(1, Math.round(monsterCount * 0.16)) ? 'dragon' : rng.pick(monsterSpecies);
-    const tier: Monster['tier'] = species === 'dragon' ? (rng.chance(0.35) ? 'boss' : 'miniboss') : rng.weighted([{ value: 'common', weight: 48 }, { value: 'elite', weight: 32 }, { value: 'miniboss', weight: 16 }, { value: 'boss', weight: 4 }]);
-    const monster: Monster = { id: i + 1, name: monsterName(rng, species), species, tier, x: tile.x, y: tile.y, health: tier === 'boss' ? rng.int(700, 1200) : tier === 'miniboss' ? rng.int(320, 680) : rng.int(90, 300), power: tier === 'boss' ? rng.int(80, 140) : tier === 'miniboss' ? rng.int(45, 95) : rng.int(15, 50), age: rng.int(4, species === 'dragon' ? 760 : 120), alive: true, hoard: rng.int(20, species === 'dragon' ? 1400 : 240), lairDungeonId: rng.chance(0.65) ? rng.pick(dungeons).id : undefined, kills: rng.int(0, 18), history: [] };
-    monsters.push(monster); tiles[tile.y * config.width + tile.x]!.monsterId = monster.id;
+  for (let index = 0; index < monsterCount; index += 1) {
+    const tile = rng.pick(shuffled.filter(item => !item.settlementId));
+    const species = index < Math.max(1, Math.round(monsterCount * .16)) ? 'dragon' : rng.pick(monsterSpecies);
+    const tier: Monster['tier'] = species === 'dragon' ? (rng.chance(.35) ? 'boss' : 'miniboss') : rng.weighted([{ value: 'common', weight: 48 }, { value: 'elite', weight: 32 }, { value: 'miniboss', weight: 16 }, { value: 'boss', weight: 4 }]);
+    const behavior = species === 'dragon' ? rng.pick(['собирает золото и карает вторжение', 'охотится на стада и караваны', 'требует дань с поселений']) : rng.pick(['охотится ночью', 'защищает выводок', 'следует за запахом крови', 'занимает заброшенные руины']);
+    const monster: Monster = {
+      id: index + 1, name: monsterName(rng, species), species, tier, x: tile.x, y: tile.y,
+      health: tier === 'boss' ? rng.int(700, 1200) : tier === 'miniboss' ? rng.int(320, 680) : rng.int(90, 300),
+      power: tier === 'boss' ? rng.int(80, 140) : tier === 'miniboss' ? rng.int(45, 95) : rng.int(15, 50), age: rng.int(4, species === 'dragon' ? 760 : 120), alive: true,
+      hoard: rng.int(20, species === 'dragon' ? 1400 : 240), hunger: rng.int(15, 80), territoryRadius: species === 'dragon' ? rng.int(6, 10) : rng.int(2, 6),
+      behavior, goal: species === 'dragon' ? 'расширить сокровищницу и сохранить логово' : 'удержать безопасную территорию',
+      lairDungeonId: rng.chance(.65) ? rng.pick(dungeons).id : undefined, kills: rng.int(0, 18), history: [`Существо заняло территорию вокруг клетки ${tile.x}:${tile.y}.`],
+    };
+    monsters.push(monster);
+    tiles[tile.y * config.width + tile.x]!.monsterId = monster.id;
   }
+
   const artifacts: Artifact[] = [];
-  const artifactCount = Math.max(8, Math.round(config.settlementCount * config.artifactDensity * 0.65));
+  const artifactCount = Math.max(8, Math.round(config.settlementCount * config.artifactDensity * .65));
   const depictions = ['коронованный всадник под семью звёздами', 'падение красного дракона', 'эльфийская королева сажает первое серебряное дерево', 'оркские кланы переходят замёрзшую реку', 'безымянный святой закрывает чёрные врата', 'три луны над горящим флотом'];
-  for (let i = 0; i < artifactCount; i += 1) {
-    const creator = rng.pick(characters.filter(c => c.age >= 16));
-    const owner = rng.pick(characters.filter(c => c.age >= 16));
-    const artifact: Artifact = { id: i + 1, name: `${rng.pick(['Корона', 'Клинок', 'Чаша', 'Знамя', 'Маска', 'Кольцо', 'Рог', 'Щит'])} ${placeName(rng)}`, type: rng.pick(['оружие', 'регалия', 'ритуальный предмет', 'драгоценность', 'доспех', 'инструмент']), material: rng.pick(['серебро', 'чёрное железо', 'золото', 'драконья кость', 'лунный камень', 'бронза', 'тис']), creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(1, config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions), history: [`Создан мастером ${creator.name}.`, `Сейчас принадлежит ${owner.name}.`] };
-    artifacts.push(artifact); creator.artifactIds.push(artifact.id); owner.artifactIds.push(artifact.id);
-    if (rng.chance(0.45)) rng.pick(dungeons).artifactIds.push(artifact.id);
+  for (let index = 0; index < artifactCount; index += 1) {
+    const creator = rng.pick(characters.filter(character => character.age >= 16));
+    const owner = rng.pick(characters.filter(character => character.age >= 16));
+    const artifact: Artifact = {
+      id: index + 1, name: `${rng.pick(['Корона', 'Клинок', 'Чаша', 'Знамя', 'Маска', 'Кольцо', 'Рог', 'Щит'])} ${placeName(rng)}`,
+      type: rng.pick(['оружие', 'регалия', 'ритуальный предмет', 'драгоценность', 'доспех', 'инструмент']),
+      material: rng.pick(['серебро', 'чёрное железо', 'золото', 'драконья кость', 'лунный камень', 'бронза', 'тис']),
+      creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(1, config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions),
+      ownerHistory: [{ year: config.historyYears, characterId: owner.id, settlementId: owner.settlementId, reason: 'последний известный переход права владения' }],
+      history: [`Создан мастером ${creator.name}.`, `Сейчас принадлежит ${owner.name}.`],
+    };
+    artifacts.push(artifact);
+    creator.artifactIds.push(artifact.id);
+    owner.artifactIds.push(artifact.id);
+    if (rng.chance(.38)) rng.pick(dungeons).artifactIds.push(artifact.id);
   }
+
   const books: Book[] = [];
   const subjects = ['история династий', 'драконы', 'травничество', 'древние машины', 'богословие', 'военное дело', 'далёкие острова', 'чудовища', 'ремесло', 'поэзия'];
-  for (let i = 0; i < Math.max(10, Math.round(config.settlementCount * 0.75)); i += 1) {
-    const author = rng.pick(characters.filter(c => c.age >= 20));
+  for (let index = 0; index < Math.max(10, Math.round(config.settlementCount * .75)); index += 1) {
+    const author = rng.pick(characters.filter(character => character.age >= 20));
     const subject = rng.pick(subjects);
-    const book: Book = { id: i + 1, title: `${rng.pick(['О', 'Хроника:', 'Скрытая правда:', 'Песни о', 'Наблюдения о'])} ${subject}`, authorId: author.id, yearWritten: rng.int(Math.max(1, config.historyYears - author.age), config.historyYears), language: kingdoms.find(k => k.id === author.kingdomId)!.culture, subject, reliability: rng.int(25, 98), summary: `Труд о теме «${subject}», основанный на опыте автора в ${settlements.find(s => s.id === author.settlementId)!.name}.`, copies: rng.int(1, 45), settlementId: author.settlementId };
-    books.push(book); author.bookIds.push(book.id); author.biography.push(`Написал книгу «${book.title}».`);
+    const book: Book = {
+      id: index + 1, title: `${rng.pick(['О', 'Хроника:', 'Скрытая правда:', 'Песни о', 'Наблюдения о'])} ${subject}`,
+      authorId: author.id, yearWritten: rng.int(Math.max(1, config.historyYears - author.age), config.historyYears), language: kingdoms.find(kingdom => kingdom.id === author.kingdomId)!.culture,
+      subject, reliability: rng.int(25, 98), bias: rng.pick(['лояльность правящему дому', 'враждебность соседнему народу', 'религиозное толкование', 'сухое наблюдение', 'личная месть автора']),
+      summary: `Труд о теме «${subject}», основанный на опыте автора в ${settlements.find(settlement => settlement.id === author.settlementId)!.name}.`, copies: rng.int(1, 45), settlementId: author.settlementId, referencedEventIds: [],
+    };
+    books.push(book);
+    author.bookIds.push(book.id);
+    author.biography.push(`Написал книгу «${book.title}».`);
   }
+
   const events: WorldEvent[] = [];
   let eventId = 1;
-  for (const settlement of settlements) {
-    events.push({ id: eventId++, year: settlement.foundedYear, month: rng.int(1, 12), kind: 'settlement', title: `Основан ${settlement.name}`, description: `${settlement.name} возник под властью государства ${kingdoms.find(k => k.id === settlement.kingdomId)!.name}.`, entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 3 });
-  }
-  const historyEvents = Math.min(900, Math.max(80, Math.round(config.historyYears * 1.45)));
-  for (let i = 0; i < historyEvents; i += 1) events.push(historicalEvent(eventId++, rng, rng.int(1, config.historyYears), kingdoms, settlements, monsters, artifacts, books));
-  events.sort((a, b) => a.year - b.year || a.month - b.month);
+  for (const settlement of settlements) events.push(event(eventId++, settlement.foundedYear, rng.int(1, 12), 'settlement', `Основан ${settlement.name}`, `${settlement.name} возник под властью государства ${kingdoms.find(kingdom => kingdom.id === settlement.kingdomId)!.name}.`, 'удобное место, ресурс и защита', [`появилось поселение`, `началась эксплуатация ресурса «${settlement.resource}»`], [{ kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: settlement.kingdomId }], 3));
+  for (const dynasty of dynasties) events.push(event(eventId++, rng.int(1, config.historyYears), rng.int(1, 12), 'dynasty', `Возвысился ${dynasty.name}`, `Род получил землю, богатство и место при дворе.`, 'служба правителю и накопленное влияние', ['род получил политический вес', 'появились наследственные притязания'], [{ kind: 'dynasty', id: dynasty.id }, ...(dynasty.kingdomId ? [{ kind: 'kingdom' as const, id: dynasty.kingdomId }] : [])], 3));
+  for (const route of tradeRoutes.slice(0, 60)) events.push(event(eventId++, rng.int(Math.max(1, config.historyYears - 140), config.historyYears), rng.int(1, 12), 'trade', `Открыт путь ${route.name}`, `Караваны начали перевозить ${route.goods.join(' и ')}.`, 'спрос поселений на чужие ресурсы', ['выросли рынки', 'дорога стала целью разбойников и сборщиков пошлин'], [{ kind: 'tradeRoute', id: route.id }, { kind: 'settlement', id: route.fromSettlementId }, { kind: 'settlement', id: route.toSettlementId }], 2));
+
   const wars: War[] = [];
-  const world: WorldState = {
-    version: 1, language: 'ru', config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, armies, monsters, artifacts, books, dungeons, wars, events,
-    nextIds: { event: eventId, character: characterId, war: 1, artifact: artifacts.length + 1, book: books.length + 1 },
+  const pastWarCount = Math.max(1, Math.round(config.kingdomCount * config.warlike * 1.5));
+  for (let index = 0; index < pastWarCount; index += 1) {
+    const attacker = rng.pick(kingdoms);
+    const defenders = kingdoms.filter(kingdom => kingdom.id !== attacker.id && settlements.some(settlement => settlement.kingdomId === kingdom.id));
+    if (!defenders.length) continue;
+    const defender = rng.pick(defenders);
+    const defendedSettlements = settlements.filter(settlement => settlement.kingdomId === defender.id);
+    if (!defendedSettlements.length) continue;
+    const contested = rng.pick(defendedSettlements);
+    const startYear = rng.int(Math.max(2, config.historyYears - 180), Math.max(3, config.historyYears - 4));
+    const victor = rng.chance((attacker.armyStrength + attacker.aggression) / (attacker.armyStrength + defender.armyStrength + attacker.aggression + defender.stability)) ? attacker : defender;
+    const cause = rng.pick(['спорная пограничная крепость', 'неуплаченные торговые пошлины', 'династические притязания', 'набеги на приграничные деревни', 'контроль над железными рудниками', 'убийство королевского посланника']);
+    const war: War = {
+      id: wars.length + 1, name: `Война ${attacker.name} и ${defender.name}`, attackerId: attacker.id, defenderId: defender.id, startYear, endYear: startYear + rng.int(1, 8), active: false,
+      cause, goal: cause.includes('династические') ? `признать права дома ${dynasties.find(dynasty => dynasty.id === attacker.dynastyId)?.name ?? attacker.name}` : `получить контроль над ${contested.name}`,
+      contestedSettlementIds: [contested.id], battles: rng.int(1, 7), attackerLosses: rng.int(40, 520), defenderLosses: rng.int(35, 500), victorId: victor.id,
+      peaceTerms: victor.id === attacker.id ? `${contested.name} перешёл под власть государства ${attacker.name}` : `${attacker.name} отказалось от притязаний и выплатило серебро`,
+      history: [],
+    };
+    war.history.push(`Война началась из-за причины: ${cause}.`, `Мир завершился условиями: ${war.peaceTerms}.`);
+    wars.push(war);
+    if (victor.id === attacker.id) {
+      const oldKingdomId = contested.kingdomId;
+      contested.kingdomId = attacker.id;
+      contested.history.push(`После войны ${startYear} года поселение перешло от государства ${kingdoms.find(item => item.id === oldKingdomId)?.name} к государству ${attacker.name}.`);
+      characters.filter(character => character.settlementId === contested.id).forEach(character => { character.kingdomId = attacker.id; });
+      tiles.filter(tile => tile.settlementId === contested.id).forEach(tile => { tile.kingdomId = attacker.id; });
+    }
+    events.push(event(eventId++, startYear, rng.int(1, 12), 'war', `Началась ${war.name}`, `${attacker.name} собрало войско против государства ${defender.name}.`, cause, [`армии направились к ${contested.name}`, 'торговые пути стали опаснее'], [{ kind: 'war', id: war.id }, { kind: 'kingdom', id: attacker.id }, { kind: 'kingdom', id: defender.id }, { kind: 'settlement', id: contested.id }], 4));
+    events.push(event(eventId++, war.endYear!, rng.int(1, 12), 'battle', `Завершилась ${war.name}`, war.peaceTerms!, 'истощение армий и исход сражений', [war.peaceTerms!], [{ kind: 'war', id: war.id }, { kind: 'kingdom', id: victor.id }, { kind: 'settlement', id: contested.id }], 4));
+  }
+
+  for (const monster of monsters.filter(item => item.tier === 'boss' || item.species === 'dragon').slice(0, 16)) {
+    const target = [...settlements].sort((a, b) => distance(monster, a) - distance(monster, b))[0]!;
+    if (rng.chance(.55)) {
+      const year = rng.int(Math.max(1, config.historyYears - 90), config.historyYears);
+      monster.history.push(`В ${year} году разорил земли у ${target.name}.`);
+      target.history.push(`В ${year} году поселение пережило нападение существа ${monster.name}.`);
+      events.push(event(eventId++, year, rng.int(1, 12), monster.species === 'dragon' ? 'dragon' : 'monster', `${monster.name} напал на ${target.name}`, `Существо уничтожило припасы и заставило жителей искать защиту.`, `голод и расширение территории существа`, ['поселение потеряло запасы', 'правитель назначил награду'], [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: target.id }, { kind: 'kingdom', id: target.kingdomId }], monster.species === 'dragon' ? 5 : 3));
+    }
+  }
+
+  events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
+  for (const book of books) {
+    const candidates = events.filter(item => item.year <= book.yearWritten && item.entityRefs.some(ref => ref.kind === 'settlement' && ref.id === book.settlementId));
+    const referenceCount = rng.int(0, Math.min(4, candidates.length));
+    book.referencedEventIds = referenceCount > 0 ? candidates.slice(-referenceCount).map(item => item.id) : [];
+  }
+
+  return {
+    version: 2, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, artifacts, books, dungeons, wars, tradeRoutes, events,
+    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1 },
   };
-  return world;
 }
 
 export const defaultConfig: WorldConfig = {
   seed: 'Eldervale-Первая-Эпоха', width: 54, height: 34, historyYears: 320, kingdomCount: 7,
-  settlementCount: 30, populationScale: 0.72, magic: 0.38, warlike: 0.48, monsterDensity: 1, artifactDensity: 1,
+  settlementCount: 30, populationScale: .72, magic: .38, warlike: .48, monsterDensity: 1, artifactDensity: 1,
 };

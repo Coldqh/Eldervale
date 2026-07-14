@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { WorldConfig } from '../types';
 import { defaultConfig } from '../sim/generator';
+import { APP_VERSION } from '../version';
 
 const deviceProfiles: { label: string; hint: string; config: Partial<WorldConfig> }[] = [
   { label: 'Телефон', hint: 'Быстрая генерация и меньше нагрев', config: { width: 46, height: 30, settlementCount: 24, populationScale: .58, historyYears: 240 } },
@@ -8,7 +9,7 @@ const deviceProfiles: { label: string; hint: string; config: Partial<WorldConfig
   { label: 'Большой мир', hint: 'Больше территорий, людей и истории', config: { width: 68, height: 42, settlementCount: 42, populationScale: .92, historyYears: 480 } },
 ];
 
-export function WorldSetup({ initial, onGenerate, onClose }: { initial?: WorldConfig; onGenerate: (config: WorldConfig) => void; onClose?: () => void }) {
+export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { initial?: WorldConfig; onGenerate: (config: WorldConfig) => void; onClose?: () => void; onOpenSettings: () => void }) {
   const [config, setConfig] = useState<WorldConfig>(initial ?? defaultConfig);
   const set = <K extends keyof WorldConfig>(key: K, value: WorldConfig[K]) => setConfig(current => ({ ...current, [key]: value }));
   const applyProfile = (profile: Partial<WorldConfig>) => setConfig(current => ({ ...current, ...profile }));
@@ -24,7 +25,7 @@ export function WorldSetup({ initial, onGenerate, onClose }: { initial?: WorldCo
     <div className="setup-panel">
       <div className="setup-heading">
         <div><span className="eyebrow">Создание мира</span><h2>Настрой первую эпоху</h2></div>
-        {onClose && <button className="icon-button" onClick={onClose} aria-label="Закрыть настройки">×</button>}
+        <div className="setup-heading-actions"><button className="icon-button" onClick={onOpenSettings} aria-label="Открыть настройки">⚙</button>{onClose && <button className="icon-button" onClick={onClose} aria-label="Закрыть настройки">×</button>}</div>
       </div>
 
       <div className="profile-grid">
@@ -61,7 +62,7 @@ export function WorldSetup({ initial, onGenerate, onClose }: { initial?: WorldCo
       </div>
 
       <button className="primary-button" onClick={() => onGenerate(config)}>Сотворить Eldervale <span>→</span></button>
-      <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Большие миры сильнее нагружают мобильный браузер.</p>
+      <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Большие миры сильнее нагружают мобильный браузер. Версия приложения: {APP_VERSION}.</p>
     </div>
   </div>;
 }

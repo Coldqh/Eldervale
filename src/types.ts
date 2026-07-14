@@ -1,7 +1,8 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute';
+export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 
 export interface WorldConfig {
   seed: string;
@@ -29,6 +30,13 @@ export interface Tile {
   monsterId?: number;
 }
 
+export interface DiplomacyRecord {
+  kingdomId: number;
+  score: number;
+  status: 'союз' | 'мир' | 'напряжение' | 'война';
+  reason: string;
+}
+
 export interface Kingdom {
   id: number;
   name: string;
@@ -36,6 +44,7 @@ export interface Kingdom {
   species: Species;
   rulerId: number;
   capitalId: number;
+  dynastyId?: number;
   treasury: number;
   armyStrength: number;
   stability: number;
@@ -44,6 +53,9 @@ export interface Kingdom {
   religion: string;
   foundedYear: number;
   enemies: number[];
+  claims: number[];
+  diplomacy: DiplomacyRecord[];
+  laws: string[];
 }
 
 export interface Settlement {
@@ -61,6 +73,11 @@ export interface Settlement {
   buildings: string[];
   notableCharacterIds: number[];
   damaged: number;
+  resource: string;
+  shortages: string[];
+  tradeRouteIds: number[];
+  unrest: number;
+  history: string[];
 }
 
 export interface Character {
@@ -73,18 +90,47 @@ export interface Character {
   alive: boolean;
   settlementId: number;
   kingdomId: number;
+  dynastyId?: number;
   profession: string;
   renown: number;
   health: number;
+  wealth: number;
+  loyalty: number;
   ambition: string;
   parentIds: number[];
   childIds: number[];
   spouseId?: number;
+  relationshipIds: number[];
   titles: string[];
   artifactIds: number[];
   bookIds: number[];
+  injuries: string[];
   kills: number;
   biography: string[];
+}
+
+export interface Relationship {
+  id: number;
+  characterAId: number;
+  characterBId: number;
+  kind: RelationKind;
+  strength: number;
+  sinceYear: number;
+  public: boolean;
+  reason: string;
+}
+
+export interface Dynasty {
+  id: number;
+  name: string;
+  founderId: number;
+  currentHeadId: number;
+  memberIds: number[];
+  kingdomId?: number;
+  prestige: number;
+  wealth: number;
+  claimKingdomIds: number[];
+  history: string[];
 }
 
 export interface Army {
@@ -96,9 +142,11 @@ export interface Army {
   y: number;
   strength: number;
   morale: number;
+  supplies: number;
   targetKingdomId?: number;
   targetSettlementId?: number;
   status: 'garrison' | 'marching' | 'raiding' | 'battle' | 'recovering';
+  campaignHistory: string[];
 }
 
 export interface Monster {
@@ -113,9 +161,21 @@ export interface Monster {
   age: number;
   alive: boolean;
   hoard: number;
+  hunger: number;
+  territoryRadius: number;
+  behavior: string;
+  goal: string;
+  targetSettlementId?: number;
   lairDungeonId?: number;
   kills: number;
   history: string[];
+}
+
+export interface ArtifactOwnerRecord {
+  year: number;
+  characterId?: number;
+  settlementId?: number;
+  reason: string;
 }
 
 export interface Artifact {
@@ -129,6 +189,7 @@ export interface Artifact {
   yearCreated: number;
   power: number;
   depiction: string;
+  ownerHistory: ArtifactOwnerRecord[];
   history: string[];
 }
 
@@ -140,9 +201,11 @@ export interface Book {
   language: string;
   subject: string;
   reliability: number;
+  bias: string;
   summary: string;
   copies: number;
   settlementId: number;
+  referencedEventIds: number[];
 }
 
 export interface Dungeon {
@@ -151,10 +214,13 @@ export interface Dungeon {
   x: number;
   y: number;
   origin: string;
+  purpose: string;
   builtYear: number;
   danger: number;
   depth: number;
   currentInhabitants: string;
+  ownerKingdomId?: number;
+  discovered: boolean;
   artifactIds: number[];
   history: string[];
 }
@@ -168,9 +234,27 @@ export interface War {
   endYear?: number;
   active: boolean;
   cause: string;
+  goal: string;
+  contestedSettlementIds: number[];
   battles: number;
   attackerLosses: number;
   defenderLosses: number;
+  victorId?: number;
+  peaceTerms?: string;
+  history: string[];
+}
+
+export interface TradeRoute {
+  id: number;
+  name: string;
+  fromSettlementId: number;
+  toSettlementId: number;
+  goods: string[];
+  volume: number;
+  safety: number;
+  active: boolean;
+  controlledByKingdomIds: number[];
+  history: string[];
 }
 
 export interface WorldEvent {
@@ -180,13 +264,17 @@ export interface WorldEvent {
   kind: EventKind;
   title: string;
   description: string;
-  entityRefs: { kind: EntityKind; id: number }[];
+  cause: string;
+  consequences: string[];
+  traces: EntityRef[];
+  entityRefs: EntityRef[];
   importance: number;
 }
 
 export interface WorldState {
-  version: 1;
+  version: 2;
   language?: 'ru';
+  appVersion?: string;
   config: WorldConfig;
   name: string;
   year: number;
@@ -195,12 +283,15 @@ export interface WorldState {
   kingdoms: Kingdom[];
   settlements: Settlement[];
   characters: Character[];
+  relationships: Relationship[];
+  dynasties: Dynasty[];
   armies: Army[];
   monsters: Monster[];
   artifacts: Artifact[];
   books: Book[];
   dungeons: Dungeon[];
   wars: War[];
+  tradeRoutes: TradeRoute[];
   events: WorldEvent[];
   nextIds: Record<string, number>;
 }

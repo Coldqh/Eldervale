@@ -1,5 +1,5 @@
 import type { WorldState } from '../types';
-import { localizeLegacyWorld } from '../sim/localizeLegacy';
+import { migrateWorld } from '../sim/migrateWorld';
 
 const DB_NAME = 'eldervale';
 const STORE_NAME = 'worlds';
@@ -28,14 +28,14 @@ export async function loadWorld(): Promise<WorldState | undefined> {
       request.onerror = () => reject(request.error);
     });
     db.close();
-    if (world) return localizeLegacyWorld(world);
+    if (world) return migrateWorld(world);
   } catch {
     // В приватном режиме браузер может блокировать IndexedDB.
   }
 
   try {
     const legacy = localStorage.getItem(LEGACY_KEY);
-    return legacy ? localizeLegacyWorld(JSON.parse(legacy) as WorldState) : undefined;
+    return legacy ? migrateWorld(JSON.parse(legacy)) : undefined;
   } catch {
     return undefined;
   }
