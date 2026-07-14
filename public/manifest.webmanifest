@@ -1,0 +1,10 @@
+{
+  "name": "Eldervale",
+  "short_name": "Eldervale",
+  "start_url": "/Eldervale/",
+  "display": "standalone",
+  "background_color": "#0e1410",
+  "theme_color": "#111813",
+  "description": "Процедурная симуляция живого фэнтези-мира.",
+  "icons": [{ "src": "./crest.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
