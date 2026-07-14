@@ -8,9 +8,24 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./crest.svg" type="image/svg+xml" />
     <title>Eldervale</title>
+    <style>
+      .boot-rescue { min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: #ece4cf; background: radial-gradient(circle at 50% 10%, #26382b, #0b110d 62%); font-family: Inter, system-ui, sans-serif; }
+      .boot-rescue-card { width: min(500px, 100%); padding: 26px; border: 1px solid rgba(226,207,157,.25); border-radius: 18px; background: rgba(18,28,21,.94); text-align: center; }
+      .boot-rescue-card strong { display: block; color: #ead9a9; font: 500 25px Georgia, serif; }
+      .boot-rescue-card span { display: block; margin-top: 10px; color: #8e978d; font-size: 13px; line-height: 1.5; }
+      .boot-rescue-card a { display: inline-block; margin-top: 18px; padding: 11px 15px; border-radius: 10px; color: #fff0c9; background: linear-gradient(120deg, #806b3f, #4a6247); text-decoration: none; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="boot-rescue">
+        <div class="boot-rescue-card">
+          <strong>Запускаем Eldervale</strong>
+          <span>Если экран не изменится, браузер держит старую сломанную сборку.</span>
+          <a href="./repair.html">Очистить кэш и восстановить</a>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

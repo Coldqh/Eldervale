@@ -37,19 +37,13 @@ export async function forceUpdate(remoteVersion?: string): Promise<void> {
       await registration.update().catch(() => undefined);
       registration.waiting?.postMessage({ type: 'ПРИМЕНИТЬ_ОБНОВЛЕНИЕ' });
     }));
-  } catch { /* Продолжаем очистку даже без Service Worker. */ }
+  } catch { /* Страница восстановления выполнит полную очистку. */ }
 
-  try {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key.startsWith('eldervale-')).map(key => caches.delete(key)));
-  } catch { /* Cache Storage может быть недоступен в приватном режиме. */ }
-
-  const url = new URL(window.location.href);
-  url.searchParams.set('версия', remoteVersion ?? APP_VERSION);
-  url.searchParams.set('обновление', String(Date.now()));
-  window.location.replace(url.toString());
+  const repairUrl = new URL(`${import.meta.env.BASE_URL}repair.html`, window.location.origin);
+  repairUrl.searchParams.set('версия', remoteVersion ?? APP_VERSION);
+  repairUrl.searchParams.set('обновление', String(Date.now()));
+  window.location.replace(repairUrl.toString());
 }
-
 
 function compareVersions(left: string, right: string): number {
   const a = left.split('.').map(part => Number.parseInt(part, 10) || 0);

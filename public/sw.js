@@ -1,22 +1,31 @@
-const VERSION = '0.3.0';
-const CACHE = `eldervale-app-${VERSION}`;
+const VERSION = '0.3.1';
+const CACHE = `eldervale-runtime-${VERSION}`;
 const ROOT = '/Eldervale/';
-const CORE = [ROOT, `${ROOT}manifest.webmanifest`, `${ROOT}crest.svg`, `${ROOT}version.json`];
+const CORE = [
+  ROOT,
+  `${ROOT}manifest.webmanifest`,
+  `${ROOT}crest.svg`,
+  `${ROOT}version.json`,
+  `${ROOT}repair.html`,
+];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(() => self.skipWaiting()));
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(CORE);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key.startsWith('eldervale-') && key !== CACHE).map(key => caches.delete(key)));
+    await Promise.all(keys
+      .filter(key => key.startsWith('eldervale-') && key !== CACHE)
+      .map(key => caches.delete(key)));
     await self.clients.claim();
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of clients) {
-      client.postMessage({ type: 'ВЕРСИЯ_АКТИВИРОВАНА', version: VERSION });
-      if ('navigate' in client) client.navigate(client.url);
-    }
+    for (const client of clients) client.postMessage({ type: 'ВЕРСИЯ_АКТИВИРОВАНА', version: VERSION });
   })());
 });
 
@@ -25,26 +34,64 @@ self.addEventListener('message', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
-  const url = new URL(event.request.url);
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.endsWith('/version.json')) {
-    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+
+  if (url.pathname.endsWith('/sw.js') || url.pathname.endsWith('/version.json') || url.pathname.endsWith('/repair.html')) {
+    event.respondWith(fetch(request, { cache: 'no-store' }));
     return;
   }
-  event.respondWith((async () => {
-    try {
-      const response = await fetch(event.request, { cache: 'no-cache' });
-      if (response.ok) {
-        const cache = await caches.open(CACHE);
-        await cache.put(event.request, response.clone());
-      }
-      return response;
-    } catch {
-      const cached = await caches.match(event.request);
-      if (cached) return cached;
-      if (event.request.mode === 'navigate') return (await caches.match(ROOT));
-      throw new Error('Ресурс недоступен без сети');
-    }
-  })());
+
+  if (request.mode === 'navigate') {
+    event.respondWith(networkFirstNavigation(request));
+    return;
+  }
+
+  if (url.pathname.includes('/assets/')) {
+    event.respondWith(cacheFirstAsset(request));
+    return;
+  }
+
+  event.respondWith(networkFirstStatic(request));
 });
+
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response.ok) {
+      const cache = await caches.open(CACHE);
+      await cache.put(ROOT, response.clone());
+    }
+    return response;
+  } catch {
+    return (await caches.match(ROOT)) || Response.error();
+  }
+}
+
+async function cacheFirstAsset(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response.ok) {
+    const cache = await caches.open(CACHE);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function networkFirstStatic(request) {
+  try {
+    const response = await fetch(request, { cache: 'no-cache' });
+    if (response.ok) {
+      const cache = await caches.open(CACHE);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return (await caches.match(request)) || Response.error();
+  }
+}
