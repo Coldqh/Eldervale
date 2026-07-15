@@ -81,7 +81,7 @@ export function SettingsPanel({
       {storage && <div className="settings-release-notes storage-report"><span className="eyebrow">Последнее сохранение</span><strong>{storage.writtenRecords} записей изменено · {formatMs(storage.totalMs)}</strong><small>{storage.skippedRecords} неизменённых записей пропущено · удалено {storage.deletedRecords} · объём {formatBytes(storage.bytesEstimated)}{storage.snapshotCreated ? ' · создан снимок' : ''}</small></div>}
       <div className="settings-release-notes">
         <span className="eyebrow">Последнее обновление</span>
-        <strong>1.0.0 · Хранилище и настоящий исторический движок</strong>
+        <strong>1.1.0 · Повседневная жизнь и настоящая экономика</strong>
         <small>Несколько миров, инкрементальные сохранения, автоматические снимки, восстановление после сбоя и многоуровневая причинная история от древних эпох до настоящего.</small>
       </div>
       <div className="settings-actions">

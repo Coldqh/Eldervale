@@ -6,14 +6,14 @@ const groundColors: Record<LocalGround, string> = {
   grass: '#617853', dirt: '#745e43', sand: '#a58a5f', water: '#244d59', mud: '#4b5d50', snow: '#aeb7b3', stone: '#656862', road: '#8a7352', floor: '#8c7c64', ash: '#423f3a',
 };
 const featureColors: Partial<Record<LocalFeature, string>> = {
-  tree: '#214d32', bush: '#375e3f', rock: '#3e4140', reeds: '#6b7951', wall: '#292d2b', door: '#bb9a5f', field: '#9b8150', rubble: '#5d5145', fire: '#e87842', blood: '#7d2d2c', body: '#201d1b', chest: '#d2aa5a',
+  tree: '#214d32', bush: '#375e3f', rock: '#3e4140', reeds: '#6b7951', wall: '#292d2b', door: '#bb9a5f', field: '#9b8150', rubble: '#080808', looted: '#020202', fire: '#e87842', blood: '#3d1515', body: '#000000', chest: '#d2aa5a',
   'stairs-down': '#d2bd83', 'stairs-up': '#e6d69f', bridge: '#7b6042', herb: '#75a95f', berry: '#9b4f6b', mushroom: '#b49a73', 'animal-trail': '#7b674c',
 };
 const LOCAL_MIN_ZOOM = .65;
 const LOCAL_MAX_ZOOM = 12;
 
 const markerColors: Record<LocalMarker['kind'], string> = {
-  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#c66852', fauna: '#86a76a', resource: '#80b89a',
+  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#080808', fauna: '#86a76a', resource: '#80b89a', building: '#8e8068', establishment: '#d7a95b',
 };
 
 export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMove, onBack, onSelect }: {
@@ -294,8 +294,10 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
   }
 
   for (const marker of map.markers) {
-    if (marker.x < startX || marker.x > endX || marker.y < startY || marker.y > endY) continue;
-    drawMarker(ctx, marker, ox + (marker.x + .5) * cellSize, oy + (marker.y + .5) * cellSize, cellSize);
+    const footprintWidth = marker.footprintWidth ?? 1;
+    const footprintHeight = marker.footprintHeight ?? 1;
+    if (marker.x + footprintWidth < startX || marker.x > endX || marker.y + footprintHeight < startY || marker.y > endY) continue;
+    drawMarker(ctx, marker, ox + marker.x * cellSize, oy + marker.y * cellSize, cellSize);
   }
   ctx.strokeStyle = '#f4d889';
   ctx.lineWidth = Math.max(1.5, cellSize * .13);
@@ -319,20 +321,41 @@ function drawFeature(ctx: CanvasRenderingContext2D, feature: LocalFeature, x: nu
   }
 }
 
-function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x: number, y: number, size: number) {
-  const radius = Math.max(2.2, Math.min(6.5, size * .32));
-  ctx.fillStyle = markerColors[marker.kind];
-  ctx.strokeStyle = '#111712';
-  ctx.lineWidth = 1;
+function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x0: number, y0: number, size: number) {
+  const widthCells = Math.max(1, marker.footprintWidth ?? 1);
+  const heightCells = Math.max(1, marker.footprintHeight ?? 1);
+  const width = widthCells * size;
+  const height = heightCells * size;
+  const x = x0 + width / 2;
+  const y = y0 + height / 2;
+  const radius = Math.max(2.2, Math.min(8, Math.min(width, height) * .32));
+  const effectIsBlack = marker.kind === 'effect' && /body|grave|rubble|looted|тело|руин|разграб/i.test(`${marker.detail ?? ''} ${marker.label}`);
+  ctx.fillStyle = effectIsBlack ? '#000000' : markerColors[marker.kind];
+  ctx.strokeStyle = marker.kind === 'monster' && (widthCells > 1 || heightCells > 1) ? '#f5b26f' : '#111712';
+  ctx.lineWidth = marker.kind === 'monster' && (widthCells > 1 || heightCells > 1) ? Math.max(1.5, size * .12) : 1;
   if (marker.kind === 'monster') {
-    ctx.beginPath(); ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y + radius); ctx.lineTo(x - radius, y + radius); ctx.closePath(); ctx.fill(); ctx.stroke();
-  } else if (marker.kind === 'army') {
+    if (widthCells > 1 || heightCells > 1) {
+      ctx.globalAlpha = .86;
+      ctx.fillRect(x0 + size * .08, y0 + size * .08, Math.max(2, width - size * .16), Math.max(2, height - size * .16));
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(x0 + size * .08, y0 + size * .08, Math.max(2, width - size * .16), Math.max(2, height - size * .16));
+      ctx.beginPath();
+      ctx.moveTo(x, y0 + size * .18);
+      ctx.lineTo(x0 + width - size * .18, y0 + height - size * .18);
+      ctx.lineTo(x0 + size * .18, y0 + height - size * .18);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y + radius); ctx.lineTo(x - radius, y + radius); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  } else if (marker.kind === 'army' || marker.kind === 'building' || marker.kind === 'establishment') {
     ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2); ctx.strokeRect(x - radius, y - radius, radius * 2, radius * 2);
   } else {
     ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
   if ((marker.count ?? 0) > 1 && size >= 9) {
-    ctx.fillStyle = '#151a15';
+    ctx.fillStyle = marker.kind === 'effect' ? '#f1e7d3' : '#151a15';
     ctx.font = `bold ${Math.max(6, radius * 1.25)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -342,7 +365,7 @@ function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x: numbe
 
 function MarkerCard({ marker, world, onSelect }: { marker: LocalMarker; world: WorldState; onSelect: (ref: EntityRef) => void }) {
   return <div className="local-marker-card">
-    <div><i style={{ background: markerColors[marker.kind] }} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
+    <div><i style={{ background: marker.kind === 'effect' && /body|grave|rubble|looted|тело|руин|разграб/i.test(`${marker.detail ?? ''} ${marker.label}`) ? '#000' : markerColors[marker.kind] }} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
     {marker.refs.length > 0 && <div className="local-marker-actions">
       {marker.refs.slice(0, 12).map(ref => <button key={`${ref.kind}-${ref.id}`} onClick={() => onSelect(ref)}>{entityName(world, ref)}</button>)}
       {marker.refs.length > 12 && <small>ещё {marker.refs.length - 12}</small>}
@@ -354,12 +377,12 @@ function entityName(world: WorldState, ref: EntityRef): string {
   const collections: Record<EntityRef['kind'], readonly { id: number; name?: string; title?: string }[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
-    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes,
   };
   const entity = collections[ref.kind].find(item => item.id === ref.id);
   return entity?.name ?? entity?.title ?? `${ref.kind} ${ref.id}`;
 }
 
 function markerLabel(kind: LocalMarker['kind']): string {
-  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'предмет', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс' } as const)[kind];
+  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'предмет', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение' } as const)[kind];
 }

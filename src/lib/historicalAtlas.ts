@@ -98,7 +98,8 @@ export function atlasEventGroup(event: WorldEvent): AtlasEventGroup {
   if (event.kind === 'book' || event.kind === 'artifact') return 'знания';
   if (event.kind === 'ecology' || event.kind === 'hunt' || event.kind === 'foraging' || event.kind === 'migration') return 'природа';
   if (event.kind === 'alchemy') return 'знания';
-  if (event.kind === 'settlement' || event.kind === 'trade' || event.kind === 'disaster' || event.kind === 'construction') return 'поселения';
+  if (event.kind === 'settlement' || event.kind === 'trade' || event.kind === 'disaster' || event.kind === 'construction' || event.kind === 'establishment' || event.kind === 'market') return 'поселения';
+  if (event.kind === 'food' || event.kind === 'craft' || event.kind === 'work' || event.kind === 'household') return 'жизни';
   return 'жизни';
 }
 
@@ -134,7 +135,16 @@ export function eraTitle(world: WorldState, year: number): string {
 }
 
 function reconstructSettlementOwners(world: WorldState, year: number): Map<number, number> {
-  const owners = new Map(world.settlements.map(settlement => [settlement.id, settlement.kingdomId]));
+  const owners = new Map<number, number>();
+  if (world.territoryHistory?.length) {
+    const tileOwners = territoryOwnersAtYear(world, year);
+    for (const settlement of world.settlements) {
+      const owner = tileOwners.get(`${settlement.x}:${settlement.y}`);
+      if (owner !== undefined) owners.set(settlement.id, owner);
+    }
+    return owners;
+  }
+  for (const settlement of world.settlements) owners.set(settlement.id, settlement.kingdomId);
   const warsDescending = [...world.wars].sort((a, b) => (b.endYear ?? world.year + 1) - (a.endYear ?? world.year + 1) || b.startYear - a.startYear);
   for (const war of warsDescending) {
     const resolvedYear = war.endYear ?? world.year + 1;
@@ -146,6 +156,10 @@ function reconstructSettlementOwners(world: WorldState, year: number): Map<numbe
 }
 
 function reconstructTerritories(world: WorldState, visibleSettlementIds: Set<number>, owners: Map<number, number>, year: number): Array<number | undefined> {
+  if (world.territoryHistory?.length) {
+    const ownerByTile = territoryOwnersAtYear(world, year);
+    return world.tiles.map(tile => tile.terrain === 'ocean' ? undefined : ownerByTile.get(`${tile.x}:${tile.y}`));
+  }
   const settlements = world.settlements.filter(settlement => visibleSettlementIds.has(settlement.id));
   const foundedKingdoms = new Set(world.kingdoms.filter(kingdom => kingdom.foundedYear <= year).map(kingdom => kingdom.id));
   return world.tiles.map(tile => {
@@ -166,6 +180,16 @@ function reconstructTerritories(world: WorldState, visibleSettlementIds: Set<num
     }
     return bestOwner;
   });
+}
+
+function territoryOwnersAtYear(world: WorldState, year: number): Map<string, number | undefined> {
+  const result = new Map<string, number | undefined>();
+  const changes = [...(world.territoryHistory ?? [])].sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
+  for (const change of changes) {
+    if (change.year > year) break;
+    result.set(`${change.x}:${change.y}`, change.kingdomId);
+  }
+  return result;
 }
 
 function estimatePopulation(world: WorldState, settlementId: number, year: number): number {

@@ -42,7 +42,7 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
   drawRoadNetwork(cells, width, height, exits, rng, Boolean(tile.settlementId));
 
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
-  if (settlement) buildSettlement(cells, width, height, settlement, tile, exits, rng);
+  if (settlement) buildSettlement(world, cells, width, height, settlement, tile, exits, rng);
   const dungeon = tile.dungeonId ? world.dungeons.find(item => item.id === tile.dungeonId) : world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
   if (dungeon) placeDungeonEntrance(cells, width, height, rng);
 
@@ -103,7 +103,9 @@ function generateDungeonLevel(world: WorldState, tile: Tile, level: number, avai
   const monster = world.monsters.find(item => item.alive && item.lairDungeonId === dungeon.id);
   if (monster && depth === Math.max(1, dungeon.depth)) {
     const point = center(last);
-    markers.push({ id: `monster-${monster.id}`, x: point.x, y: point.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: 'Хозяин логова' });
+    const topLeft = fitFootprint(cells, width, height, point, monster.footprintWidth ?? 1, monster.footprintHeight ?? 1);
+    occupyFootprint(cells, width, topLeft, monster.footprintWidth ?? 1, monster.footprintHeight ?? 1);
+    markers.push({ id: `monster-${monster.id}`, x: topLeft.x, y: topLeft.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `Хозяин логова · занимает ${monster.footprintWidth ?? 1}×${monster.footprintHeight ?? 1} клеток`, footprintWidth: monster.footprintWidth ?? 1, footprintHeight: monster.footprintHeight ?? 1 });
   }
   for (const artifactId of dungeon.artifactIds) {
     const point = randomWalkable(cells, width, height, rng);
@@ -273,7 +275,7 @@ function paintRoad(cells: LocalCell[], width: number, height: number, cx: number
 }
 
 function buildSettlement(
-  cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], tile: Tile, exits: LocalExit[], rng: RNG,
+  world: WorldState, cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], tile: Tile, exits: LocalExit[], rng: RNG,
 ): void {
   const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: 'центр' as const }];
   const districtIndex = Math.max(0, districts.findIndex(item => item.x === tile.x && item.y === tile.y));
@@ -298,6 +300,17 @@ function buildSettlement(
   const fieldCount = district.role === 'поля' ? Math.max(18, Math.round(width / 5)) : settlement.type === 'city' || settlement.type === 'fortress' ? 4 : Math.max(8, Math.round(width / 12));
   placeFields(cells, width, height, rng, fieldCount);
 
+  const physicalBuildings = (world.buildings ?? []).filter(building => building.globalX === tile.x && building.globalY === tile.y);
+  if (physicalBuildings.length) {
+    for (const building of physicalBuildings) {
+      const dimensions = physicalBuildingDimensions(building.type, building.floors);
+      const slot = findBuildSlot(cells, width, height, building.localX, building.localY, dimensions.w, dimensions.h);
+      if (!slot) continue;
+      drawBuilding(cells, width, slot.x, slot.y, dimensions.w, dimensions.h, building.name, new RNG(`${world.config.seed}:физическое-здание:${building.id}`));
+    }
+    return;
+  }
+
   const slots: Point[] = [];
   for (let y = 5; y < height - 9; y += 8) for (let x = 5; x < width - 9; x += 9) slots.push({ x, y });
   slots.sort(() => rng.next() - .5);
@@ -312,6 +325,27 @@ function buildSettlement(
     drawBuilding(cells, width, slot.x, slot.y, w, h, label, rng);
     built += 1;
   }
+}
+
+function physicalBuildingDimensions(type: WorldState['buildings'][number]['type'], floors: number): { w: number; h: number } {
+  if (type === 'tenement' || type === 'manor' || type === 'guildhall') return { w: Math.min(11, 7 + floors), h: Math.min(9, 6 + Math.floor(floors / 2)) };
+  if (type === 'warehouse' || type === 'barracks' || type === 'market') return { w: 9, h: 7 };
+  if (type === 'tavern' || type === 'inn' || type === 'temple') return { w: 8, h: 6 };
+  if (type === 'farm' || type === 'stable') return { w: 8, h: 5 };
+  return { w: 6, h: 5 };
+}
+
+function findBuildSlot(cells: LocalCell[], width: number, height: number, desiredX: number, desiredY: number, w: number, h: number): Point | undefined {
+  const baseX = Math.max(2, Math.min(width - w - 2, desiredX));
+  const baseY = Math.max(2, Math.min(height - h - 2, desiredY));
+  for (let radius = 0; radius <= 18; radius += 2) {
+    for (let dy = -radius; dy <= radius; dy += 2) for (let dx = -radius; dx <= radius; dx += 2) {
+      const x = Math.max(2, Math.min(width - w - 2, baseX + dx));
+      const y = Math.max(2, Math.min(height - h - 2, baseY + dy));
+      if (canBuild(cells, width, height, x, y, w, h)) return { x, y };
+    }
+  }
+  return undefined;
 }
 
 function drawSettlementWall(cells: LocalCell[], width: number, height: number, exits: LocalExit[]): void {
@@ -396,7 +430,8 @@ function applyStoredEffects(world: WorldState, globalX: number, globalY: number,
     if (!inside(effect.localX, effect.localY, width, height)) continue;
     const patch = effect.kind === 'burn' ? { ground: 'ash' as LocalGround, feature: 'fire' as LocalFeature, blocked: false }
       : effect.kind === 'rubble' ? { feature: 'rubble' as LocalFeature, blocked: false }
-        : effect.kind === 'blood' ? { feature: 'blood' as LocalFeature, blocked: false }
+        : effect.kind === 'looted' ? { feature: 'looted' as LocalFeature, ground: 'ash' as LocalGround, blocked: false }
+          : effect.kind === 'blood' ? { feature: 'blood' as LocalFeature, blocked: false }
           : effect.kind === 'body' || effect.kind === 'grave' ? { feature: 'body' as LocalFeature, blocked: true }
             : effect.kind === 'lost-item' ? { feature: 'chest' as LocalFeature, blocked: true }
               : effect.kind === 'repaired' ? { feature: undefined, ground: 'grass' as LocalGround, blocked: false }
@@ -444,13 +479,28 @@ function buildSurfaceMarkers(
     });
   }
 
+  for (const building of (world.buildings ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const establishment = building.establishmentId ? world.establishments.find(item => item.id === building.establishmentId) : undefined;
+    const markerKind: LocalMarker['kind'] = establishment ? 'establishment' : 'building';
+    const refs: EntityRef[] = [{ kind: 'building', id: building.id }, ...(establishment ? [{ kind: 'establishment' as const, id: establishment.id }] : [])];
+    markers.push({
+      id: `building-${building.id}`, x: Math.max(1, Math.min(width - 2, building.localX)), y: Math.max(1, Math.min(height - 2, building.localY)),
+      kind: markerKind, label: establishment?.name ?? building.name, refs,
+      detail: establishment ? `${establishment.type} · работников ${establishment.workerIds.length}` : `${building.rooms.length} помещений · состояние ${building.condition}%`,
+    });
+  }
+
   for (const army of world.armies.filter(item => item.x === tile.x && item.y === tile.y)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:армия:${army.id}:${tile.x}:${tile.y}`), 5);
     markers.push({ id: `army-${army.id}`, x: point.x, y: point.y, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.strength, detail: `${army.strength} воинов · ${army.status}` });
   }
   for (const monster of world.monsters.filter(item => item.alive && item.x === tile.x && item.y === tile.y)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:чудовище:${monster.id}:${tile.x}:${tile.y}`), 6);
-    markers.push({ id: `monster-${monster.id}`, x: point.x, y: point.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `${monster.species}, сила ${monster.power}` });
+    const footprintWidth = Math.max(1, monster.footprintWidth ?? 1);
+    const footprintHeight = Math.max(1, monster.footprintHeight ?? 1);
+    const topLeft = fitFootprint(cells, width, height, point, footprintWidth, footprintHeight);
+    occupyFootprint(cells, width, topLeft, footprintWidth, footprintHeight);
+    markers.push({ id: `monster-${monster.id}`, x: topLeft.x, y: topLeft.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `${monster.species}, сила ${monster.power} · занимает ${footprintWidth}×${footprintHeight} клеток`, footprintWidth, footprintHeight });
   }
 
   for (const population of world.animalPopulations.filter(item => item.count > 0 && item.x === tile.x && item.y === tile.y)) {
@@ -471,7 +521,7 @@ function buildSurfaceMarkers(
     markers.push({ id: `artifact-${artifact.id}`, x: point.x, y: point.y, kind: 'artifact', label: artifact.name, refs: [{ kind: 'artifact', id: artifact.id }] });
   }
   for (const effect of world.localMapChanges.filter(item => item.globalX === tile.x && item.globalY === tile.y && item.level === 0)) {
-    markers.push({ id: `effect-${effect.id}`, x: effect.localX, y: effect.localY, kind: 'effect', label: effect.label, refs: effect.entityRef ? [effect.entityRef] : [], detail: `${effect.year} год` });
+    markers.push({ id: `effect-${effect.id}`, x: effect.localX, y: effect.localY, kind: 'effect', label: effect.label, refs: effect.entityRef ? [effect.entityRef] : [], detail: `${effect.year} год · ${effect.kind}` });
   }
   return markers;
 }
@@ -480,6 +530,31 @@ function characterPosition(id: number, walkable: LocalCell[], seed: string, x: n
   if (!walkable.length) return { x: 24, y: 24 };
   const cell = walkable[hashSeed(`${seed}:житель:${id}:${x}:${y}`) % walkable.length]!;
   return { x: cell.x, y: cell.y };
+}
+
+function occupyFootprint(cells: LocalCell[], width: number, topLeft: Point, footprintWidth: number, footprintHeight: number): void {
+  for (let y = topLeft.y; y < topLeft.y + footprintHeight; y += 1) for (let x = topLeft.x; x < topLeft.x + footprintWidth; x += 1) {
+    const cell = cells[y * width + x];
+    if (cell) cell.blocked = true;
+  }
+}
+
+function fitFootprint(cells: LocalCell[], width: number, height: number, center: Point, footprintWidth: number, footprintHeight: number): Point {
+  const desiredX = Math.max(1, Math.min(width - footprintWidth - 1, center.x - Math.floor(footprintWidth / 2)));
+  const desiredY = Math.max(1, Math.min(height - footprintHeight - 1, center.y - Math.floor(footprintHeight / 2)));
+  for (let radius = 0; radius <= 12; radius += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) for (let dx = -radius; dx <= radius; dx += 1) {
+      const x0 = Math.max(1, Math.min(width - footprintWidth - 1, desiredX + dx));
+      const y0 = Math.max(1, Math.min(height - footprintHeight - 1, desiredY + dy));
+      let clear = true;
+      for (let y = y0; y < y0 + footprintHeight && clear; y += 1) for (let x = x0; x < x0 + footprintWidth; x += 1) {
+        const cell = cells[y * width + x];
+        if (!cell || cell.blocked || cell.ground === 'water') { clear = false; break; }
+      }
+      if (clear) return { x: x0, y: y0 };
+    }
+  }
+  return { x: desiredX, y: desiredY };
 }
 
 function randomWalkable(cells: LocalCell[], width: number, height: number, rng: RNG, margin = 2): Point {
@@ -533,11 +608,11 @@ function inside(x: number, y: number, width: number, height: number): boolean {
 
 export function localCellSummary(map: LocalMapData, x: number, y: number): { title: string; lines: string[]; markers: LocalMarker[] } {
   const cell = map.cells[y * map.width + x];
-  const markers = map.markers.filter(marker => marker.x === x && marker.y === y);
+  const markers = map.markers.filter(marker => x >= marker.x && y >= marker.y && x < marker.x + (marker.footprintWidth ?? 1) && y < marker.y + (marker.footprintHeight ?? 1));
   if (!cell) return { title: 'За пределами карты', lines: [], markers: [] };
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
-    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'обломки', fire: 'огонь', blood: 'кровь', body: 'тело', chest: 'сундук или предметы',
+    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', chest: 'сундук или предметы',
     'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа',
   };
   const lines = [`Основа: ${groundNames[cell.ground]}`];

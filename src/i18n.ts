@@ -1,4 +1,4 @@
-import type { Army, Monster, Settlement, Species, Terrain } from './types';
+import type { Army, BuildingType, Monster, Settlement, Species, Terrain } from './types';
 
 const species: Record<Species, string> = {
   human: 'человек',
@@ -10,7 +10,15 @@ const species: Record<Species, string> = {
 const professions: Record<string, string> = {
   child: 'ребёнок', farmer: 'земледелец', miller: 'мельник', hunter: 'охотник', guard: 'стражник',
   blacksmith: 'кузнец', carpenter: 'плотник', herbalist: 'травник', merchant: 'торговец', scribe: 'писец',
-  priest: 'жрец', soldier: 'воин', fisher: 'рыбак', miner: 'шахтёр', weaver: 'ткач', brewer: 'пивовар', healer: 'лекарь',
+  priest: 'жрец', soldier: 'воин', fisher: 'рыбак', miner: 'шахтёр', weaver: 'ткач', brewer: 'пивовар', healer: 'лекарь', baker: 'пекарь', cook: 'повар', shopkeeper: 'лавочник', innkeeper: 'трактирщик', laborer: 'работник',
+};
+
+
+const buildingTypes: Record<BuildingType, string> = {
+  house: 'жилой дом', tenement: 'доходный дом', manor: 'большой семейный дом', barracks: 'казарма', monastery: 'монастырь', warehouse: 'склад',
+  farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
+  blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', market: 'рынок', shop: 'лавка', bathhouse: 'баня',
+  healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник', public: 'общественное здание',
 };
 
 const settlementTypes: Record<Settlement['type'], string> = {
@@ -52,3 +60,5 @@ export const monsterSpeciesLabel = (value: string) => monsterSpecies[value] ?? v
 export const terrainLabel = (value: Terrain | string) => terrains[value as Terrain] ?? value;
 export const artifactTypeLabel = (value: string) => artifactTypes[value] ?? value;
 export const materialLabel = (value: string) => materials[value] ?? value;
+
+export const buildingTypeLabel = (value: BuildingType | string) => buildingTypes[value as BuildingType] ?? value;

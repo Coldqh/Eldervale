@@ -53,6 +53,17 @@ function terrainAt(x: number, y: number, width: number, height: number, seed: nu
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
+function monsterFootprint(species: string, tier: Monster['tier'], power: number, rng: RNG): { width: number; height: number } {
+  if (species === 'dragon') return tier === 'boss'
+    ? { width: rng.int(7, 11), height: rng.int(5, 8) }
+    : { width: rng.int(5, 8), height: rng.int(4, 6) };
+  if (species === 'giant serpent') return { width: rng.int(6, 10), height: rng.int(2, 3) };
+  if (tier === 'boss') return { width: rng.int(4, 7), height: rng.int(4, 7) };
+  if (tier === 'miniboss' || power >= 70) return { width: rng.int(2, 4), height: rng.int(2, 4) };
+  if (species === 'ogre' || species === 'troll') return { width: 2, height: 2 };
+  return { width: 1, height: 1 };
+}
+
 function settlementType(rng: RNG, tile: Tile): Settlement['type'] {
   if (tile.terrain === 'coast' && rng.chance(0.55)) return 'port';
   return rng.weighted([
@@ -297,7 +308,8 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
       residentialCapacity: housing.residentialCapacity, districts: [], notableCharacterIds: [], damaged: 0, resource,
       stockpile: { [resource]: rng.int(18, 80), зерно: rng.int(20, 90), древесина: rng.int(12, 70), камень: rng.int(4, 45) },
       livestock: { куры: Math.max(0, Math.round(population / 8)), козы: Math.max(0, Math.round(population / 18)), лошади: type === 'city' || type === 'fortress' ? Math.round(population / 22) : Math.round(population / 50) },
-      shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18), history: [],
+      shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18), history: [], buildingIds: [], householdIds: [], establishmentIds: [],
+      economy: { currency: 'крона', coinSupply: 0, priceIndex: 1, wageIndex: 1, rentIndex: 1, taxRate: .08, prices: {}, supply: {}, demand: {}, imports: {}, exports: {}, lastMonthlyTrade: 0, bankruptcies: 0 },
     };
   });
   report('Формирование государств и границ', 28, `${settlements.length} поселений`);
@@ -355,7 +367,10 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
         settlementId: settlement.id, kingdomId: kingdom.id, profession: age < 14 ? 'child' : rng.pick(professions), workplace: '',
         homeDistrict: settlement.districts.length ? rng.pick(settlement.districts).name : 'Сердце поселения', renown: rng.int(0, 18), health: rng.int(58, 100),
         wealth: age < 14 ? 0 : rng.int(0, 180), loyalty: rng.int(25, 92), ambition: rng.pick(ambitions), parentIds: [], childIds: [], relationshipIds: [],
-        titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0, biography: [`Родился в ${settlement.name}.`],
+        titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0, biography: [`Родился в ${settlement.name}.`], inventoryItemIds: [],
+        skills: { [age < 14 ? 'child' : professions[characterId % professions.length]!]: Math.max(1, Math.min(100, rng.int(6, 42) + Math.floor(age / 3))) },
+        needs: { hunger: 10, thirst: 8, rest: 10, warmth: 10, safety: 12, social: 16, lastUpdatedTick: config.historyYears * 12 },
+        schedule: { wakeHour: 6, workStartHour: age >= 14 ? 8 : 0, workEndHour: age >= 14 ? 17 : 0, sleepHour: 22, restDay: 1 + characterId % 7, currentActivity: age >= 14 ? 'занят обычной работой' : 'живёт в семье и учится' },
       });
     }
     const locals = characters.filter(character => character.settlementId === settlement.id);
@@ -424,13 +439,16 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
     const species = index < Math.max(1, Math.round(monsterCount * .16)) ? 'dragon' : rng.pick(monsterSpecies);
     const tier: Monster['tier'] = species === 'dragon' ? (rng.chance(.35) ? 'boss' : 'miniboss') : rng.weighted([{ value: 'common', weight: 48 }, { value: 'elite', weight: 32 }, { value: 'miniboss', weight: 16 }, { value: 'boss', weight: 4 }]);
     const behavior = species === 'dragon' ? rng.pick(['собирает золото и карает вторжение', 'охотится на стада и караваны', 'требует дань с поселений']) : rng.pick(['охотится ночью', 'защищает выводок', 'следует за запахом крови', 'занимает заброшенные руины']);
+    const health = tier === 'boss' ? rng.int(700, 1200) : tier === 'miniboss' ? rng.int(320, 680) : rng.int(90, 300);
+    const power = tier === 'boss' ? rng.int(80, 140) : tier === 'miniboss' ? rng.int(45, 95) : rng.int(15, 50);
+    const footprint = monsterFootprint(species, tier, power, rng);
     const monster: Monster = {
       id: index + 1, name: monsterName(rng, species), species, tier, x: tile.x, y: tile.y,
-      health: tier === 'boss' ? rng.int(700, 1200) : tier === 'miniboss' ? rng.int(320, 680) : rng.int(90, 300),
-      power: tier === 'boss' ? rng.int(80, 140) : tier === 'miniboss' ? rng.int(45, 95) : rng.int(15, 50), age: rng.int(4, species === 'dragon' ? 760 : 120), alive: true,
+      health, power, age: rng.int(4, species === 'dragon' ? 760 : 120), alive: true,
       hoard: rng.int(20, species === 'dragon' ? 1400 : 240), hunger: rng.int(15, 80), territoryRadius: species === 'dragon' ? rng.int(6, 10) : rng.int(2, 6),
       behavior, goal: species === 'dragon' ? 'расширить сокровищницу и сохранить логово' : 'удержать безопасную территорию',
       lairDungeonId: rng.chance(.65) ? rng.pick(dungeons).id : undefined, kills: rng.int(0, 18), history: [`Существо заняло территорию вокруг клетки ${tile.x}:${tile.y}.`],
+      footprintWidth: footprint.width, footprintHeight: footprint.height,
     };
     monsters.push(monster);
     tiles[tile.y * config.width + tile.x]!.monsterId = monster.id;
@@ -546,11 +564,11 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
 
   report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
   const world: WorldState = {
-    version: 6, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
+    version: 8, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], items: [], productionRecipes: [], employments: [], shipments: [], territoryHistory: [], events, localMapChanges: [],
     simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
     history: { engineVersion: 1, generatedYears: config.historyYears, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },
-    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1 },
+    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1, building: 1, household: 1, establishment: 1, item: 1, productionRecipe: 1, employment: 1, shipment: 1, territoryChange: 1 },
   };
   report('Мир готов', 100);
   return world;

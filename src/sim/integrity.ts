@@ -2,6 +2,8 @@ import type { WorldState } from '../types';
 import { causalIntegrityIssues } from './causality';
 import { ecologyIntegrityIssues } from './ecology';
 import { housingIntegrity } from './settlements';
+import { materialEconomyIntegrityIssues } from './materialEconomy';
+import { territoryIntegrityIssues } from './territory';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -10,9 +12,10 @@ export interface WorldIntegrityReport {
 }
 
 export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
-  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world)];
-  const warnings: string[] = [];
-  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length;
+  const territory = territoryIntegrityIssues(world);
+  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...territory.errors];
+  const warnings: string[] = [...territory.warnings];
+  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0);
 
   for (const settlement of world.settlements) {
     const housing = housingIntegrity(settlement);
@@ -36,6 +39,10 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   for (const recipe of world.alchemyRecipes) {
     if (recipe.ingredientIds.some(id => !ingredientIds.has(id))) errors.push(`${recipe.name}: отсутствует ингредиент`);
   }
+  for (const monster of world.monsters) {
+    if ((monster.footprintWidth ?? 0) < 1 || (monster.footprintHeight ?? 0) < 1) errors.push(`${monster.name}: неверный физический размер`);
+    if ((monster.footprintWidth ?? 1) > 16 || (monster.footprintHeight ?? 1) > 16) warnings.push(`${monster.name}: занимает слишком много локальных клеток`);
+  }
   for (const population of world.animalPopulations) {
     if (population.count > population.carryingCapacity * 1.8) warnings.push(`${population.species} ${population.x}:${population.y}: сильное перенаселение`);
   }
@@ -50,6 +57,6 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   }
   for (const key of world.simulation.activeRegionKeys) if (!tileKeys.has(key)) warnings.push(`Планировщик: активный регион ${key} находится вне карты`);
 
-  checks += world.armies.length + world.artifacts.length + world.ingredients.length + world.simulation.queuedActions.length + world.simulation.activeRegionKeys.length;
+  checks += world.armies.length + world.artifacts.length + world.ingredients.length + world.monsters.length + world.territoryHistory.length + world.tiles.length + world.simulation.queuedActions.length + world.simulation.activeRegionKeys.length;
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)], checks };
 }

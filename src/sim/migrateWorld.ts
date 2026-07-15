@@ -6,15 +6,18 @@ import { normalizeEventCausality } from './causality';
 import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
 import { createHousingProfile } from './settlements';
 import { createSimulationRuntime, ensureSimulationRuntime } from './scheduler';
+import { generatePhysicalEconomy } from './materialEconomy';
+import { rebuildTerritoryHistoryFromCurrent } from './territory';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-6`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-8`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
-  localized.version = 6;
+  const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
+  localized.version = 8;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -27,6 +30,14 @@ export function migrateWorld(input: unknown): WorldState {
   localized.wars ??= [];
   localized.events ??= [];
   localized.localMapChanges ??= [];
+  localized.buildings ??= [];
+  localized.households ??= [];
+  localized.establishments ??= [];
+  localized.items ??= [];
+  localized.productionRecipes ??= [];
+  localized.employments ??= [];
+  localized.shipments ??= [];
+  localized.territoryHistory ??= [];
   localized.nextIds ??= {};
   localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
   localized.history ??= {
@@ -69,6 +80,10 @@ export function migrateWorld(input: unknown): WorldState {
     }
     settlement.districts ??= [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: settlement.type === 'fortress' ? 'крепость' : 'центр' }];
     settlement.stockpile ??= { [settlement.resource]: 30, зерно: Math.max(12, Math.round(settlement.food / 2)), древесина: 25, камень: 12 };
+    settlement.buildingIds ??= [];
+    settlement.householdIds ??= [];
+    settlement.establishmentIds ??= [];
+    settlement.economy ??= { currency: 'крона', coinSupply: Math.max(100, settlement.population * 12), priceIndex: 1, wageIndex: 1, rentIndex: 1, taxRate: .08, prices: {}, supply: {}, demand: {}, imports: {}, exports: {}, lastMonthlyTrade: 0, bankruptcies: 0 };
     settlement.livestock ??= { куры: Math.round(settlement.population / 8), козы: Math.round(settlement.population / 18), лошади: Math.round(settlement.population / 45) };
     for (const district of settlement.districts) {
       const tile = localized.tiles.find((item: any) => item.x === district.x && item.y === district.y);
@@ -83,6 +98,10 @@ export function migrateWorld(input: unknown): WorldState {
     character.workplace ??= workplaceFor(character.profession);
     const settlement = localized.settlements.find((item: any) => item.id === character.settlementId);
     character.homeDistrict ??= settlement?.districts?.[0]?.name ?? 'Сердце поселения';
+    character.inventoryItemIds ??= [];
+    character.skills ??= { [character.profession]: Math.max(1, Math.min(100, rng.int(8, 45) + Math.floor((character.age ?? 0) / 3))) };
+    character.needs ??= { hunger: 10, thirst: 8, rest: 10, warmth: 10, safety: 12, social: 16, lastUpdatedTick: (localized.year ?? 1) * 12 + (localized.month ?? 1) - 1 };
+    character.schedule ??= { wakeHour: 6, workStartHour: character.age >= 14 ? 8 : 0, workEndHour: character.age >= 14 ? 17 : 0, sleepHour: 22, restDay: 1 + character.id % 7, currentActivity: character.age >= 14 ? 'занят обычной работой' : 'живёт в семье и учится' };
   }
   for (const army of localized.armies) {
     army.supplies ??= 70;
@@ -93,6 +112,9 @@ export function migrateWorld(input: unknown): WorldState {
     monster.territoryRadius ??= monster.species === 'dragon' ? 7 : 4;
     monster.behavior ??= monster.species === 'dragon' ? 'охраняет логово и собирает сокровища' : 'охотится в своей области';
     monster.goal ??= monster.species === 'dragon' ? 'расширить сокровищницу' : 'найти безопасное логово';
+    const giant = monster.species === 'dragon' || monster.species === 'giant serpent' || monster.tier === 'boss';
+    monster.footprintWidth ??= monster.species === 'dragon' ? (monster.tier === 'boss' ? 9 : 6) : monster.species === 'giant serpent' ? 8 : monster.tier === 'boss' ? 5 : monster.tier === 'miniboss' ? 3 : giant ? 2 : 1;
+    monster.footprintHeight ??= monster.species === 'giant serpent' ? 2 : monster.species === 'dragon' ? (monster.tier === 'boss' ? 6 : 4) : monster.tier === 'boss' ? 5 : monster.tier === 'miniboss' ? 3 : giant ? 2 : 1;
   }
   for (const artifact of localized.artifacts) artifact.ownerHistory ??= [{ year: artifact.yearCreated, characterId: artifact.ownerId, settlementId: artifact.settlementId, reason: 'первый известный владелец' }];
   for (const book of localized.books) { book.bias ??= 'личный взгляд автора'; book.referencedEventIds ??= []; }
@@ -120,6 +142,18 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.animalPopulation = Math.max(0, ...localized.animalPopulations.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.ingredient = Math.max(0, ...localized.ingredients.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.recipe = Math.max(0, ...localized.alchemyRecipes.map((item: any) => item.id ?? 0)) + 1;
+
+  localized.nextIds.building = Math.max(0, ...localized.buildings.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.household = Math.max(0, ...localized.households.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.establishment = Math.max(0, ...localized.establishments.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.item = Math.max(0, ...localized.items.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.productionRecipe = Math.max(0, ...localized.productionRecipes.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.employment = Math.max(0, ...localized.employments.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.shipment = Math.max(0, ...localized.shipments.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
+
+  generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
+  if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   ensureSimulationRuntime(localized as WorldState);
 

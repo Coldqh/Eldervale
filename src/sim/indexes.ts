@@ -1,5 +1,5 @@
 import type {
-  AnimalPopulation, Character, Kingdom, NaturalIngredient, Relationship, Settlement, Tile, WorldEvent, WorldState,
+  AnimalPopulation, Building, Character, EmploymentContract, Establishment, Household, Kingdom, NaturalIngredient, ProductionRecipe, Relationship, Settlement, Tile, WorldEvent, WorldItem, WorldState,
 } from '../types';
 
 export const coordinateKey = (x: number, y: number) => `${x}:${y}`;
@@ -18,6 +18,15 @@ export interface WorldIndexes {
   ingredientById: Map<number, NaturalIngredient>;
   relationshipKeys: Set<string>;
   eventsByEntity: Map<string, WorldEvent[]>;
+  buildingById: Map<number, Building>;
+  householdById: Map<number, Household>;
+  establishmentById: Map<number, Establishment>;
+  itemById: Map<number, WorldItem>;
+  productionRecipeById: Map<number, ProductionRecipe>;
+  employmentById: Map<number, EmploymentContract>;
+  buildingsBySettlement: Map<number, Building[]>;
+  householdsBySettlement: Map<number, Household[]>;
+  establishmentsBySettlement: Map<number, Establishment[]>;
 }
 
 export function buildWorldIndexes(world: WorldState): WorldIndexes {
@@ -34,8 +43,18 @@ export function buildWorldIndexes(world: WorldState): WorldIndexes {
     ingredientById: new Map(world.ingredients.map(item => [item.id, item])),
     relationshipKeys: new Set(world.relationships.map(item => relationshipKey(item.characterAId, item.characterBId))),
     eventsByEntity: new Map(),
+    buildingById: new Map((world.buildings ?? []).map(item => [item.id, item])),
+    householdById: new Map((world.households ?? []).map(item => [item.id, item])),
+    establishmentById: new Map((world.establishments ?? []).map(item => [item.id, item])),
+    itemById: new Map((world.items ?? []).map(item => [item.id, item])),
+    productionRecipeById: new Map((world.productionRecipes ?? []).map(item => [item.id, item])),
+    employmentById: new Map((world.employments ?? []).map(item => [item.id, item])),
+    buildingsBySettlement: new Map(), householdsBySettlement: new Map(), establishmentsBySettlement: new Map(),
   };
 
+  for (const building of world.buildings ?? []) { const list = indexes.buildingsBySettlement.get(building.settlementId) ?? []; list.push(building); indexes.buildingsBySettlement.set(building.settlementId, list); }
+  for (const household of world.households ?? []) { const list = indexes.householdsBySettlement.get(household.settlementId) ?? []; list.push(household); indexes.householdsBySettlement.set(household.settlementId, list); }
+  for (const establishment of world.establishments ?? []) { const list = indexes.establishmentsBySettlement.get(establishment.settlementId) ?? []; list.push(establishment); indexes.establishmentsBySettlement.set(establishment.settlementId, list); }
   for (const character of world.characters) addResidentToIndexes(indexes, character);
   rebuildAnimalIndexes(indexes, world.animalPopulations);
   for (const ingredient of world.ingredients) {
@@ -143,5 +162,6 @@ export function nearbyTileKeys(x: number, y: number, radius: number): string[] {
 
 export function countIndexedEntities(indexes: WorldIndexes): number {
   return indexes.characterById.size + indexes.settlementById.size + indexes.kingdomById.size + indexes.tileByCoordinate.size
-    + indexes.animalPopulationByTileAndSpecies.size + indexes.ingredientById.size + indexes.relationshipKeys.size;
+    + indexes.animalPopulationByTileAndSpecies.size + indexes.ingredientById.size + indexes.relationshipKeys.size
+    + indexes.buildingById.size + indexes.householdById.size + indexes.establishmentById.size + indexes.itemById.size + indexes.employmentById.size;
 }

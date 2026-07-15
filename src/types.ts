@@ -1,11 +1,191 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
-export type LocalEffectKind = 'burn' | 'rubble' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
+export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
+
+
+export type ItemCategory = 'еда' | 'напиток' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'оружие' | 'мебель' | 'лекарство' | 'предмет быта';
+export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'public';
+export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'рынок' | 'лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
+export type HouseholdStatus = 'нищие' | 'бедные' | 'обычные' | 'зажиточные' | 'богатые' | 'знатные' | 'служебное общежитие';
+export type RecipeCategory = 'добыча' | 'переработка' | 'готовка' | 'ремесло';
+
+export interface NeedState {
+  hunger: number;
+  thirst: number;
+  rest: number;
+  warmth: number;
+  safety: number;
+  social: number;
+  lastUpdatedTick: number;
+}
+
+export interface CharacterSchedule {
+  wakeHour: number;
+  workStartHour: number;
+  workEndHour: number;
+  sleepHour: number;
+  restDay: number;
+  currentActivity: string;
+}
+
+export interface SettlementEconomy {
+  currency: string;
+  coinSupply: number;
+  priceIndex: number;
+  wageIndex: number;
+  rentIndex: number;
+  taxRate: number;
+  prices: Record<string, number>;
+  supply: Record<string, number>;
+  demand: Record<string, number>;
+  imports: Record<string, number>;
+  exports: Record<string, number>;
+  lastMonthlyTrade: number;
+  bankruptcies: number;
+}
+
+export interface Building {
+  id: number;
+  settlementId: number;
+  districtName: string;
+  globalX: number;
+  globalY: number;
+  localX: number;
+  localY: number;
+  name: string;
+  type: BuildingType;
+  floors: number;
+  capacity: number;
+  condition: number;
+  builtYear: number;
+  ownerCharacterId?: number;
+  householdId?: number;
+  establishmentId?: number;
+  residentIds: number[];
+  workerIds: number[];
+  inventoryItemIds: number[];
+  rooms: string[];
+  hasWater: boolean;
+  hasHearth: boolean;
+  history: string[];
+}
+
+export interface Household {
+  id: number;
+  settlementId: number;
+  homeBuildingId?: number;
+  headCharacterId: number;
+  memberIds: number[];
+  status: HouseholdStatus;
+  wealth: number;
+  debt: number;
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  foodReserveDays: number;
+  fuelReserveDays: number;
+  inventoryItemIds: number[];
+  needs: NeedState;
+  history: string[];
+}
+
+export interface WorldItem {
+  id: number;
+  templateId: string;
+  name: string;
+  category: ItemCategory;
+  material: string;
+  quantity: number;
+  unit: string;
+  weightPerUnit: number;
+  quality: number;
+  condition: number;
+  freshness: number;
+  perishabilityMonths: number;
+  baseValue: number;
+  settlementId: number;
+  buildingId?: number;
+  householdId?: number;
+  establishmentId?: number;
+  ownerCharacterId?: number;
+  craftedByCharacterId?: number;
+  createdYear: number;
+  source: string;
+  history: string[];
+}
+
+export interface ProductionRecipeInput { templateId: string; quantity: number; }
+export interface ProductionRecipeOutput { templateId: string; quantity: number; qualityBonus?: number; }
+export interface ProductionRecipe {
+  id: number;
+  name: string;
+  category: RecipeCategory;
+  profession: string;
+  establishmentTypes: EstablishmentType[];
+  inputs: ProductionRecipeInput[];
+  outputs: ProductionRecipeOutput[];
+  fuelTemplateId?: string;
+  fuelQuantity?: number;
+  laborHours: number;
+  minimumSkill: number;
+  culture?: string;
+  description: string;
+}
+
+export interface Establishment {
+  id: number;
+  settlementId: number;
+  buildingId: number;
+  name: string;
+  type: EstablishmentType;
+  ownerCharacterId: number;
+  workerIds: number[];
+  supplierEstablishmentIds: number[];
+  customerHouseholdIds: number[];
+  inventoryItemIds: number[];
+  recipeIds: number[];
+  openHour: number;
+  closeHour: number;
+  reputation: number;
+  cash: number;
+  debt: number;
+  monthlyRevenue: number;
+  monthlyExpenses: number;
+  active: boolean;
+  menu: Record<string, number>;
+  history: string[];
+}
+
+export interface EmploymentContract {
+  id: number;
+  characterId: number;
+  establishmentId: number;
+  role: string;
+  wage: number;
+  hoursPerWeek: number;
+  sinceYear: number;
+  apprenticeOfCharacterId?: number;
+  active: boolean;
+}
+
+export interface TradeShipment {
+  id: number;
+  routeId: number;
+  fromSettlementId: number;
+  toSettlementId: number;
+  sellerEstablishmentId?: number;
+  buyerEstablishmentId?: number;
+  goods: { templateId: string; quantity: number; unitPrice: number }[];
+  departedTick: number;
+  arrivalTick: number;
+  status: 'в пути' | 'доставлен' | 'потерян';
+  value: number;
+  cause?: string;
+}
 
 export interface WorldConfig {
   seed: string;
@@ -151,6 +331,7 @@ export interface Tile {
   elevation: number;
   moisture: number;
   kingdomId?: number;
+  controlledSinceYear?: number;
   settlementId?: number;
   settlementDistrict?: string;
   dungeonId?: number;
@@ -218,6 +399,10 @@ export interface Settlement {
   tradeRouteIds: number[];
   unrest: number;
   history: string[];
+  buildingIds: number[];
+  householdIds: number[];
+  establishmentIds: number[];
+  economy: SettlementEconomy;
 }
 
 export interface Character {
@@ -249,6 +434,15 @@ export interface Character {
   injuries: string[];
   kills: number;
   biography: string[];
+  householdId?: number;
+  homeBuildingId?: number;
+  workplaceBuildingId?: number;
+  employerEstablishmentId?: number;
+  employmentContractId?: number;
+  inventoryItemIds: number[];
+  skills: Record<string, number>;
+  needs: NeedState;
+  schedule: CharacterSchedule;
 }
 
 export interface Relationship {
@@ -311,6 +505,8 @@ export interface Monster {
   lairDungeonId?: number;
   kills: number;
   history: string[];
+  footprintWidth: number;
+  footprintHeight: number;
 }
 
 export interface AnimalPopulation {
@@ -478,6 +674,19 @@ export interface CausalEventInput {
   traces?: EntityRef[];
 }
 
+
+export interface TerritoryChange {
+  id: number;
+  year: number;
+  month: number;
+  x: number;
+  y: number;
+  kingdomId?: number;
+  previousKingdomId?: number;
+  sourceSettlementId?: number;
+  reason: 'основание столицы' | 'мирное освоение' | 'рост поселения' | 'торговый путь' | 'военное завоевание' | 'утрата контроля';
+}
+
 export interface LocalMapEffect {
   id: string;
   globalX: number;
@@ -504,11 +713,13 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource';
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment';
   label: string;
   refs: EntityRef[];
   count?: number;
   detail?: string;
+  footprintWidth?: number;
+  footprintHeight?: number;
 }
 
 export interface LocalExit {
@@ -534,7 +745,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 6;
+  version: 8;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -557,6 +768,14 @@ export interface WorldState {
   dungeons: Dungeon[];
   wars: War[];
   tradeRoutes: TradeRoute[];
+  buildings: Building[];
+  households: Household[];
+  establishments: Establishment[];
+  items: WorldItem[];
+  productionRecipes: ProductionRecipe[];
+  employments: EmploymentContract[];
+  shipments: TradeShipment[];
+  territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];
   simulation: SimulationRuntimeState;

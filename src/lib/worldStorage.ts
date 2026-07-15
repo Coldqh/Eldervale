@@ -19,7 +19,7 @@ const TILE_CHUNK_SIZE = 256;
 
 const entityCollections = [
   'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'monsters', 'animalPopulations',
-  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'events', 'localMapChanges',
+  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'items', 'productionRecipes', 'employments', 'shipments', 'events', 'localMapChanges',
 ] as const;
 
 type EntityCollection = typeof entityCollections[number];

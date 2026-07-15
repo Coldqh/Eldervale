@@ -138,10 +138,16 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
 
   const { regions, settlements: activeSettlementIds } = collectActiveRegions(world, indexes);
   const seasonal = [1, 4, 7, 10].includes(world.month);
+  const bulkEconomy = world.month === 1;
   const bulkEcology = seasonal || [8, 12].includes(world.month);
-  const economySettlementIds = new Set<number>(activeSettlementIds);
+  const economySettlementIds = new Set<number>();
+  for (const settlement of world.settlements) {
+    if (settlement.shortages.length || settlement.damaged >= 35 || settlement.unrest >= 55 || settlement.population > settlement.residentialCapacity) economySettlementIds.add(settlement.id);
+  }
+  for (const war of world.wars) if (war.active) for (const settlementId of war.contestedSettlementIds) economySettlementIds.add(settlementId);
+  for (const army of world.armies) if (army.targetSettlementId && army.status !== 'garrison' && army.status !== 'recovering') economySettlementIds.add(army.targetSettlementId);
   const ecologySettlementIds = new Set<number>(activeSettlementIds);
-  if (seasonal) {
+  if (bulkEconomy) {
     for (const settlement of world.settlements) {
       economySettlementIds.add(settlement.id);
     }
@@ -166,7 +172,7 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
     dueMonsterIds,
     runSeasonalEcology: seasonal,
     runPopulation: world.month === 1,
-    runHousing: world.month === 2 || world.month === 8,
+    runHousing: world.month === 8,
     runBooks: world.month === 12,
     runSettlementLifecycle: world.month === 3,
     processedTasks: due.length + economySettlementIds.size + ecologySettlementIds.size,

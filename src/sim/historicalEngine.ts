@@ -7,6 +7,8 @@ import { generateWorld, type GenerationProgressReporter } from './generator';
 import { inspectWorldIntegrity } from './integrity';
 import { personName, placeName } from './names';
 import { RNG } from './rng';
+import { generatePhysicalEconomy } from './materialEconomy';
+import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -34,6 +36,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   world.nextIds.war = 1;
   world.year = presentYear;
   world.month = 1;
+  initializeTerritorialHistory(world);
 
   const foundationalIds = seedFoundations(world, rng);
   const fallenRealms = createFallenRealms(world, rng, presentYear);
@@ -47,6 +50,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
     const eraEventIds: number[] = [];
     for (let year = plan.startYear; year <= plan.endYear; year += plan.stepYears) {
       const span = Math.min(plan.stepYears, plan.endYear - year + 1);
+      advanceHistoricalTerritories(world, new RNG(`${config.seed}:границы:${year}:${span}`), year, span);
       const created = simulateHistoricalPeriod(world, rng, year, span, plan.kind);
       eraEventIds.push(...created);
       completedSteps += 1;
@@ -65,8 +69,11 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
     });
   }
 
-  onProgress?.('Связывание книг, артефактов и руин', 93, 100, 'Источники получают реальные события и владельцев');
+  onProgress?.('Связывание книг, артефактов и руин', 89, 100, 'Источники получают реальные события и владельцев');
   linkKnowledgeAndArtifacts(world, rng);
+  generatePhysicalEconomy(world, new RNG(`${config.seed}:повседневная-жизнь-v1`), (phase, percent, detail) => {
+    onProgress?.(phase, 90 + Math.round(percent * .08), 100, detail);
+  });
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
   const landmarkEventIds = [...world.events]
     .sort((a, b) => b.importance - a.importance || b.year - a.year || b.id - a.id)
@@ -88,8 +95,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   world.nextIds.character = Math.max(0, ...world.characters.map(character => character.id)) + 1;
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 6;
-  onProgress?.('История мира готова', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
+  world.version = 8;
+  onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }
 
@@ -221,7 +228,7 @@ function historicalWar(world: WorldState, rng: RNG, year: number, span: number):
   world.wars.push(war);
   if (victor.id === attacker.id && rng.chance(.38)) {
     target.kingdomId = attacker.id;
-    for (const tile of world.tiles) if (tile.settlementId === target.id) tile.kingdomId = attacker.id;
+    captureTerritoryAroundSettlement(world, target, attacker.id, endYear, rng, Math.max(4, Math.min(10, 4 + Math.floor(attacker.armyStrength / 140))));
     target.history.push(`В ${endYear} году власть перешла к государству ${attacker.name}.`);
   }
   const start = addHistoricalEvent(world, startYear, rng.int(1, 12), {
@@ -387,7 +394,10 @@ function createHistoricalFigure(world: WorldState, rng: RNG, place: Settlement, 
     homeDistrict: place.districts[0]?.name, renown: rng.int(42, 78), health: alive ? rng.int(45, 90) : 0, wealth: rng.int(40, 900), loyalty: rng.int(30, 94),
     ambition: rng.pick(['защитить родную землю', 'получить власть', 'оставить имя в книгах', 'уничтожить древнюю угрозу']),
     parentIds: [], childIds: [], relationshipIds: [], titles: [title], artifactIds: [], bookIds: [], injuries: [], kills: 0,
-    biography: [`Родился в ${birthYear} году.`, `В ${activeYear} году получил известность как ${title}.`],
+    biography: [`Родился в ${birthYear} году.`, `В ${activeYear} году получил известность как ${title}.`], inventoryItemIds: [],
+    skills: { [title.includes('герой') ? 'hunter' : title.includes('воевода') ? 'soldier' : 'scribe']: rng.int(45, 88) },
+    needs: { hunger: 8, thirst: 8, rest: 10, warmth: 10, safety: 15, social: 18, lastUpdatedTick: world.year * 12 + world.month - 1 },
+    schedule: { wakeHour: 6, workStartHour: 8, workEndHour: 18, sleepHour: 23, restDay: 1 + world.nextIds.character % 7, currentActivity: title.includes('герой') ? 'путешествует и ищет угрозы' : 'исполняет обязанности' },
   };
   world.characters.push(figure);
   return figure;
