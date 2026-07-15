@@ -30,6 +30,7 @@ interface StoredRecord {
   collection: EntityCollection | 'tiles';
   order: number | string;
   fingerprint: string;
+  byteSize?: number;
   data: unknown;
 }
 
@@ -200,7 +201,9 @@ export async function createWorldSlot(world: WorldState, preferredId?: string): 
   let suffix = 2;
   while (existing.has(slotId)) slotId = `${sanitizeSlotId(preferredId || world.config.seed)}-${suffix++}`;
   activeSlotCache = slotId;
-  const profile = await saveWorld(world, slotId, { forceSnapshot: true, reason: 'ручной' });
+  // Новый мир уже является полным сохранением. Создавать рядом вторую
+  // полную копию-снимок бессмысленно и очень дорого на крупных мирах.
+  const profile = await saveWorld(world, slotId);
   await setActiveWorldSlot(slotId);
   return { slotId, world, profile };
 }
@@ -220,13 +223,16 @@ export async function saveWorld(
   const deleted = [...previousFingerprints.keys()].filter(key => !currentFingerprints.has(key));
   const slots = await listWorldSlots();
   const previousMeta = slots.find(slot => slot.id === resolvedSlot);
-  const snapshotDue = Boolean(options.forceSnapshot || !previousMeta?.lastSnapshotYear || world.year - previousMeta.lastSnapshotYear >= SNAPSHOT_INTERVAL_YEARS);
-  const bytesEstimated = estimateWorldBytes(world);
+  const snapshotDue = Boolean(options.forceSnapshot || (previousMeta?.lastSnapshotYear !== undefined && world.year - previousMeta.lastSnapshotYear >= SNAPSHOT_INTERVAL_YEARS));
+  // Не сериализуем весь мир второй раз. Размер уже известен из отдельных
+  // записей, которые всё равно строятся для инкрементального сохранения.
+  const core = extractCore(world);
+  const bytesEstimated = currentRecords.reduce((sum, record) => sum + (record.byteSize ?? 0), 0) + new Blob([JSON.stringify(core)]).size;
   const now = Date.now();
   const meta: WorldSlotMeta = {
     id: resolvedSlot, name: world.name, seed: world.config.seed, createdAt: previousMeta?.createdAt ?? now, updatedAt: now,
     year: world.year, month: world.month, schemaVersion: world.version, appVersion: APP_VERSION, sizeBytes: bytesEstimated,
-    snapshotCount: previousMeta?.snapshotCount ?? 0, lastSnapshotYear: previousMeta?.lastSnapshotYear,
+    snapshotCount: previousMeta?.snapshotCount ?? 0, lastSnapshotYear: previousMeta?.lastSnapshotYear ?? world.year,
   };
 
   try {
@@ -237,7 +243,7 @@ export async function saveWorld(
     const recordStore = transaction.objectStore(RECORD_STORE);
     const slotStore = transaction.objectStore(SLOT_STORE);
     const snapshotStore = transaction.objectStore(SNAPSHOT_STORE);
-    coreStore.put({ slotId: resolvedSlot, core: extractCore(world) } satisfies StoredCore);
+    coreStore.put({ slotId: resolvedSlot, core } satisfies StoredCore);
     for (const record of changed) recordStore.put(record);
     for (const key of deleted) recordStore.delete(key);
     transaction.objectStore(PREFERENCE_STORE).put(resolvedSlot, ACTIVE_SLOT_KEY);
@@ -325,10 +331,15 @@ export async function duplicateWorldSlot(slotId: string): Promise<string> {
 export async function listWorldSnapshots(slotId: string): Promise<WorldSnapshotMeta[]> {
   const db = await openDatabase();
   const transaction = db.transaction(SNAPSHOT_STORE, 'readonly');
-  const records = await requestValue(transaction.objectStore(SNAPSHOT_STORE).index('slotId').getAll(slotId) as IDBRequest<StoredSnapshot[]>);
+  // getAll() десериализовывал несколько полных миров только ради даты и года.
+  // Ключ снимка уже содержит все данные, нужные списку настроек.
+  const keys = await requestValue(transaction.objectStore(SNAPSHOT_STORE).index('slotId').getAllKeys(slotId) as IDBRequest<IDBValidKey[]>);
   await transactionDone(transaction);
   db.close();
-  return records.map(({ world: _world, ...meta }) => meta).sort((a, b) => b.createdAt - a.createdAt);
+  return keys
+    .map(key => snapshotMetaFromKey(String(key), slotId))
+    .filter((meta): meta is WorldSnapshotMeta => Boolean(meta))
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function createWorldSnapshot(world: WorldState, slotId: string, reason: WorldSnapshotMeta['reason'] = 'ручной'): Promise<WorldSnapshotMeta> {
@@ -372,7 +383,7 @@ function partitionWorld(world: WorldState, slotId: string): StoredRecord[] {
 
 function makeRecord(slotId: string, collection: StoredRecord['collection'], order: number | string, data: unknown): StoredRecord {
   const serialized = JSON.stringify(data);
-  return { key: `${slotId}:${collection}:${order}`, slotId, collection, order, fingerprint: hashString(serialized), data };
+  return { key: `${slotId}:${collection}:${order}`, slotId, collection, order, fingerprint: hashString(serialized), byteSize: new Blob([serialized]).size, data };
 }
 
 function extractCore(world: WorldState): StoredCore['core'] {
@@ -399,14 +410,28 @@ async function trimSnapshots(slotId: string): Promise<void> {
   const db = await openDatabase();
   const transaction = db.transaction([SNAPSHOT_STORE, SLOT_STORE], 'readwrite');
   const store = transaction.objectStore(SNAPSHOT_STORE);
-  const snapshots = await requestValue(store.index('slotId').getAll(slotId) as IDBRequest<StoredSnapshot[]>);
-  snapshots.sort((a, b) => b.createdAt - a.createdAt);
-  for (const snapshot of snapshots.slice(SNAPSHOT_LIMIT)) store.delete(snapshot.id);
+  const keys = await requestValue(store.index('slotId').getAllKeys(slotId) as IDBRequest<IDBValidKey[]>);
+  const ordered = keys
+    .map(key => ({ key, meta: snapshotMetaFromKey(String(key), slotId) }))
+    .sort((a, b) => (b.meta?.createdAt ?? 0) - (a.meta?.createdAt ?? 0));
+  for (const entry of ordered.slice(SNAPSHOT_LIMIT)) store.delete(entry.key);
   const slotStore = transaction.objectStore(SLOT_STORE);
   const meta = await requestValue(slotStore.get(slotId) as IDBRequest<WorldSlotMeta | undefined>);
-  if (meta) slotStore.put({ ...meta, snapshotCount: Math.min(SNAPSHOT_LIMIT, snapshots.length) });
+  if (meta) slotStore.put({ ...meta, snapshotCount: Math.min(SNAPSHOT_LIMIT, ordered.length) });
   await transactionDone(transaction);
   db.close();
+}
+
+function snapshotMetaFromKey(key: string, slotId: string): WorldSnapshotMeta | undefined {
+  const prefix = `${slotId}:`;
+  if (!key.startsWith(prefix)) return undefined;
+  const tail = key.slice(prefix.length).split(':');
+  if (tail.length < 3) return undefined;
+  const year = Number(tail[0]);
+  const month = Number(tail[1]);
+  const createdAt = Number(tail[2]);
+  if (![year, month, createdAt].every(Number.isFinite)) return undefined;
+  return { id: key, slotId, year, month, createdAt, reason: 'автоматический', sizeBytes: 0 };
 }
 
 async function loadLegacyIndexedWorld(): Promise<WorldState | undefined> {

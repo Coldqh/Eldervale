@@ -97,8 +97,10 @@ export default function App() {
         setSetupOpen(!saved);
         setEntityStack([]);
         setLocalPosition(undefined);
-        setProgress(undefined);
-        await refreshStorage(resolvedSlotId);
+        setProgress(saved ? { operation: 'загрузка', phase: 'Мир открыт', completed: 1, total: 1, percent: 100, elapsedMs: 0 } : undefined);
+        // Список миров и снимков не должен удерживать экран загрузки.
+        // Особенно важно для старых снимков, которые могут весить сотни МБ.
+        void refreshStorage(resolvedSlotId);
       } catch (error) {
         console.error('Не удалось подготовить сохранённый мир', error);
         if (!active) return;
@@ -272,7 +274,7 @@ export default function App() {
       setEntityStack([]);
       setLocalPosition(undefined);
       setView('map');
-      await refreshStorage(slotId);
+      void refreshStorage(slotId);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Не удалось открыть мир.');
     } finally {
