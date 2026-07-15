@@ -46,8 +46,10 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   const startedAt = performance.now();
   const world = generateHistoricalWorld(message.config, (phase, completed, total, detail) => {
     const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
-    post({ id: message.id, type: 'progress', progress: progressMessage(operation, phase, completed, total, startedAt, { detail }) });
+    const capped = Math.min(94, completed / Math.max(1, total) * 94);
+    post({ id: message.id, type: 'progress', progress: progressMessage(operation, phase, capped, 100, startedAt, { detail }) });
   });
+  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Индексируем созданный мир', 95, 100, startedAt) });
   engine = createSimulationEngine(world);
   const totalMs = performance.now() - startedAt;
   const profile: SimulationProfile = {
@@ -56,7 +58,11 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   };
   lastProfile = profile;
   activeOperationId = undefined;
+  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Передаём мир приложению', 98, 100, startedAt) });
   post({ id: message.id, type: 'complete', world, profile });
+  // Главный поток уже получил structured-clone копию. Не держим второй
+  // полный мир и его индексы во время тяжёлого первого сохранения.
+  engine = undefined;
 }
 
 async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' }>): Promise<void> {

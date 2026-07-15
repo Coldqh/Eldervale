@@ -123,7 +123,7 @@ export default function App() {
   }, [runUpdateCheck]);
 
   useEffect(() => {
-    if (booting || !updateState.updateRequired) return;
+    if (booting || simulating || !updateState.updateRequired) return;
     const remoteVersion = updateState.remoteVersion ?? 'неизвестная';
     const attemptKey = `eldervale-auto-update:${remoteVersion}`;
 
@@ -134,7 +134,7 @@ export default function App() {
 
     const timer = window.setTimeout(() => { void forceUpdate(updateState.remoteVersion); }, 2200);
     return () => window.clearTimeout(timer);
-  }, [booting, updateState.updateRequired, updateState.remoteVersion]);
+  }, [booting, simulating, updateState.updateRequired, updateState.remoteVersion]);
 
   useEffect(() => {
     if (!selected) return;
@@ -165,12 +165,14 @@ export default function App() {
       const result = await generateWorldInBackground(config, setProgress);
       if (!result.world) throw new Error('Генератор не вернул созданный мир');
       const receivedAt = performance.now();
+      setLoadingText('Сохраняем созданный мир');
+      setProgress({ operation: 'сохранение', phase: 'Разделяем мир на безопасные части', completed: 0, total: 3, percent: 0, elapsedMs: 0 });
       const saveStarted = performance.now();
       const createdSlot = await createWorldSlot(result.world);
       const saveMs = performance.now() - saveStarted;
+      setProgress({ operation: 'сохранение', phase: 'Подготавливаем интерфейс', completed: 2, total: 3, percent: 98, elapsedMs: saveMs });
       setActiveSlotId(createdSlot.slotId);
       setStorageProfile(createdSlot.profile);
-      await refreshStorage(createdSlot.slotId);
       const profile: SimulationProfile = {
         ...(result.profile ?? { operation: 'генерация', totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
         workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
@@ -183,6 +185,8 @@ export default function App() {
       setSetupOpen(false);
       setView('map');
       setLocalPosition(undefined);
+      setProgress({ operation: 'сохранение', phase: 'Мир открыт', completed: 3, total: 3, percent: 100, elapsedMs: performance.now() - saveStarted });
+      void refreshStorage(createdSlot.slotId);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Не удалось создать мир.');
     } finally {

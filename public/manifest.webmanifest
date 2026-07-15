@@ -1,10 +1,48 @@
 {
-  "name": "Eldervale",
+  "id": "/Eldervale/",
+  "name": "Eldervale — живой фэнтези-мир",
   "short_name": "Eldervale",
-  "start_url": "/Eldervale/",
+  "description": "Процедурная симуляция живого фэнтези-мира.",
+  "lang": "ru",
+  "start_url": "/Eldervale/?source=pwa",
+  "scope": "/Eldervale/",
   "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
+  "orientation": "any",
   "background_color": "#0e1410",
   "theme_color": "#111813",
-  "description": "Процедурная симуляция живого фэнтези-мира.",
-  "icons": [{ "src": "./crest.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+  "categories": [
+    "games",
+    "entertainment"
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./crest.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }

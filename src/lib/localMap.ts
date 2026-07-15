@@ -510,10 +510,37 @@ function buildSurfaceMarkers(
     if (trail && !trail.feature) trail.feature = 'animal-trail';
   }
   for (const ingredient of world.ingredients.filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y)) {
-    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:ингредиент:${ingredient.id}:${tile.x}:${tile.y}`), 4);
-    markers.push({ id: `resource-${ingredient.id}`, x: point.x, y: point.y, kind: 'resource', label: ingredient.name, refs: [{ kind: 'ingredient', id: ingredient.id }], count: Math.round(ingredient.abundance), detail: `${ingredient.kind} · запас ${Math.round(ingredient.abundance)}` });
-    const cell = cells[point.y * width + point.x];
-    if (cell && !cell.feature) cell.feature = ingredient.kind === 'гриб' ? 'mushroom' : ingredient.kind === 'растение' ? 'herb' : 'rock';
+    const spreadRng = new RNG(`${world.config.seed}:ареал-ингредиента:${ingredient.id}:${tile.x}:${tile.y}`);
+    const total = Math.max(1, Math.round(ingredient.abundance));
+    const patchCount = Math.max(3, Math.min(18, Math.round(Math.sqrt(total) * 1.35)));
+    let remaining = total;
+    for (let patchIndex = 0; patchIndex < patchCount && remaining > 0; patchIndex += 1) {
+      const center = randomWalkable(cells, width, height, spreadRng, 5);
+      const patchesLeft = patchCount - patchIndex;
+      const amount = patchIndex === patchCount - 1
+        ? remaining
+        : Math.max(1, Math.min(remaining - (patchesLeft - 1), Math.round(remaining / patchesLeft * spreadRng.int(65, 135) / 100)));
+      remaining -= amount;
+      const radius = ingredient.kind === 'минерал' ? spreadRng.int(1, 3) : spreadRng.int(2, 5);
+      let painted = 0;
+      const targetCells = Math.max(2, Math.min(amount, ingredient.kind === 'минерал' ? spreadRng.int(3, 8) : spreadRng.int(4, 12)));
+      for (let attempt = 0; attempt < targetCells * 5 && painted < targetCells; attempt += 1) {
+        const x = center.x + spreadRng.int(-radius, radius);
+        const y = center.y + spreadRng.int(-radius, radius);
+        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
+        const cell = cells[y * width + x];
+        if (!cell || cell.blocked || cell.ground === 'water' || cell.building) continue;
+        if (!cell.feature || ['bush', 'reeds', 'rock'].includes(cell.feature)) {
+          cell.feature = ingredient.kind === 'гриб' ? 'mushroom' : ingredient.kind === 'растение' ? 'herb' : 'rock';
+          painted += 1;
+        }
+      }
+      markers.push({
+        id: `resource-${ingredient.id}-${patchIndex}`, x: center.x, y: center.y, kind: 'resource', label: ingredient.name,
+        refs: [{ kind: 'ingredient', id: ingredient.id }], count: amount,
+        detail: `${ingredient.kind} · участок ${patchIndex + 1}/${patchCount} · запас ${amount}`,
+      });
+    }
   }
 
   for (const artifact of world.artifacts.filter(item => item.settlementId === settlement?.id && !item.ownerId)) {

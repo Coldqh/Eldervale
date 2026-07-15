@@ -164,35 +164,36 @@ export async function loadWorldSlot(slotId: string): Promise<WorldState | undefi
 
 async function loadPartitionedWorld(slotId: string): Promise<WorldState | undefined> {
   const db = await openDatabase();
-  const transaction = db.transaction([CORE_STORE, RECORD_STORE], 'readonly');
-  const core = await requestValue(transaction.objectStore(CORE_STORE).get(slotId) as IDBRequest<StoredCore | undefined>);
-  if (!core) {
-    transaction.abort();
-    db.close();
-    return undefined;
-  }
-  const records = await requestValue(transaction.objectStore(RECORD_STORE).index('slotId').getAll(slotId) as IDBRequest<StoredRecord[]>);
-  await transactionDone(transaction);
-  db.close();
+  const coreTransaction = db.transaction(CORE_STORE, 'readonly');
+  const core = await requestValue(coreTransaction.objectStore(CORE_STORE).get(slotId) as IDBRequest<StoredCore | undefined>);
+  await transactionDone(coreTransaction);
+  if (!core) { db.close(); return undefined; }
 
   const collections: Record<string, unknown[]> = Object.fromEntries(entityCollections.map(name => [name, []]));
   const tileChunks: { order: number; data: WorldState['tiles'] }[] = [];
   const fingerprints = new Map<string, string>();
-  for (const record of records) {
-    fingerprints.set(record.key, record.fingerprint);
-    if (record.collection === 'tiles') tileChunks.push({ order: Number(record.order), data: record.data as WorldState['tiles'] });
-    else collections[record.collection]!.push(record.data);
-  }
+  const transaction = db.transaction(RECORD_STORE, 'readonly');
+  const index = transaction.objectStore(RECORD_STORE).index('slotId');
+  await new Promise<void>((resolve, reject) => {
+    const request = index.openCursor(IDBKeyRange.only(slotId));
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) { resolve(); return; }
+      const record = cursor.value as StoredRecord;
+      fingerprints.set(record.key, record.fingerprint);
+      if (record.collection === 'tiles') tileChunks.push({ order: Number(record.order), data: record.data as WorldState['tiles'] });
+      else collections[record.collection]!.push(record.data);
+      cursor.continue();
+    };
+  });
+  await transactionDone(transaction);
+  db.close();
+
   for (const name of entityCollections) collections[name]!.sort((a: any, b: any) => entityOrder(a) - entityOrder(b));
   tileChunks.sort((a, b) => a.order - b.order);
   fingerprintCache.set(slotId, fingerprints);
-
-  const world = migrateWorld({
-    ...core.core,
-    tiles: tileChunks.flatMap(chunk => chunk.data),
-    ...collections,
-  });
-  return world;
+  return migrateWorld({ ...core.core, tiles: tileChunks.flatMap(chunk => chunk.data), ...collections });
 }
 
 export async function createWorldSlot(world: WorldState, preferredId?: string): Promise<{ slotId: string; world: WorldState; profile: StorageProfile }> {
@@ -383,7 +384,7 @@ function partitionWorld(world: WorldState, slotId: string): StoredRecord[] {
 
 function makeRecord(slotId: string, collection: StoredRecord['collection'], order: number | string, data: unknown): StoredRecord {
   const serialized = JSON.stringify(data);
-  return { key: `${slotId}:${collection}:${order}`, slotId, collection, order, fingerprint: hashString(serialized), byteSize: new Blob([serialized]).size, data };
+  return { key: `${slotId}:${collection}:${order}`, slotId, collection, order, fingerprint: hashString(serialized), byteSize: serialized.length * 2, data };
 }
 
 function extractCore(world: WorldState): StoredCore['core'] {

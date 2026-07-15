@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d9b56d"/><stop offset="1" stop-color="#6f8c69"/></linearGradient></defs>
-  <rect width="512" height="512" rx="112" fill="#111813"/>
-  <path d="M256 70 420 132v116c0 96-66 162-164 194C158 410 92 344 92 248V132z" fill="url(#g)"/>
-  <path d="M256 114c-46 54-67 107-62 160 5 54 32 94 62 121 30-27 57-67 62-121 5-53-16-106-62-160z" fill="#101711"/>
-  <path d="M157 205c50 5 77 27 99 61 22-34 49-56 99-61-18 41-49 69-99 86-50-17-81-45-99-86z" fill="#d9b56d"/>
+  <rect width="512" height="512" rx="92" fill="#0f1611"/>
+  <rect x="54" y="54" width="404" height="404" rx="90" fill="#141f17" stroke="#d8b56d" stroke-width="10"/>
+  <path d="M256 102 374 154 358 306 256 405 154 306 138 154Z" fill="#668460" stroke="#e5c67e" stroke-width="10"/>
+  <path d="m174 198 82 96 82-96-40 104-42 55-42-55Z" fill="#0e1711"/>
+  <path d="M220 175v148m0-148h78m-78 72h62m-62 76h78" fill="none" stroke="#eed089" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="256" cy="357" r="9" fill="#eed089"/>
 </svg>

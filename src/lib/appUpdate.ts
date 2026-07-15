@@ -3,6 +3,8 @@ import { APP_VERSION, VERSION_URL } from '../version';
 export interface UpdateCheckResult {
   currentVersion: string;
   remoteVersion?: string;
+  remoteName?: string;
+  remoteNotes?: string;
   updateRequired: boolean;
   checkedAt: number;
   error?: string;
@@ -16,10 +18,10 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
       headers: { 'cache-control': 'no-cache' },
     });
     if (!response.ok) throw new Error(`Сервер вернул ${response.status}`);
-    const data = await response.json() as { version?: string };
+    const data = await response.json() as { version?: string; name?: string; notes?: string };
     const remoteVersion = data.version?.trim();
     if (!remoteVersion) throw new Error('Файл версии пуст');
-    return { currentVersion: APP_VERSION, remoteVersion, updateRequired: compareVersions(remoteVersion, APP_VERSION) > 0, checkedAt };
+    return { currentVersion: APP_VERSION, remoteVersion, remoteName: data.name?.trim(), remoteNotes: data.notes?.trim(), updateRequired: compareVersions(remoteVersion, APP_VERSION) > 0, checkedAt };
   } catch (error) {
     return {
       currentVersion: APP_VERSION,

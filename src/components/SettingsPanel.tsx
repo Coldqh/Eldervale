@@ -1,6 +1,8 @@
+import { useSyncExternalStore } from 'react';
 import type { UpdateCheckResult } from '../lib/appUpdate';
 import type { SimulationProfile, StorageProfile, WorldSlotMeta, WorldSnapshotMeta, WorldState } from '../types';
-import { APP_VERSION } from '../version';
+import { APP_RELEASE_NAME, APP_RELEASE_NOTES, APP_VERSION } from '../version';
+import { getPwaInstallState, installPwa, subscribePwaInstallState } from '../lib/pwaInstall';
 import { inspectWorldIntegrity } from '../sim/integrity';
 
 export function SettingsPanel({
@@ -27,6 +29,7 @@ export function SettingsPanel({
 }) {
   const integrity = world ? inspectWorldIntegrity(world) : undefined;
   const shownPerformance = performance ?? world?.simulation.lastProfile;
+  const pwa = useSyncExternalStore(subscribePwaInstallState, getPwaInstallState, getPwaInstallState);
   const status = update.updateRequired
     ? `Доступна обязательная версия ${update.remoteVersion}`
     : update.error
@@ -38,6 +41,13 @@ export function SettingsPanel({
       <div className="settings-heading"><div><span className="eyebrow">Настройки и миры</span><h2>Eldervale</h2></div><button className="icon-button" onClick={onClose} aria-label="Закрыть настройки">×</button></div>
       <div className="settings-version-card">
         <span>Текущая версия</span><strong>{APP_VERSION}</strong><small>{status}</small>
+      </div>
+      <div className="settings-release-notes pwa-status-card">
+        <span className="eyebrow">Приложение и офлайн-режим</span>
+        <strong>{pwa.installed ? 'Eldervale установлен' : pwa.canInstall ? 'Можно установить на рабочий стол' : 'Офлайн-кэш подготавливается автоматически'}</strong>
+        <small>{pwa.online ? (pwa.offlineReady ? 'Мир можно открывать без интернета после первого полного запуска.' : 'Открой приложение один раз онлайн, чтобы сохранить все файлы.') : 'Сейчас нет интернета. Используется сохранённая версия приложения.'}</small>
+        {!pwa.installed && pwa.canInstall && <button className="primary-button compact-primary" onClick={() => void installPwa()}>Установить приложение <span>↓</span></button>}
+        {!pwa.installed && pwa.ios && !pwa.canInstall && <small>На iPhone: «Поделиться» → «На экран Домой».</small>}
       </div>
 
       <section className="world-library-section">
@@ -81,8 +91,8 @@ export function SettingsPanel({
       {storage && <div className="settings-release-notes storage-report"><span className="eyebrow">Последнее сохранение</span><strong>{storage.writtenRecords} записей изменено · {formatMs(storage.totalMs)}</strong><small>{storage.skippedRecords} неизменённых записей пропущено · удалено {storage.deletedRecords} · объём {formatBytes(storage.bytesEstimated)}{storage.snapshotCreated ? ' · создан снимок' : ''}</small></div>}
       <div className="settings-release-notes">
         <span className="eyebrow">Последнее обновление</span>
-        <strong>1.1.0 · Повседневная жизнь и настоящая экономика</strong>
-        <small>Несколько миров, инкрементальные сохранения, автоматические снимки, восстановление после сбоя и многоуровневая причинная история от древних эпох до настоящего.</small>
+        <strong>{APP_VERSION} · {APP_RELEASE_NAME}</strong>
+        <small>{APP_RELEASE_NOTES}</small>
       </div>
       <div className="settings-actions">
         <button className="ghost-button" onClick={onCheck}>Проверить обновление</button>

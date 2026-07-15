@@ -758,3 +758,8 @@ button { border: 0; cursor: pointer; }
   .history-overview-head small { display: block; margin-top: 6px; text-align: left; }
   .history-overview-eras, .landmark-event-grid { grid-template-columns: 1fr; }
 }
+
+.pwa-status-card .primary-button {
+  margin-top: 12px;
+  width: fit-content;
+}

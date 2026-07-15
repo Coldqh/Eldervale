@@ -43,7 +43,8 @@ function getWorker(): Worker | undefined {
     if (currentOperationId === event.data.id) currentOperationId = undefined;
     if (event.data.type === 'error') request.reject(new Error(event.data.error));
     else {
-      if (request.action === 'initialize' || request.action === 'generate') workerHasWorld = true;
+      if (request.action === 'initialize') workerHasWorld = true;
+      if (request.action === 'generate') workerHasWorld = false;
       if (event.data.world) lastKnownWorld = event.data.world;
       request.resolve({ world: event.data.world, profile: event.data.profile, cancelled: event.data.type === 'cancelled' });
     }
@@ -80,7 +81,8 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     const world = generateHistoricalWorld(command.config, (phase, completed, total, detail) => {
       const elapsedMs = performance.now() - startedAt;
       const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
-      onProgress?.({ operation, phase, completed, total, percent: completed / total * 100, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
+      const capped = Math.min(94, completed / Math.max(1, total) * 94);
+      onProgress?.({ operation, phase, completed: capped, total: 100, percent: capped, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
     });
     fallbackEngine = createSimulationEngine(world);
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };

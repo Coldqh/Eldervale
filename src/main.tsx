@@ -2,6 +2,7 @@ import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { APP_VERSION } from './version';
+import { initializePwaInstall } from './lib/pwaInstall';
 import './styles.css';
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Error }> {
@@ -33,15 +34,16 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
 const root = document.getElementById('root');
 if (!root) throw new Error('Корневой элемент приложения не найден');
 
+initializePwaInstall();
 createRoot(root).render(<StrictMode><AppErrorBoundary><App /></AppErrorBoundary></StrictMode>);
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  // controllerchange больше не перезагружает вкладку автоматически.
-  // Явное обновление проходит через forceUpdate() и repair.html,
-  // поэтому первая активация worker не может оборвать генерацию мира.
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { updateViaCache: 'none' }).then(registration => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { updateViaCache: 'none' }).then(async registration => {
       void registration.update();
+      const ready = await navigator.serviceWorker.ready;
+      ready.active?.postMessage({ type: 'ПОДГОТОВИТЬ_ОФЛАЙН' });
       window.setInterval(() => { void registration.update(); }, 5 * 60 * 1000);
     }).catch(error => console.warn('Service Worker не зарегистрирован', error));
   });
