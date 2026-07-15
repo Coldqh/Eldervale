@@ -18,7 +18,7 @@ const SNAPSHOT_LIMIT = 4;
 const TILE_CHUNK_SIZE = 256;
 
 const entityCollections = [
-  'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'monsters', 'animalPopulations',
+  'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'monsters', 'cemeteries', 'burials', 'animalPopulations',
   'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'items', 'productionRecipes', 'employments', 'shipments', 'events', 'localMapChanges',
 ] as const;
 

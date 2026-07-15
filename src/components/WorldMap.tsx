@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { EntityRef, Terrain, TradeRoute, WorldState } from '../types';
+import type { EntityRef, LocalMarker, TradeRoute, WorldState } from '../types';
 import type { AtlasMapState } from '../lib/historicalAtlas';
+import { paintGlobalTile, paintMarker as paintTextureMarker, terrainColor } from '../lib/texturePaint';
 
 export type MapLayer = 'terrain' | 'realms' | 'danger' | 'population' | 'ecology' | 'trade';
-const terrainColors: Record<Terrain, string> = {
-  ocean: '#172b32', coast: '#496b69', plains: '#75865f', forest: '#3d624a', hills: '#776f53', mountains: '#6f706b', marsh: '#46675d', desert: '#9a8259', tundra: '#89918b',
-};
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 
@@ -222,7 +220,7 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
       const tile = world.tiles[index];
       if (!tile) continue;
       const historicalOwner = historicalState?.tileKingdomIds[index];
-      let fill = terrainColors[tile.terrain];
+      let fill = terrainColor(tile.terrain);
       if (layer === 'realms' && tile.terrain !== 'ocean') fill = world.kingdoms.find(kingdom => kingdom.id === (historicalState ? historicalOwner : tile.kingdomId))?.color ?? fill;
       if (layer === 'danger' && tile.terrain !== 'ocean') {
         const monster = world.monsters.find(item => monsterVisible(item.id, item.alive, historicalState) && Math.hypot(item.x - tile.x, item.y - tile.y) <= item.territoryRadius);
@@ -240,8 +238,7 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
         const richness = Math.min(1, animals / 180 + resources / 220);
         fill = richness > .8 ? '#4f7f55' : richness > .45 ? '#526c4d' : richness > .15 ? '#475846' : '#303b35';
       }
-      ctx.fillStyle = fill;
-      ctx.fillRect(ox + tile.x * cell, oy + tile.y * cell, Math.ceil(cell + .35), Math.ceil(cell + .35));
+      paintGlobalTile(ctx, tile.terrain, ox + tile.x * cell, oy + tile.y * cell, cell, (tile.x + 1) * 73856093 ^ (tile.y + 1) * 19349663, layer === 'terrain' ? undefined : fill);
     }
   }
 
@@ -265,31 +262,33 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
     const y = oy + (settlement.y + .5) * cell;
     const population = historicalState?.settlementPopulations.get(settlement.id) ?? settlement.population;
     const radius = Math.max(2.5, Math.min(9, 2.2 + Math.sqrt(population) / 4.2 + Math.min(2, viewport.zoom * .18)));
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = historicalState && !historicalState.current ? '#e6d09a' : settlement.shortages.length ? '#ef9a66' : settlement.damaged > 55 ? '#d06a4d' : '#f0db9b';
-    ctx.fill();
-    ctx.strokeStyle = '#171b15';
-    ctx.stroke();
+    const marker: LocalMarker = { id: `settlement-${settlement.id}`, x: 0, y: 0, kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }] };
+    ctx.save();
+    ctx.translate(x - radius, y - radius);
+    paintTextureMarker(ctx, marker, 0, 0, radius * 2);
+    ctx.restore();
   }
   for (const dungeon of world.dungeons.filter(item => dungeonVisible(item.id, historicalState) && item.x >= startX - 1 && item.x <= endX + 1 && item.y >= startY - 1 && item.y <= endY + 1)) {
     const x = ox + (dungeon.x + .5) * cell;
     const y = oy + (dungeon.y + .5) * cell;
     const size = Math.min(7, Math.max(3.6, cell * .22));
-    ctx.fillStyle = dungeon.discovered ? '#d8c7a0' : 'rgba(216,199,160,.25)';
-    ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    ctx.save(); ctx.globalAlpha = dungeon.discovered ? 1 : .35;
+    paintTextureMarker(ctx, { id: `dungeon-${dungeon.id}`, x: 0, y: 0, kind: 'dungeon', label: dungeon.name, refs: [{ kind: 'dungeon', id: dungeon.id }] }, x - size, y - size, size * 2);
+    ctx.restore();
+  }
+  if (!historicalState || historicalState.current) {
+    for (const cemetery of world.cemeteries.filter(item => item.globalX >= startX - 1 && item.globalX <= endX + 1 && item.globalY >= startY - 1 && item.globalY <= endY + 1)) {
+      const x = ox + (cemetery.globalX + .5) * cell;
+      const y = oy + (cemetery.globalY + .5) * cell;
+      const size = Math.min(6, Math.max(2.8, cell * .16));
+      paintTextureMarker(ctx, { id: `cemetery-${cemetery.id}`, x: 0, y: 0, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: cemetery.burialIds.length }, x - size, y - size, size * 2);
+    }
   }
   for (const monster of world.monsters.filter(item => monsterVisible(item.id, item.alive, historicalState) && item.x >= startX - 2 && item.x <= endX + 2 && item.y >= startY - 2 && item.y <= endY + 2)) {
     const x = ox + (monster.x + .5) * cell;
     const y = oy + (monster.y + .5) * cell;
     const radius = Math.min(9, Math.max(4.5, cell * .25));
-    ctx.fillStyle = monster.species === 'dragon' ? '#ff8b5c' : '#c77981';
-    ctx.beginPath();
-    ctx.moveTo(x, y - radius);
-    ctx.lineTo(x + radius, y + radius * .88);
-    ctx.lineTo(x - radius, y + radius * .88);
-    ctx.closePath();
-    ctx.fill();
+    paintTextureMarker(ctx, { id: `monster-${monster.id}`, x: 0, y: 0, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], footprintWidth: Math.max(1, Math.min(3, monster.footprintWidth)), footprintHeight: Math.max(1, Math.min(3, monster.footprintHeight)) }, x - radius, y - radius, radius * 2 / Math.max(1, Math.min(3, monster.footprintWidth)));
     if (layer === 'danger') {
       ctx.strokeStyle = monster.species === 'dragon' ? 'rgba(255,139,92,.3)' : 'rgba(199,121,129,.22)';
       ctx.lineWidth = 1;
@@ -299,17 +298,11 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
     }
   }
   if (!historicalState || historicalState.current) {
-    for (const army of world.armies.filter(item => item.status === 'marching' && item.x >= startX - 1 && item.x <= endX + 1 && item.y >= startY - 1 && item.y <= endY + 1)) {
+    for (const army of world.armies.filter(item => (item.status === 'marching' || item.status === 'hunting') && item.x >= startX - 1 && item.x <= endX + 1 && item.y >= startY - 1 && item.y <= endY + 1)) {
       const x = ox + (army.x + .5) * cell;
       const y = oy + (army.y + .5) * cell;
       const radius = Math.min(9, Math.max(4, cell * .22));
-      ctx.strokeStyle = '#f4e7bd';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x - radius, y + radius);
-      ctx.lineTo(x, y - radius);
-      ctx.lineTo(x + radius, y + radius);
-      ctx.stroke();
+      paintTextureMarker(ctx, { id: `army-${army.id}`, x: 0, y: 0, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.strength }, x - radius, y - radius, radius * 2);
     }
   }
 }

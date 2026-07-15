@@ -4,6 +4,7 @@ import { ecologyIntegrityIssues } from './ecology';
 import { housingIntegrity } from './settlements';
 import { materialEconomyIntegrityIssues } from './materialEconomy';
 import { territoryIntegrityIssues } from './territory';
+import { worldTick } from './scheduler';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -15,7 +16,7 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   const territory = territoryIntegrityIssues(world);
   const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...territory.errors];
   const warnings: string[] = [...territory.warnings];
-  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0);
+  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0);
 
   for (const settlement of world.settlements) {
     const housing = housingIntegrity(settlement);
@@ -28,23 +29,62 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
 
   const settlementIds = new Set(world.settlements.map(item => item.id));
   const characterIds = new Set(world.characters.map(item => item.id));
+  const monsterIds = new Set(world.monsters.map(item => item.id));
+  const cemeteryIds = new Set((world.cemeteries ?? []).map(item => item.id));
+  const burialIds = new Set((world.burials ?? []).map(item => item.id));
   const ingredientIds = new Set(world.ingredients.map(item => item.id));
   const tileKeys = new Set(world.tiles.map(tile => `${tile.x}:${tile.y}`));
   for (const character of world.characters) {
+    if (!character.alive) errors.push(`${character.name}: мёртвая личность осталась в активной симуляции`);
     if (!settlementIds.has(character.settlementId)) errors.push(`${character.name}: не существует поселение проживания ${character.settlementId}`);
     if (!character.workplace) warnings.push(`${character.name}: не определено рабочее место`);
   }
-  for (const army of world.armies) if (!characterIds.has(army.commanderId)) errors.push(`${army.name}: не существует командир`);
+  for (const army of world.armies) {
+    if (!characterIds.has(army.commanderId) && army.strength > 0) errors.push(`${army.name}: нет живого командира`);
+    if (army.status === 'hunting' && (!army.targetMonsterId || !monsterIds.has(army.targetMonsterId))) errors.push(`${army.name}: охота не имеет живой цели`);
+    if (army.targetMonsterId && army.status !== 'hunting') warnings.push(`${army.name}: указана цель-чудовище без статуса охоты`);
+  }
   for (const artifact of world.artifacts) if (artifact.ownerId && !characterIds.has(artifact.ownerId)) errors.push(`${artifact.name}: не существует владелец`);
   for (const recipe of world.alchemyRecipes) {
     if (recipe.ingredientIds.some(id => !ingredientIds.has(id))) errors.push(`${recipe.name}: отсутствует ингредиент`);
   }
   for (const monster of world.monsters) {
+    if (!monster.alive) errors.push(`${monster.name}: мёртвое существо осталось в активной симуляции`);
     if ((monster.footprintWidth ?? 0) < 1 || (monster.footprintHeight ?? 0) < 1) errors.push(`${monster.name}: неверный физический размер`);
     if ((monster.footprintWidth ?? 1) > 16 || (monster.footprintHeight ?? 1) > 16) warnings.push(`${monster.name}: занимает слишком много локальных клеток`);
   }
   for (const population of world.animalPopulations) {
     if (population.count > population.carryingCapacity * 1.8) warnings.push(`${population.species} ${population.x}:${population.y}: сильное перенаселение`);
+  }
+
+
+  const burialSubjectKeys = new Set<string>();
+  for (const burial of world.burials ?? []) {
+    if (burial.subjectKind !== 'anonymous' && burial.subjectId !== undefined) {
+      const key = `${burial.subjectKind}:${burial.subjectId}`;
+      if (burialSubjectKeys.has(key)) errors.push(`Кладбищенский архив: повтор записи ${key}`);
+      burialSubjectKeys.add(key);
+      if (burial.subjectKind === 'character' && characterIds.has(burial.subjectId)) errors.push(`${burial.name}: одновременно находится среди живых и умерших`);
+      if (burial.subjectKind === 'monster' && monsterIds.has(burial.subjectId)) errors.push(`${burial.name}: одновременно находится среди живых существ и останков`);
+    }
+    if (burial.cemeteryId && !cemeteryIds.has(burial.cemeteryId)) errors.push(`${burial.name}: не существует кладбище ${burial.cemeteryId}`);
+    if (burial.state === 'corpse' && burial.cemeteryId) warnings.push(`${burial.name}: тело уже привязано к кладбищу, но не погребено`);
+    if (burial.count < 1) errors.push(`${burial.name}: неверное число погибших`);
+  }
+  for (const cemetery of world.cemeteries ?? []) {
+    if (cemetery.settlementId && !settlementIds.has(cemetery.settlementId)) errors.push(`${cemetery.name}: не существует поселение`);
+    const unique = new Set(cemetery.burialIds);
+    if (unique.size !== cemetery.burialIds.length) errors.push(`${cemetery.name}: повторяющиеся могилы`);
+    for (const id of unique) {
+      const burial = world.burials.find(item => item.id === id);
+      if (!burial) errors.push(`${cemetery.name}: отсутствует запись погребения ${id}`);
+      else if (burial.cemeteryId !== cemetery.id) errors.push(`${cemetery.name}: запись ${id} ссылается на другое кладбище`);
+    }
+  }
+  const tick = worldTick(world);
+  for (const effect of world.localMapChanges) {
+    if (effect.burialId && !burialIds.has(effect.burialId)) errors.push(`Местность ${effect.id}: отсутствует запись останков ${effect.burialId}`);
+    if (effect.kind === 'body' && effect.expiresTick !== undefined && effect.expiresTick <= tick) errors.push(`Местность ${effect.id}: просроченный труп не удалён`);
   }
 
   const scheduledIds = new Set<string>();

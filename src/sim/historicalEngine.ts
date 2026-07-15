@@ -9,6 +9,7 @@ import { personName, placeName } from './names';
 import { RNG } from './rng';
 import { generatePhysicalEconomy } from './materialEconomy';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
+import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -72,8 +73,11 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   onProgress?.('Связывание книг, артефактов и руин', 89, 100, 'Источники получают реальные события и владельцев');
   linkKnowledgeAndArtifacts(world, rng);
   generatePhysicalEconomy(world, new RNG(`${config.seed}:повседневная-жизнь-v1`), (phase, percent, detail) => {
-    onProgress?.(phase, 90 + Math.round(percent * .08), 100, detail);
+    onProgress?.(phase, 90 + Math.round(percent * .07), 100, detail);
   });
+  onProgress?.('Кладбища и архив павших', 98, 100, 'переносим умерших и убитых существ из активной симуляции');
+  ensureCemeteries(world, rng);
+  compactDeadEntities(world, rng);
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
   const landmarkEventIds = [...world.events]
     .sort((a, b) => b.importance - a.importance || b.year - a.year || b.id - a.id)
@@ -92,10 +96,10 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   };
   world.nextIds.event = Math.max(0, ...world.events.map(event => event.id)) + 1;
   world.nextIds.war = Math.max(0, ...world.wars.map(war => war.id)) + 1;
-  world.nextIds.character = Math.max(0, ...world.characters.map(character => character.id)) + 1;
+  synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 8;
+  world.version = 9;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

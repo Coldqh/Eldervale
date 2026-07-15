@@ -1,15 +1,15 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'cemetery' | 'burial';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 
 export type ItemCategory = 'еда' | 'напиток' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'оружие' | 'мебель' | 'лекарство' | 'предмет быта';
-export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'public';
+export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'public';
 export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'рынок' | 'лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
 export type HouseholdStatus = 'нищие' | 'бедные' | 'обычные' | 'зажиточные' | 'богатые' | 'знатные' | 'служебное общежитие';
 export type RecipeCategory = 'добыча' | 'переработка' | 'готовка' | 'ремесло';
@@ -481,7 +481,8 @@ export interface Army {
   supplies: number;
   targetKingdomId?: number;
   targetSettlementId?: number;
-  status: 'garrison' | 'marching' | 'raiding' | 'battle' | 'recovering';
+  targetMonsterId?: number;
+  status: 'garrison' | 'marching' | 'hunting' | 'raiding' | 'battle' | 'recovering';
   campaignHistory: string[];
 }
 
@@ -507,6 +508,60 @@ export interface Monster {
   history: string[];
   footprintWidth: number;
   footprintHeight: number;
+}
+
+
+export type BurialState = 'corpse' | 'buried' | 'cremated' | 'decayed' | 'trophy' | 'mass-grave';
+
+export interface Cemetery {
+  id: number;
+  name: string;
+  settlementId?: number;
+  globalX: number;
+  globalY: number;
+  localX: number;
+  localY: number;
+  foundedYear: number;
+  capacity: number;
+  burialIds: number[];
+  caretakerCharacterId?: number;
+  history: string[];
+}
+
+export interface BurialRecord {
+  id: number;
+  subjectKind: 'character' | 'monster' | 'anonymous';
+  subjectId?: number;
+  name: string;
+  species: string;
+  count: number;
+  birthYear?: number;
+  deathYear: number;
+  deathMonth: number;
+  cause: string;
+  killerName?: string;
+  settlementId?: number;
+  kingdomId?: number;
+  cemeteryId?: number;
+  globalX: number;
+  globalY: number;
+  localX: number;
+  localY: number;
+  state: BurialState;
+  buriedYear?: number;
+  buriedMonth?: number;
+  profession?: string;
+  titles: string[];
+  renown: number;
+  parentIds: number[];
+  childIds: number[];
+  spouseId?: number;
+  tier?: Monster['tier'];
+  power?: number;
+  footprintWidth?: number;
+  footprintHeight?: number;
+  summary: string;
+  history: string[];
 }
 
 export interface AnimalPopulation {
@@ -696,6 +751,9 @@ export interface LocalMapEffect {
   localY: number;
   kind: LocalEffectKind;
   year: number;
+  month?: number;
+  expiresTick?: number;
+  burialId?: number;
   label: string;
   entityRef?: EntityRef;
 }
@@ -713,7 +771,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment';
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'cemetery' | 'grave' | 'item' | 'corpse';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -745,7 +803,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 8;
+  version: 9;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -760,6 +818,8 @@ export interface WorldState {
   dynasties: Dynasty[];
   armies: Army[];
   monsters: Monster[];
+  cemeteries: Cemetery[];
+  burials: BurialRecord[];
   animalPopulations: AnimalPopulation[];
   ingredients: NaturalIngredient[];
   alchemyRecipes: AlchemyRecipe[];

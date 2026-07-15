@@ -1,4 +1,4 @@
-import type { Character, EntityRef, Kingdom, Relationship, Settlement, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
+import type { Character, EntityRef, Kingdom, Monster, Relationship, Settlement, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
 import { RNG } from './rng';
 import { personName, placeName } from './names';
 import { appendCausalEvent } from './causality';
@@ -8,10 +8,11 @@ import { expandHousing } from './settlements';
 import type { WorldIndexes } from './indexes';
 import {
   addResidentToIndexes, buildWorldIndexes, changeProfessionInIndexes, indexRelationship,
-  moveResidentInIndexes, relationshipKey, removeResidentFromIndexes, residents, workers,
+  moveResidentInIndexes, relationshipKey, residents, workers,
 } from './indexes';
-import { prepareMonthSchedule } from './scheduler';
+import { prepareMonthSchedule, worldTick } from './scheduler';
 import { advanceModernTerritories, captureTerritoryAroundSettlement } from './territory';
+import { advanceBurials, archiveAnonymousCasualties, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   return appendCausalEvent(world, data);
@@ -26,20 +27,23 @@ function workplaceFor(profession: string): string {
 
 function addLocalEffect(world: WorldState, globalX: number, globalY: number, kind: WorldState['localMapChanges'][number]['kind'], label: string, rng: RNG, entityRef?: EntityRef, level = 0): void {
   world.localMapChanges ??= [];
+  const ttl = kind === 'blood' ? 4 : kind === 'burn' ? 18 : kind === 'looted' ? 36 : kind === 'rubble' ? 120 : kind === 'body' ? 8 : undefined;
   const effect = {
     id: `${world.year}-${world.month}-${world.localMapChanges.length + 1}-${rng.int(1000, 9999)}`,
-    globalX, globalY, level, localX: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), localY: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), kind, year: world.year, label, entityRef,
+    globalX, globalY, level, localX: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), localY: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), kind, year: world.year, month: world.month,
+    expiresTick: ttl ? worldTick(world) + ttl : undefined, label, entityRef,
   };
   world.localMapChanges.push(effect);
   if (world.localMapChanges.length > 6000) world.localMapChanges.splice(0, world.localMapChanges.length - 6000);
 }
 
-function addBattlefieldEffects(world: WorldState, x: number, y: number, losses: number, rng: RNG, armyId: number): void {
-  const count = Math.min(28, Math.max(5, Math.round(losses / 4)));
+function addBattlefieldEffects(world: WorldState, x: number, y: number, losses: number, rng: RNG, armyId: number, settlementId?: number): void {
+  const count = Math.min(24, Math.max(4, Math.round(losses / 5)));
   for (let index = 0; index < count; index += 1) {
-    const kind = index % 5 === 0 ? 'body' : index % 3 === 0 ? 'blood' : 'rubble';
-    addLocalEffect(world, x, y, kind, kind === 'body' ? 'Тело погибшего воина' : kind === 'blood' ? 'Следы сражения' : 'Разрушения после боя', rng, { kind: 'army', id: armyId });
+    const kind = index % 3 === 0 ? 'blood' : 'rubble';
+    addLocalEffect(world, x, y, kind, kind === 'blood' ? 'Следы сражения' : 'Разрушения после боя', rng, { kind: 'army', id: armyId });
   }
+  archiveAnonymousCasualties(world, losses, x, y, 'погибли в сражении армий', rng, settlementId);
 }
 
 function nearestSettlement(world: WorldState, x: number, y: number, filter?: (settlement: Settlement) => boolean): Settlement | undefined {
@@ -155,8 +159,8 @@ function addRelationship(world: WorldState, indexes: WorldIndexes, a: Character,
 }
 
 function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+  const deaths: { character: Character; cause: string; settlement?: Settlement }[] = [];
   for (const character of world.characters) {
-    if (!character.alive) continue;
     character.age = Math.max(0, world.year - character.birthYear);
     if (character.profession === 'child' && character.age >= 14) {
       const profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']);
@@ -167,16 +171,19 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
     const hungerRisk = settlement?.shortages.includes('пища') ? .035 : 0;
     const mortality = character.age < 45 ? .002 : character.age < 65 ? .01 : character.age < 85 ? .055 : .16;
     if (rng.chance(mortality + hungerRisk + (100 - character.health) / 1500)) {
-      removeResidentFromIndexes(indexes, character);
-      character.alive = false;
-      character.deathYear = world.year;
-      character.biography.push(`Умер в ${world.year} году.`);
-      addEvent(world, {
-        kind: 'death', title: `Умер ${character.name}`, description: `${character.name} умер в возрасте ${character.age} лет.`,
-        cause: hungerRisk ? 'болезнь и нехватка пищи' : 'возраст, болезнь или старая травма', consequences: character.childIds.length ? ['имущество и обязательства переходят детям'] : ['освободилось место в общине'],
-        entityRefs: [{ kind: 'character', id: character.id }, ...(settlement ? [{ kind: 'settlement' as const, id: settlement.id }] : [])], importance: character.renown > 55 ? 3 : 1,
-      });
+      deaths.push({ character, cause: hungerRisk ? 'болезнь и нехватка пищи' : 'возраст, болезнь или старая травма', settlement });
     }
+  }
+  if (deaths.length) {
+    archiveCharactersBatch(world, indexes, deaths.map(({ character, cause, settlement }) => ({
+      character,
+      context: { cause, settlementId: settlement?.id, globalX: settlement?.x, globalY: settlement?.y },
+    })), rng);
+    for (const { character, cause, settlement } of deaths) addEvent(world, {
+      kind: 'death', title: `Умер ${character.name}`, description: `${character.name} умер в возрасте ${character.age} лет.`,
+      cause, consequences: character.childIds.length ? ['имущество и обязательства переходят детям', 'тело будет перенесено на кладбище'] : ['освободилось место в общине', 'тело будет перенесено на кладбище'],
+      entityRefs: [{ kind: 'character', id: character.id }, ...(settlement ? [{ kind: 'settlement' as const, id: settlement.id }] : [])], importance: character.renown > 55 ? 3 : 1,
+    });
   }
 
   for (const settlement of world.settlements) {
@@ -265,7 +272,9 @@ function startWars(world: WorldState, rng: RNG): void {
   defender.enemies.push(attacker.id);
   attacker.claims.push(target.id);
   setDiplomacy(world, attacker.id, defender.id, -100, 'война', cause);
-  const army = world.armies.find(item => item.kingdomId === attacker.id)!;
+  const army = world.armies.find(item => item.kingdomId === attacker.id && !item.targetMonsterId && (item.status === 'garrison' || item.status === 'recovering'));
+  if (!army) return;
+  army.targetMonsterId = undefined;
   army.targetKingdomId = defender.id;
   army.targetSettlementId = target.id;
   army.status = 'marching';
@@ -280,17 +289,65 @@ function startWars(world: WorldState, rng: RNG): void {
 function moveArmies(world: WorldState, rng: RNG, indexes: WorldIndexes, dueArmyIds: ReadonlySet<number>): void {
   for (const armyId of dueArmyIds) {
     const army = world.armies.find(item => item.id === armyId);
-    if (!army || army.status !== 'marching') continue;
-    const target = army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined;
-    if (!target) { army.status = 'recovering'; continue; }
+    if (!army || (army.status !== 'marching' && army.status !== 'hunting')) continue;
     army.supplies = Math.max(0, army.supplies - rng.int(2, 6));
     if (army.supplies <= 0) {
-      army.strength = Math.max(0, army.strength - rng.int(3, 12));
+      const losses = rng.int(3, 12);
+      army.strength = Math.max(0, army.strength - losses);
       army.morale = Math.max(10, army.morale - 6);
+      archiveAnonymousCasualties(world, losses, army.x, army.y, 'умерли от голода и болезней в походе', rng);
     }
+
+    if (army.status === 'hunting') {
+      const monster = army.targetMonsterId ? world.monsters.find(item => item.id === army.targetMonsterId) : undefined;
+      if (!monster) { army.status = 'recovering'; army.targetMonsterId = undefined; continue; }
+      army.x += Math.sign(monster.x - army.x);
+      army.y += Math.sign(monster.y - army.y);
+      if (Math.hypot(monster.x - army.x, monster.y - army.y) <= 1) resolveMonsterBattle(world, army, monster, rng);
+      continue;
+    }
+
+    const target = army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined;
+    if (!target) { army.status = 'recovering'; continue; }
     army.x += Math.sign(target.x - army.x);
     army.y += Math.sign(target.y - army.y);
     if (army.x === target.x && army.y === target.y) resolveBattle(world, army.id, target.id, rng, indexes);
+  }
+}
+
+function resolveMonsterBattle(world: WorldState, army: WorldState['armies'][number], monster: Monster, rng: RNG): void {
+  const armyPower = army.strength * (.55 + army.morale / 120) * (.55 + army.supplies / 160) * rng.int(75, 125) / 100;
+  const monsterPower = (monster.power * 2.2 + monster.health * .9 + monster.footprintWidth * monster.footprintHeight * 4) * rng.int(78, 126) / 100;
+  const armyLosses = Math.min(army.strength, Math.max(3, Math.round(monsterPower / 20)));
+  const monsterDamage = Math.max(4, Math.round(armyPower / 14));
+  army.strength = Math.max(0, army.strength - armyLosses);
+  army.morale = Math.max(8, army.morale - Math.max(2, Math.round(armyLosses / 12)));
+  monster.health = Math.max(0, monster.health - monsterDamage);
+  monster.kills += armyLosses;
+  archiveAnonymousCasualties(world, armyLosses, monster.x, monster.y, `погибли в бою с ${monster.name}`, rng);
+  addBattlefieldEffects(world, monster.x, monster.y, armyLosses, rng, army.id);
+  army.campaignHistory.push(`В ${world.year} году сразилось с ${monster.name}: потери ${armyLosses}, чудовище потеряло ${monsterDamage} здоровья.`);
+
+  if (monster.health <= 0 || armyPower > monsterPower * 1.12) {
+    const name = monster.name;
+    const monsterId = monster.id;
+    archiveMonster(world, monster, { cause: `убито армией ${army.name}`, killerName: army.name, globalX: monster.x, globalY: monster.y }, rng);
+    army.targetMonsterId = undefined;
+    army.status = 'recovering';
+    army.morale = Math.min(100, army.morale + 12);
+    addEvent(world, {
+      kind: 'monster', title: `${army.name} уничтожило ${name}`, description: `Армия добралась до логова и убила чудовище ценой ${armyLosses} воинов.`,
+      cause: 'приказ правителя после нападений на жителей и дороги', conditions: ['угроза была подтверждена', 'армия имела снабжение и могла дойти до цели'],
+      decision: 'командир вступил в бой', outcome: 'чудовище погибло', consequences: ['угроза исчезла', 'павших перенесут на кладбища', 'армия возвращается на восстановление'],
+      entityRefs: [{ kind: 'army', id: army.id }, { kind: 'monster', id: monsterId }, { kind: 'kingdom', id: army.kingdomId }], importance: 5,
+    });
+  } else if (army.strength <= Math.max(8, Math.round(monster.power / 2)) || army.morale < 22) {
+    army.status = 'recovering';
+    addEvent(world, {
+      kind: 'monster', title: `${army.name} отступило от ${monster.name}`, description: `Чудовище пережило бой. Армия потеряла ${armyLosses} воинов.`,
+      cause: 'силы чудовища превысили возможности отряда', consequences: ['угроза сохранилась', 'армия вернулась за пополнением'],
+      entityRefs: [{ kind: 'army', id: army.id }, { kind: 'monster', id: monster.id }], importance: 4,
+    });
   }
 }
 
@@ -343,7 +400,7 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
       entityRefs: [{ kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'war', id: war.id }], importance: 4,
     });
   }
-  addBattlefieldEffects(world, target.x, target.y, attackLoss + defenseLoss, rng, army.id);
+  addBattlefieldEffects(world, target.x, target.y, attackLoss + defenseLoss, rng, army.id, target.id);
   army.status = 'recovering';
   army.targetSettlementId = undefined;
   army.targetKingdomId = undefined;
@@ -364,7 +421,7 @@ function endWar(world: WorldState, war: War, victorId: number): void {
   attacker.enemies = attacker.enemies.filter(id => id !== defender.id);
   defender.enemies = defender.enemies.filter(id => id !== attacker.id);
   setDiplomacy(world, attacker.id, defender.id, -32, 'напряжение', 'свежая память о войне');
-  world.armies.filter(army => army.kingdomId === attacker.id || army.kingdomId === defender.id).forEach(army => { army.status = 'recovering'; army.targetSettlementId = undefined; });
+  world.armies.filter(army => army.kingdomId === attacker.id || army.kingdomId === defender.id).forEach(army => { army.status = 'recovering'; army.targetSettlementId = undefined; army.targetMonsterId = undefined; });
   addEvent(world, {
     kind: 'war', title: `Завершилась ${war.name}`, description: war.peaceTerms, cause: 'потери, истощение запасов и исход сражений',
     consequences: ['армии возвращаются домой', 'границы закреплены мирным договором', 'между государствами осталось напряжение'],
@@ -375,14 +432,31 @@ function endWar(world: WorldState, war: War, victorId: number): void {
 function recoverArmies(world: WorldState): void {
   for (const army of world.armies) {
     if (army.status !== 'recovering' && army.status !== 'garrison') continue;
-    const kingdom = world.kingdoms.find(item => item.id === army.kingdomId)!;
-    const capital = world.settlements.find(item => item.id === kingdom.capitalId)!;
+    const kingdom = world.kingdoms.find(item => item.id === army.kingdomId);
+    const capital = kingdom ? world.settlements.find(item => item.id === kingdom.capitalId) : undefined;
+    if (!kingdom || !capital) continue;
     army.x = capital.x;
     army.y = capital.y;
     const recruitment = Math.max(1, Math.round(capital.population / 180));
     army.strength = Math.min(kingdom.armyStrength, army.strength + recruitment);
     army.morale = Math.min(92, army.morale + 2);
     army.supplies = Math.min(100, army.supplies + 8);
+
+    if (army.targetMonsterId) {
+      const target = world.monsters.find(item => item.id === army.targetMonsterId);
+      if (!target) {
+        army.targetMonsterId = undefined;
+        army.status = 'garrison';
+        continue;
+      }
+      const requiredStrength = Math.max(18, Math.round(target.power * .48));
+      if (army.strength >= requiredStrength && army.supplies > 55 && army.morale > 40) {
+        army.status = 'hunting';
+        army.campaignHistory.push(`В ${world.year} году после пополнения продолжило охоту на ${target.name}.`);
+      } else army.status = 'recovering';
+      continue;
+    }
+
     if (army.strength > kingdom.armyStrength * .65 && army.supplies > 55) army.status = 'garrison';
   }
 }
@@ -429,13 +503,17 @@ function monsterActions(world: WorldState, rng: RNG, indexes: WorldIndexes, dueM
     monster.hunger = Math.max(0, monster.hunger - rng.int(25, 65));
     monster.kills += deaths;
     const victims = [...residents(indexes, target.id)].sort(() => rng.next() - .5).slice(0, deaths);
-    victims.forEach(victim => {
-      removeResidentFromIndexes(indexes, victim);
-      victim.alive = false;
-      victim.deathYear = world.year;
-      victim.biography.push(`Погиб во время нападения ${monster.name} на ${target.name}.`);
-      addLocalEffect(world, target.x, target.y, 'body', `Тело ${victim.name}`, rng, { kind: 'character', id: victim.id });
-    });
+    for (const victim of victims) victim.biography.push(`Погиб во время нападения ${monster.name} на ${target.name}.`);
+    archiveCharactersBatch(world, indexes, victims.map(victim => ({
+      character: victim,
+      context: {
+        cause: `погиб во время нападения ${monster.name} на ${target.name}`,
+        killerName: monster.name,
+        settlementId: target.id,
+        globalX: target.x,
+        globalY: target.y,
+      },
+    })), rng);
     for (let index = 0; index < Math.min(18, Math.max(4, Math.round(damage / 2))); index += 1) {
       addLocalEffect(world, target.x, target.y, isDragon && index % 2 === 0 ? 'burn' : index % 4 === 0 ? 'blood' : index % 3 === 0 ? 'rubble' : 'looted', isDragon ? 'След огня дракона' : 'Разграбленный участок', rng, { kind: 'monster', id: monster.id });
     }
@@ -446,16 +524,22 @@ function monsterActions(world: WorldState, rng: RNG, indexes: WorldIndexes, dueM
     addEvent(world, {
       kind: isDragon ? 'dragon' : 'monster', title: `${monster.name} напал на ${target.name}`,
       description: isDragon ? `Огонь уничтожил дома и амбары. Погибли ${deaths} жителей.` : `Существо разграбило окраины. Погибли ${deaths} жителей.`,
-      cause: `${monster.behavior}; голод достиг ${monster.hunger}%`, consequences: ['потеря припасов', 'гибель жителей', 'правитель может отправить героя', 'опасность торговых путей выросла'],
+      cause: `${monster.behavior}; голод вынудил существо выйти к поселению`,
+      consequences: ['потеря припасов', 'гибель жителей', 'правитель отправляет героя или армию', 'опасность торговых путей выросла'],
       entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: target.id }, { kind: 'kingdom', id: target.kingdomId }], importance: isDragon ? 5 : monster.tier === 'boss' ? 4 : 3,
     });
-    if (isDragon || monster.tier === 'boss' || monster.tier === 'miniboss') dispatchHero(world, monster.id, target.kingdomId, rng, indexes);
+    const majorThreat = isDragon || monster.tier === 'boss' || monster.tier === 'miniboss' || monster.kills >= 5 || deaths >= 4;
+    if (majorThreat) {
+      dispatchHero(world, monster.id, target.kingdomId, rng, indexes);
+      if (world.monsters.some(item => item.id === monster.id)) dispatchArmyAgainstMonster(world, monster.id, target.kingdomId);
+    }
   }
 }
 
 function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, rng: RNG, indexes: WorldIndexes): void {
-  const monster = world.monsters.find(item => item.id === monsterId)!;
-  const kingdom = world.kingdoms.find(item => item.id === kingdomId)!;
+  const monster = world.monsters.find(item => item.id === monsterId);
+  const kingdom = world.kingdoms.find(item => item.id === kingdomId);
+  if (!monster || !kingdom) return;
   const heroes = world.characters.filter(character => character.alive && character.kingdomId === kingdomId && character.age >= 18 && (character.profession === 'soldier' || character.profession === 'hunter' || character.renown >= 35));
   if (!heroes.length) return;
   const hero = [...heroes].sort((a, b) => b.renown - a.renown)[0]!;
@@ -467,34 +551,38 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
   const heroPower = 30 + hero.renown + hero.health * .35 + hero.artifactIds.length * 18 + rng.int(0, 55);
   const monsterPower = monster.power + monster.health * .08 + rng.int(0, 55);
   if (heroPower > monsterPower) {
-    monster.alive = false;
+    const monsterName = monster.name;
+    const lair = world.dungeons.find(dungeon => dungeon.id === monster.lairDungeonId);
     hero.renown = Math.min(100, hero.renown + (monster.species === 'dragon' ? 35 : 18));
     hero.kills += 1;
     hero.wealth += monster.hoard;
     hero.titles.push(monster.species === 'dragon' ? 'Драконоборец' : 'Убийца чудовищ');
-    hero.biography.push(`Убил ${monster.name} в ${world.year} году.`);
+    hero.biography.push(`Убил ${monsterName} в ${world.year} году.`);
     monster.history.push(`Убит героем ${hero.name}.`);
-    addLocalEffect(world, monster.x, monster.y, 'body', `Останки ${monster.name}`, rng, { kind: 'monster', id: monster.id });
+    archiveMonster(world, monster, { cause: `убито героем ${hero.name}`, killerName: hero.name, globalX: monster.x, globalY: monster.y }, rng);
     addLocalEffect(world, monster.x, monster.y, 'blood', `Место победы ${hero.name}`, rng, { kind: 'character', id: hero.id });
-    const lair = world.dungeons.find(dungeon => dungeon.id === monster.lairDungeonId);
     if (lair) lair.history.push(`В ${world.year} году ${hero.name} убил хозяина логова.`);
     addEvent(world, {
-      kind: 'hero', title: `${hero.name} убил ${monster.name}`, description: `Герой вернулся с сокровищами и доказательствами победы.`, cause: 'королевский приказ и личная охота',
-      consequences: ['опасность исчезла', 'герой получил богатство и славу', 'логово осталось без хозяина'],
-      entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monster.id }, ...(lair ? [{ kind: 'dungeon' as const, id: lair.id }] : [])], importance: 5,
+      kind: 'hero', title: `${hero.name} убил ${monsterName}`, description: `Герой вернулся с сокровищами и доказательствами победы.`, cause: 'королевский приказ и личная охота',
+      consequences: ['опасность исчезла', 'герой получил богатство и славу', 'останки занесены в кладбищенский архив'],
+      entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monsterId }, ...(lair ? [{ kind: 'dungeon' as const, id: lair.id }] : [])], importance: 5,
     });
   } else if (rng.chance(.58)) {
-    removeResidentFromIndexes(indexes, hero);
-    hero.alive = false;
-    hero.deathYear = world.year;
+    const heroName = hero.name;
+    const heroId = hero.id;
     hero.biography.push(`Погиб во время охоты на ${monster.name}.`);
     monster.kills += 1;
-    addLocalEffect(world, monster.x, monster.y, 'body', `Тело ${hero.name}`, rng, { kind: 'character', id: hero.id });
-    if (hero.artifactIds.length) addLocalEffect(world, monster.x, monster.y, 'lost-item', `Утерянное снаряжение ${hero.name}`, rng, { kind: 'artifact', id: hero.artifactIds[0]! });
+    archiveCharacter(world, indexes, hero, {
+      cause: `погиб во время охоты на ${monster.name}`,
+      killerName: monster.name,
+      globalX: monster.x,
+      globalY: monster.y,
+    }, rng);
+    if (hero.artifactIds.length) addLocalEffect(world, monster.x, monster.y, 'lost-item', `Утерянное снаряжение ${heroName}`, rng, { kind: 'artifact', id: hero.artifactIds[0]! });
     addEvent(world, {
-      kind: 'hero', title: `${hero.name} погиб на охоте за ${monster.name}`, description: `Выжившие вернулись с разными рассказами о последнем бое.`, cause: 'чудовище оказалось сильнее экспедиции',
-      consequences: ['угроза сохранилась', 'оружие героя могло остаться в логове', 'семья потеряла родственника'],
-      entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monster.id }], importance: 4,
+      kind: 'hero', title: `${heroName} погиб на охоте за ${monster.name}`, description: `Выжившие вернулись с разными рассказами о последнем бое.`, cause: 'чудовище оказалось сильнее экспедиции',
+      consequences: ['угроза сохранилась', 'оружие героя могло остаться в логове', 'тело будет найдено или истлеет в дикой местности'],
+      entityRefs: [{ kind: 'character', id: heroId }, { kind: 'monster', id: monster.id }], importance: 4,
     });
   } else {
     const injury = rng.pick(['сломанная рука', 'обожжённое лицо', 'повреждённое колено', 'глубокая рана груди']);
@@ -503,17 +591,38 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
     hero.biography.push(`Был ранен во время охоты на ${monster.name}: ${injury}.`);
     addEvent(world, {
       kind: 'hero', title: `${hero.name} вернулся раненым`, description: `${monster.name} пережил охоту и остался угрозой.`, cause: 'неудачный бой с чудовищем',
-      consequences: ['герой получил постоянную травму', 'угроза сохранилась'], entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monster.id }], importance: 3,
+      consequences: ['герой получил постоянную травму', 'угроза сохранилась', 'правитель может направить армию'], entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monster.id }], importance: 3,
     });
   }
+}
+
+function dispatchArmyAgainstMonster(world: WorldState, monsterId: number, kingdomId: number): void {
+  const monster = world.monsters.find(item => item.id === monsterId);
+  const kingdom = world.kingdoms.find(item => item.id === kingdomId);
+  const army = world.armies.find(item => item.kingdomId === kingdomId && !item.targetMonsterId && (item.status === 'garrison' || item.status === 'recovering'));
+  if (!monster || !kingdom || !army || army.targetMonsterId === monsterId) return;
+  if (army.strength < Math.max(20, Math.round(monster.power * .55))) return;
+  army.targetMonsterId = monster.id;
+  army.targetSettlementId = undefined;
+  army.targetKingdomId = undefined;
+  army.status = 'hunting';
+  army.campaignHistory.push(`В ${world.year} году получило приказ уничтожить ${monster.name}.`);
+  addEvent(world, {
+    kind: 'monster', title: `${army.name} отправлено против ${monster.name}`, description: `${ruler(world, kingdom)?.name ?? 'Правитель'} направил войско к месту последнего появления чудовища.`,
+    cause: 'герой не смог устранить угрозу или угроза слишком велика для одного отряда', conditions: ['местонахождение чудовища известно', 'армия имеет достаточно людей и припасов'],
+    decision: 'правитель приказал армии начать охоту', outcome: 'армия вышла к цели', consequences: ['гарнизон столицы ослаблен', 'началась военная экспедиция против чудовища'],
+    entityRefs: [{ kind: 'army', id: army.id }, { kind: 'monster', id: monster.id }, { kind: 'kingdom', id: kingdom.id }], importance: 4,
+  });
 }
 
 function succession(world: WorldState, rng: RNG): void {
   for (const kingdom of world.kingdoms) {
     const current = world.characters.find(character => character.id === kingdom.rulerId);
     if (current?.alive) continue;
+    const archivedCurrent = burialForSubject(world, 'character', kingdom.rulerId);
     const dynasty = world.dynasties.find(item => item.id === kingdom.dynastyId);
-    const heirs = current?.childIds.map(id => world.characters.find(character => character.id === id)).filter((character): character is Character => Boolean(character?.alive && character.age >= 16)) ?? [];
+    const heirIds = current?.childIds ?? archivedCurrent?.childIds ?? [];
+    const heirs = heirIds.map(id => world.characters.find(character => character.id === id)).filter((character): character is Character => Boolean(character?.alive && character.age >= 16));
     const dynasticCandidates = dynasty?.memberIds.map(id => world.characters.find(character => character.id === id)).filter((character): character is Character => Boolean(character?.alive && character.age >= 16)) ?? [];
     const nobles = world.characters.filter(character => character.alive && character.kingdomId === kingdom.id && character.age >= 18).sort((a, b) => b.renown - a.renown);
     const successor = heirs[0] ?? dynasticCandidates[0] ?? nobles[0];
@@ -537,7 +646,7 @@ function succession(world: WorldState, rng: RNG): void {
     addEvent(world, {
       kind: 'politics', title: `${successor.name} занял престол государства ${kingdom.name}`,
       description: dynastic ? 'Власть перешла члену правящего дома.' : 'Явного наследника не было, и сильнейшая придворная группа возвела нового правителя.',
-      cause: `смерть прежнего правителя ${current?.name ?? ''}`.trim(), consequences: dynastic ? ['династия сохранила власть'] : ['правящий дом сменился', 'стабильность государства упала', 'старые претенденты могут поднять мятеж'],
+      cause: `смерть прежнего правителя ${current?.name ?? archivedCurrent?.name ?? ''}`.trim(), consequences: dynastic ? ['династия сохранила власть'] : ['правящий дом сменился', 'стабильность государства упала', 'старые претенденты могут поднять мятеж'],
       entityRefs: [{ kind: 'character', id: successor.id }, { kind: 'kingdom', id: kingdom.id }, ...(successor.dynastyId ? [{ kind: 'dynasty' as const, id: successor.dynastyId }] : [])], importance: 5,
     });
   }
@@ -705,6 +814,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   moveArmies(world, rng, indexes, schedule.dueArmyIds);
   recoverArmies(world);
   monsterActions(world, rng, indexes, schedule.dueMonsterIds);
+  onPhase?.('Кладбища, погребения и исчезновение следов');
+  advanceBurials(world, rng);
   succession(world, rng);
 
   if (schedule.runBooks) writeBooks(world, rng);

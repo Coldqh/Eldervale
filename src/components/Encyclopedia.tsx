@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react';
 import type { EntityKind, EntityRef, WorldState } from '../types';
 import { armyStatusLabel, buildingTypeLabel, materialLabel, monsterSpeciesLabel, monsterTierLabel, professionLabel, settlementTypeLabel, speciesLabel } from '../i18n';
 import { getTitle } from './EntityPanel';
+import { TextureIcon } from './TextureIcon';
 
 const groups: { kind: EntityKind; label: string }[] = [
-  { kind: 'character', label: 'Личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
-  { kind: 'monster', label: 'Существа' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
+  { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
+  { kind: 'monster', label: 'Живые существа' }, { kind: 'burial', label: 'Умершие и павшие' }, { kind: 'cemetery', label: 'Кладбища' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
   { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Животные' }, { kind: 'ingredient', label: 'Ресурсы' }, { kind: 'recipe', label: 'Алхимия' },
   { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'army', label: 'Армии' }, { kind: 'war', label: 'Войны' },
 ];
@@ -14,7 +15,7 @@ function listFor(world: WorldState, kind: EntityKind): any[] {
   const lists: Record<EntityKind, any[]> = {
     character: world.characters, settlement: world.settlements, kingdom: world.kingdoms, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, war: world.wars,
-    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes,
+    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, cemetery: world.cemeteries, burial: world.burials,
   };
   return lists[kind];
 }
@@ -32,7 +33,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
     <div className="entity-list">{rows.map(item => {
       const ref: EntityRef = { kind, id: item.id };
       return <button key={item.id} className="entity-card" onClick={() => onSelect(ref)}>
-        <span className="entity-rune">{rune(kind)}</span>
+        <TextureIcon kind={kind} subtype={kind === 'monster' ? item.species : undefined} className="entity-rune" />
         <span><strong>{getTitle(world, ref)}</strong><small>{subtitle(kind, item)}</small></span>
       </button>;
     })}</div>
@@ -40,7 +41,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
 }
 
 function rune(kind: EntityKind): string {
-  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒' } as Record<EntityKind, string>)[kind];
+  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', cemetery: '†', burial: '✝' } as Record<EntityKind, string>)[kind];
 }
 
 function subtitle(kind: EntityKind, item: any): string {
@@ -52,7 +53,9 @@ function subtitle(kind: EntityKind, item: any): string {
   if (kind === 'character') return `${speciesLabel(item.species)} · ${professionLabel(item.profession)} · ${item.alive ? `${item.age} лет` : 'мёртв'}`;
   if (kind === 'settlement') return `${settlementTypeLabel(item.type)} · ${item.population} жителей · ${item.resource}`;
   if (kind === 'kingdom') return `${speciesLabel(item.species)} · ${item.culture} · стабильность ${item.stability}%`;
-  if (kind === 'monster') return `${monsterSpeciesLabel(item.species)} · ${monsterTierLabel(item.tier)} · ${item.alive ? 'живо' : 'убито'}`;
+  if (kind === 'monster') return `${monsterSpeciesLabel(item.species)} · ${monsterTierLabel(item.tier)} · живо`;
+  if (kind === 'burial') return `${item.subjectKind === 'monster' ? 'павшее существо' : item.subjectKind === 'anonymous' ? `${item.count} погибших` : 'умерший'} · ${item.deathYear} год · ${item.state}`;
+  if (kind === 'cemetery') return `${item.burialIds.length} записей · вместимость ${item.capacity}`;
   if (kind === 'artifact') return `${materialLabel(item.material)} · сила ${item.power}`;
   if (kind === 'book') return `${item.subject} · ${item.copies} копий`;
   if (kind === 'dungeon') return `${item.origin} · опасность ${item.danger}/10`;

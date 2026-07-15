@@ -57,7 +57,7 @@ function synchronizeEntityQueue(world: WorldState): void {
   const tick = worldTick(world);
   const validKeys = new Set<string>();
   for (const army of world.armies) {
-    if (army.status !== 'marching' && army.status !== 'raiding' && army.status !== 'battle') continue;
+    if (army.status !== 'marching' && army.status !== 'hunting' && army.status !== 'raiding' && army.status !== 'battle') continue;
     validKeys.add(`army:${army.id}`);
   }
   for (const monster of world.monsters) if (monster.alive) validKeys.add(`monster:${monster.id}`);
@@ -101,6 +101,8 @@ function collectActiveRegions(world: WorldState, indexes: WorldIndexes): { regio
     if (army.status === 'garrison' || army.status === 'recovering') continue;
     activate(army.x, army.y, 2);
     activateSettlement(army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined);
+    const targetMonster = army.targetMonsterId ? world.monsters.find(monster => monster.id === army.targetMonsterId) : undefined;
+    if (targetMonster) activate(targetMonster.x, targetMonster.y, 2);
   }
   for (const war of world.wars) {
     if (!war.active) continue;
@@ -138,14 +140,9 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
 
   const { regions, settlements: activeSettlementIds } = collectActiveRegions(world, indexes);
   const seasonal = [1, 4, 7, 10].includes(world.month);
-  const bulkEconomy = world.month === 1;
+  const bulkEconomy = [1, 7].includes(world.month);
   const bulkEcology = seasonal || [8, 12].includes(world.month);
-  const economySettlementIds = new Set<number>();
-  for (const settlement of world.settlements) {
-    if (settlement.shortages.length || settlement.damaged >= 35 || settlement.unrest >= 55 || settlement.population > settlement.residentialCapacity) economySettlementIds.add(settlement.id);
-  }
-  for (const war of world.wars) if (war.active) for (const settlementId of war.contestedSettlementIds) economySettlementIds.add(settlementId);
-  for (const army of world.armies) if (army.targetSettlementId && army.status !== 'garrison' && army.status !== 'recovering') economySettlementIds.add(army.targetSettlementId);
+  const economySettlementIds = new Set<number>(activeSettlementIds);
   const ecologySettlementIds = new Set<number>(activeSettlementIds);
   if (bulkEconomy) {
     for (const settlement of world.settlements) {

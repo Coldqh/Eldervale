@@ -1,24 +1,31 @@
-import type { EntityKind, EntityRef, Relationship, WorldState } from '../types';
+import type { BurialRecord, Cemetery, EntityKind, EntityRef, Relationship, WorldState } from '../types';
 import {
   armyStatusLabel, artifactTypeLabel, materialLabel, monsterSpeciesLabel, monsterTierLabel,
   buildingTypeLabel, professionLabel, settlementTypeLabel, speciesLabel,
 } from '../i18n';
+import { TextureIcon } from './TextureIcon';
 
 const labels: Record<EntityKind, string> = {
   kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', monster: 'Существо',
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт',
+  cemetery: 'Кладбище', burial: 'Кладбищенская запись',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
   if (!selected) return <div className="empty-state"><span>✦</span><strong>Выбери объект на карте</strong><p>Поселения, государства, чудовища, армии и руины связаны одной причинной историей.</p></div>;
   const entity = getEntity(world, selected);
   if (!entity) return null;
-  const relatedEvents = world.events.filter(event => event.entityRefs.some(ref => ref.kind === selected.kind && ref.id === selected.id)).slice(-12).reverse();
+  const subjectRef = entityIsBurial(entity) && entity.subjectKind !== 'anonymous' && entity.subjectId
+    ? { kind: entity.subjectKind, id: entity.subjectId } as EntityRef
+    : undefined;
+  const relatedEvents = world.events.filter(event => event.entityRefs.some(ref =>
+    (ref.kind === selected.kind && ref.id === selected.id) || (subjectRef && ref.kind === subjectRef.kind && ref.id === subjectRef.id),
+  )).slice(-12).reverse();
   return <div className="entity-panel">
-    <div className="eyebrow">{labels[selected.kind]}</div>
-    <h2>{getTitle(world, selected)}</h2>
+    <div className="entity-panel-title"><TextureIcon kind={selected.kind} subtype={entity.species ?? entity.type ?? entity.tier} /><div><div className="eyebrow">{labels[selected.kind]}</div>
+    <h2>{getTitle(world, selected)}</h2></div></div>
     <div className="entity-stats">{renderStats(world, selected, entity, onSelect)}</div>
     {relatedEvents.length > 0 && <section><h3>След в истории</h3>{relatedEvents.map(event => <div className="history-link detailed-history" key={event.id}>
       <span>{event.year}.{String(event.month).padStart(2, '0')}</span>
@@ -33,18 +40,40 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes,
+    cemetery: world.cemeteries ?? [], burial: world.burials ?? [],
   };
-  return map[ref.kind].find(item => item.id === ref.id);
+  const direct = map[ref.kind].find(item => item.id === ref.id);
+  if (direct) return direct;
+  if (ref.kind === 'character' || ref.kind === 'monster') return world.burials?.find(item => item.subjectKind === ref.kind && item.subjectId === ref.id);
+  return undefined;
 }
 
 export function getTitle(world: WorldState, ref: EntityRef): string {
   const entity = getEntity(world, ref);
   if (!entity) return 'Неизвестно';
   if (ref.kind === 'household') {
-    const head = world.characters.find(character => character.id === entity.headCharacterId);
+    const head = world.characters.find(character => character.id === entity.headCharacterId)
+      ?? world.burials?.find(item => item.subjectKind === 'character' && item.subjectId === entity.headCharacterId);
     return `Домохозяйство ${head?.name ?? `№${entity.id}`}`;
   }
   return entity.name ?? entity.title ?? `Объект №${entity.id}`;
+}
+
+
+function entityIsBurial(entity: any): entity is BurialRecord {
+  return Boolean(entity && typeof entity === 'object' && typeof entity.subjectKind === 'string' && typeof entity.state === 'string' && typeof entity.deathYear === 'number');
+}
+
+function burialStateLabel(state: BurialRecord['state']): string {
+  const labels: Record<BurialRecord['state'], string> = {
+    corpse: 'тело ожидает погребения', buried: 'погребён', cremated: 'кремирован', 'mass-grave': 'общая могила', trophy: 'останки сохранены как трофей', decayed: 'останки истлели',
+  };
+  return labels[state];
+}
+
+function cemeteryOccupancy(world: WorldState, cemetery: Cemetery): number {
+  const ids = new Set(cemetery.burialIds);
+  return (world.burials ?? []).filter(item => ids.has(item.id)).reduce((sum, item) => sum + Math.max(1, item.count), 0);
 }
 
 function link(label: string, ref: EntityRef, onSelect: (ref: EntityRef) => void) {
@@ -70,6 +99,42 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+  if (ref.kind === 'cemetery') {
+    const cemetery = entity as Cemetery;
+    const burialRefs = cemetery.burialIds.slice(-80).reverse().map(id => ({ kind: 'burial' as const, id }));
+    return <>
+      {row('Поселение', cemetery.settlementId ? link(getTitle(world, { kind: 'settlement', id: cemetery.settlementId }), { kind: 'settlement', id: cemetery.settlementId }, onSelect) : 'вне поселения')}
+      {row('Расположение', `квадрат ${cemetery.globalX}:${cemetery.globalY}, участок ${cemetery.localX}:${cemetery.localY}`)}
+      {row('Основано', `${cemetery.foundedYear} год`)}
+      {row('Погребено', `${cemeteryOccupancy(world, cemetery)} / ${cemetery.capacity}`)}
+      {row('Смотритель', cemetery.caretakerCharacterId ? link(getTitle(world, { kind: 'character', id: cemetery.caretakerCharacterId }), { kind: 'character', id: cemetery.caretakerCharacterId }, onSelect) : 'нет постоянного смотрителя')}
+      {row('Последние захоронения', links(world, burialRefs, onSelect))}
+      {row('История', cemetery.history.join(' ') || 'Записей пока нет.')}
+    </>;
+  }
+  if (ref.kind === 'burial' || entityIsBurial(entity)) {
+    const burial = entity as BurialRecord;
+    const cemetery = burial.cemeteryId ? world.cemeteries.find(item => item.id === burial.cemeteryId) : undefined;
+    return <>
+      {row('Статус', burialStateLabel(burial.state))}
+      {row('Кого хранит запись', burial.subjectKind === 'character' ? 'личность' : burial.subjectKind === 'monster' ? 'чудовище' : 'неизвестные погибшие')}
+      {row('Количество', burial.count)}
+      {row('Вид', burial.species)}
+      {burial.birthYear !== undefined && row('Годы жизни', `${burial.birthYear}–${burial.deathYear}`)}
+      {row('Дата смерти', `${burial.deathYear}.${String(burial.deathMonth).padStart(2, '0')}`)}
+      {row('Причина смерти', burial.cause)}
+      {row('Убийца или виновник', burial.killerName ?? 'не установлен')}
+      {burial.profession && row('При жизни', professionLabel(burial.profession))}
+      {burial.tier && row('Ранг существа', monsterTierLabel(burial.tier))}
+      {burial.power !== undefined && row('Сила при жизни', burial.power)}
+      {burial.titles?.length > 0 && row('Титулы', burial.titles.join(', '))}
+      {row('Известность', burial.renown)}
+      {row('Кладбище', cemetery ? link(cemetery.name, { kind: 'cemetery', id: cemetery.id }, onSelect) : burial.state === 'corpse' ? 'ещё не перенесено' : 'вне кладбища')}
+      {row('Место', `квадрат ${burial.globalX}:${burial.globalY}, клетка ${burial.localX}:${burial.localY}`)}
+      {row('Сводка', burial.summary)}
+      {row('Записи', burial.history.join(' ') || 'Дополнительных записей нет.')}
+    </>;
+  }
   if (ref.kind === 'building') {
     const settlementRef = { kind: 'settlement' as const, id: entity.settlementId };
     return <>
@@ -216,6 +281,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Государство', link(getTitle(world, { kind: 'kingdom', id: entity.kingdomId }), { kind: 'kingdom', id: entity.kingdomId }, onSelect))}
     {row('Командир', link(getTitle(world, { kind: 'character', id: entity.commanderId }), { kind: 'character', id: entity.commanderId }, onSelect))}
     {row('Численность', `${entity.strength} воинов`)}{row('Мораль', `${entity.morale}%`)}{row('Припасы', `${entity.supplies}%`)}{row('Состояние', armyStatusLabel(entity.status))}
+    {row('Цель похода', entity.targetMonsterId ? link(getTitle(world, { kind: 'monster', id: entity.targetMonsterId }), { kind: 'monster', id: entity.targetMonsterId }, onSelect) : entity.targetSettlementId ? link(getTitle(world, { kind: 'settlement', id: entity.targetSettlementId }), { kind: 'settlement', id: entity.targetSettlementId }, onSelect) : 'нет')}
     {row('Походы', entity.campaignHistory.join(' ') || 'Не участвовало в крупных походах.')}
   </>;
   if (ref.kind === 'war') return <>

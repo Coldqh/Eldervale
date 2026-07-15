@@ -43,6 +43,7 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
 
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
   if (settlement) buildSettlement(world, cells, width, height, settlement, tile, exits, rng);
+  placeCemeteries(world, tile, cells, width, height);
   const dungeon = tile.dungeonId ? world.dungeons.find(item => item.id === tile.dungeonId) : world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
   if (dungeon) placeDungeonEntrance(cells, width, height, rng);
 
@@ -412,6 +413,24 @@ function placeDungeonEntrance(cells: LocalCell[], width: number, height: number,
   setCell(cells, width, point.x, point.y, { ground: 'stone', feature: 'stairs-down', blocked: false, building: 'вход в подземелье' });
 }
 
+
+function placeCemeteries(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number): void {
+  for (const cemetery of world.cemeteries.filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const x0 = Math.max(2, Math.min(width - 10, cemetery.localX - 4));
+    const y0 = Math.max(2, Math.min(height - 10, cemetery.localY - 4));
+    const burialCount = cemetery.burialIds.length;
+    const plotSize = Math.max(6, Math.min(14, 6 + Math.ceil(Math.sqrt(Math.max(1, burialCount)))));
+    for (let y = y0; y < Math.min(height - 1, y0 + plotSize); y += 1) for (let x = x0; x < Math.min(width - 1, x0 + plotSize); x += 1) {
+      const edge = x === x0 || y === y0 || x === x0 + plotSize - 1 || y === y0 + plotSize - 1;
+      const cell = cells[y * width + x];
+      if (!cell || cell.ground === 'water' || cell.ground === 'road') continue;
+      if (edge) { cell.feature = 'cemetery'; cell.blocked = false; cell.ground = 'dirt'; }
+      else if ((x + y) % 2 === 0 && burialCount > 0) { cell.feature = 'grave'; cell.blocked = false; cell.ground = 'grass'; }
+      cell.building = cemetery.name;
+    }
+  }
+}
+
 function applyHistoricalScars(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number, rng: RNG): void {
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
   const scars = settlement ? Math.floor(settlement.damaged / 8) : 0;
@@ -432,7 +451,8 @@ function applyStoredEffects(world: WorldState, globalX: number, globalY: number,
       : effect.kind === 'rubble' ? { feature: 'rubble' as LocalFeature, blocked: false }
         : effect.kind === 'looted' ? { feature: 'looted' as LocalFeature, ground: 'ash' as LocalGround, blocked: false }
           : effect.kind === 'blood' ? { feature: 'blood' as LocalFeature, blocked: false }
-          : effect.kind === 'body' || effect.kind === 'grave' ? { feature: 'body' as LocalFeature, blocked: true }
+          : effect.kind === 'body' ? { feature: 'body' as LocalFeature, blocked: true }
+            : effect.kind === 'grave' ? { feature: 'grave' as LocalFeature, blocked: false }
             : effect.kind === 'lost-item' ? { feature: 'chest' as LocalFeature, blocked: true }
               : effect.kind === 'repaired' ? { feature: undefined, ground: 'grass' as LocalGround, blocked: false }
                 : { ground: 'dirt' as LocalGround, blocked: false };
@@ -452,6 +472,10 @@ function buildSurfaceMarkers(
   if (dungeon) {
     const stair = cells.find(cell => cell.feature === 'stairs-down');
     markers.push({ id: `dungeon-${dungeon.id}`, x: stair?.x ?? width - 8, y: stair?.y ?? height - 8, kind: 'dungeon', label: dungeon.name, refs: [{ kind: 'dungeon', id: dungeon.id }], detail: `${dungeon.depth} уровней` });
+  }
+  for (const cemetery of world.cemeteries.filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const buried = cemetery.burialIds.length;
+    markers.push({ id: `cemetery-${cemetery.id}`, x: cemetery.localX, y: cemetery.localY, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: buried, detail: `${buried} записей о погребении · вместимость ${cemetery.capacity}` });
   }
 
   const liveCharacters = settlement ? world.characters.filter(character => {
@@ -543,12 +567,22 @@ function buildSurfaceMarkers(
     }
   }
 
+  for (const item of world.items.filter(entry => entry.settlementId === settlement?.id && !entry.ownerCharacterId && !entry.householdId && !entry.establishmentId).slice(0, 24)) {
+    const building = item.buildingId ? world.buildings.find(entry => entry.id === item.buildingId) : undefined;
+    const point = building && building.globalX === tile.x && building.globalY === tile.y
+      ? { x: Math.max(1, Math.min(width - 2, building.localX + 1)), y: Math.max(1, Math.min(height - 2, building.localY + 1)) }
+      : randomWalkable(cells, width, height, new RNG(`${world.config.seed}:предмет:${item.id}:${tile.x}:${tile.y}`));
+    markers.push({ id: `item-${item.id}`, x: point.x, y: point.y, kind: 'item', label: item.name, refs: [{ kind: 'item', id: item.id }], count: Math.round(item.quantity), detail: `${item.category} · ${item.quantity} ${item.unit}` });
+  }
+
   for (const artifact of world.artifacts.filter(item => item.settlementId === settlement?.id && !item.ownerId)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:артефакт:${artifact.id}`));
     markers.push({ id: `artifact-${artifact.id}`, x: point.x, y: point.y, kind: 'artifact', label: artifact.name, refs: [{ kind: 'artifact', id: artifact.id }] });
   }
   for (const effect of world.localMapChanges.filter(item => item.globalX === tile.x && item.globalY === tile.y && item.level === 0)) {
-    markers.push({ id: `effect-${effect.id}`, x: effect.localX, y: effect.localY, kind: 'effect', label: effect.label, refs: effect.entityRef ? [effect.entityRef] : [], detail: `${effect.year} год · ${effect.kind}` });
+    const markerKind: LocalMarker['kind'] = effect.kind === 'body' ? 'corpse' : effect.kind === 'grave' ? 'grave' : effect.kind === 'lost-item' ? 'item' : 'effect';
+    const refs = effect.burialId ? [{ kind: 'burial' as const, id: effect.burialId }] : effect.entityRef ? [effect.entityRef] : [];
+    markers.push({ id: `effect-${effect.id}`, x: effect.localX, y: effect.localY, kind: markerKind, label: effect.label, refs, detail: `${effect.year}.${String(effect.month ?? 1).padStart(2, '0')} · ${effect.kind}` });
   }
   return markers;
 }
@@ -639,7 +673,7 @@ export function localCellSummary(map: LocalMapData, x: number, y: number): { tit
   if (!cell) return { title: 'За пределами карты', lines: [], markers: [] };
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
-    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', chest: 'сундук или предметы',
+    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', bones: 'кости', grave: 'могила', cemetery: 'ограда кладбища', chest: 'сундук или предметы',
     'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа',
   };
   const lines = [`Основа: ${groundNames[cell.ground]}`];

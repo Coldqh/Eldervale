@@ -150,9 +150,9 @@ export default function App() {
   }, [selected, entityStack.length, closeEntity, backEntity]);
 
   const stats = useMemo(() => world ? {
-    population: world.characters.filter(character => character.alive).length,
+    population: world.characters.length,
     activeWars: world.wars.filter(war => war.active).length,
-    dragons: world.monsters.filter(monster => monster.alive && monster.species === 'dragon').length,
+    dragons: world.monsters.filter(monster => monster.species === 'dragon').length,
     realms: world.kingdoms.length,
   } : undefined, [world]);
 
@@ -378,6 +378,7 @@ export default function App() {
           <div className="layer-tabs">
             {(['terrain', 'realms', 'danger', 'population', 'ecology', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
           </div>
+          <label className="layer-select-wrap"><span>Слой карты</span><select className="layer-select" value={layer} onChange={event => setLayer(event.target.value as MapLayer)}>{(['terrain', 'realms', 'danger', 'population', 'ecology', 'trade'] as MapLayer[]).map(item => <option key={item} value={item}>{layerLabel(item)}</option>)}</select></label>
           <div className="map-toolbar-right"><div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div><button className="atlas-entry-button" onClick={() => setView('atlas')}>Исторический атлас</button></div>
         </div>
         <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={openEntity} onOpenTile={(x, y) => openLocal(x, y)} /><div className="map-vignette" /><div className="map-open-hint">Нажми на любой квадрат, чтобы открыть его локальную карту</div></div>
@@ -455,10 +456,10 @@ function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect, o
 
 function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: number } | undefined {
   if (ref.kind === 'settlement') { const item = world.settlements.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
-  if (ref.kind === 'monster') { const item = world.monsters.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'monster') { const item = world.monsters.find(entity => entity.id === ref.id); const burial = !item ? world.burials.find(entity => entity.subjectKind === 'monster' && entity.subjectId === ref.id) : undefined; return item ? { x: item.x, y: item.y } : burial && { x: burial.globalX, y: burial.globalY }; }
   if (ref.kind === 'army') { const item = world.armies.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
   if (ref.kind === 'dungeon') { const item = world.dungeons.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
-  if (ref.kind === 'character') { const item = world.characters.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.settlementId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'character') { const item = world.characters.find(entity => entity.id === ref.id); const burial = !item ? world.burials.find(entity => entity.subjectKind === 'character' && entity.subjectId === ref.id) : undefined; const place = item && world.settlements.find(entity => entity.id === item.settlementId); return place ? { x: place.x, y: place.y } : burial && { x: burial.globalX, y: burial.globalY }; }
   if (ref.kind === 'kingdom') { const item = world.kingdoms.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.capitalId); return place && { x: place.x, y: place.y }; }
   if (ref.kind === 'book') { const item = world.books.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.settlementId); return place && { x: place.x, y: place.y }; }
   if (ref.kind === 'artifact') { const item = world.artifacts.find(entity => entity.id === ref.id); const owner = item?.ownerId ? world.characters.find(entity => entity.id === item.ownerId) : undefined; const settlementId = owner?.settlementId ?? item?.settlementId; const place = settlementId ? world.settlements.find(entity => entity.id === settlementId) : undefined; return place && { x: place.x, y: place.y }; }
@@ -473,6 +474,8 @@ function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: nu
   if (ref.kind === 'establishment') { const item = world.establishments.find(entity => entity.id === ref.id); const building = item && world.buildings.find(entity => entity.id === item.buildingId); return building && { x: building.globalX, y: building.globalY }; }
   if (ref.kind === 'item') { const item = world.items.find(entity => entity.id === ref.id); const building = item?.buildingId ? world.buildings.find(entity => entity.id === item.buildingId) : item?.establishmentId ? world.buildings.find(entity => entity.establishmentId === item.establishmentId) : item?.householdId ? world.buildings.find(entity => entity.householdId === item.householdId) : undefined; const place = !building && item ? world.settlements.find(entity => entity.id === item.settlementId) : undefined; return building ? { x: building.globalX, y: building.globalY } : place && { x: place.x, y: place.y }; }
   if (ref.kind === 'productionRecipe') { const establishment = world.establishments.find(entity => entity.recipeIds.includes(ref.id)); const building = establishment && world.buildings.find(entity => entity.id === establishment.buildingId); return building && { x: building.globalX, y: building.globalY }; }
+  if (ref.kind === 'cemetery') { const item = world.cemeteries.find(entity => entity.id === ref.id); return item && { x: item.globalX, y: item.globalY }; }
+  if (ref.kind === 'burial') { const item = world.burials.find(entity => entity.id === ref.id); return item && { x: item.globalX, y: item.globalY }; }
   return undefined;
 }
 

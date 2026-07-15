@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EntityRef, LocalFeature, LocalGround, LocalMapData, LocalMarker, WorldState } from '../types';
 import { generateLocalMap, localCellSummary } from '../lib/localMap';
+import { paintFeature as paintTextureFeature, paintLocalCell, paintMarker as paintTextureMarker } from '../lib/texturePaint';
+import { TextureIcon } from './TextureIcon';
 
 const groundColors: Record<LocalGround, string> = {
   grass: '#617853', dirt: '#745e43', sand: '#a58a5f', water: '#244d59', mud: '#4b5d50', snow: '#aeb7b3', stone: '#656862', road: '#8a7352', floor: '#8c7c64', ash: '#423f3a',
@@ -13,7 +15,7 @@ const LOCAL_MIN_ZOOM = .65;
 const LOCAL_MAX_ZOOM = 12;
 
 const markerColors: Record<LocalMarker['kind'], string> = {
-  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#080808', fauna: '#86a76a', resource: '#80b89a', building: '#8e8068', establishment: '#d7a95b',
+  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#080808', fauna: '#86a76a', resource: '#80b89a', building: '#8e8068', establishment: '#d7a95b', cemetery: '#171917', grave: '#050505', item: '#d8bd65', corpse: '#000000',
 };
 
 export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMove, onBack, onSelect }: {
@@ -281,9 +283,8 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
       const cell = map.cells[yIndex * map.width + xIndex]!;
       const x = ox + cell.x * cellSize;
       const y = oy + cell.y * cellSize;
-      ctx.fillStyle = groundColors[cell.ground];
-      ctx.fillRect(x, y, Math.ceil(cellSize + .4), Math.ceil(cellSize + .4));
-      if (cell.feature) drawFeature(ctx, cell.feature, x, y, cellSize);
+      paintLocalCell(ctx, cell.ground, x, y, cellSize, (cell.x + 1) * 73856093 ^ (cell.y + 1) * 19349663);
+      if (cell.feature) paintTextureFeature(ctx, cell.feature, x, y, cellSize);
     }
   }
   if (cellSize >= 8) {
@@ -305,67 +306,17 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
 }
 
 function drawFeature(ctx: CanvasRenderingContext2D, feature: LocalFeature, x: number, y: number, size: number) {
-  ctx.fillStyle = featureColors[feature] ?? '#222';
-  if (feature === 'wall' || feature === 'field' || feature === 'bridge') {
-    ctx.fillRect(x + size * .08, y + size * .08, size * .84, size * .84);
-  } else if (feature === 'door') {
-    ctx.fillRect(x + size * .32, y + size * .08, size * .36, size * .84);
-  } else if (feature === 'tree') {
-    ctx.beginPath(); ctx.arc(x + size * .5, y + size * .48, size * .38, 0, Math.PI * 2); ctx.fill();
-  } else if (feature === 'stairs-down' || feature === 'stairs-up') {
-    ctx.fillRect(x + size * .18, y + size * .2, size * .64, size * .12);
-    ctx.fillRect(x + size * .28, y + size * .43, size * .54, size * .12);
-    ctx.fillRect(x + size * .38, y + size * .66, size * .44, size * .12);
-  } else {
-    ctx.beginPath(); ctx.arc(x + size * .5, y + size * .5, size * .25, 0, Math.PI * 2); ctx.fill();
-  }
+  paintTextureFeature(ctx, feature, x, y, size);
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x0: number, y0: number, size: number) {
-  const widthCells = Math.max(1, marker.footprintWidth ?? 1);
-  const heightCells = Math.max(1, marker.footprintHeight ?? 1);
-  const width = widthCells * size;
-  const height = heightCells * size;
-  const x = x0 + width / 2;
-  const y = y0 + height / 2;
-  const radius = Math.max(2.2, Math.min(8, Math.min(width, height) * .32));
-  const effectIsBlack = marker.kind === 'effect' && /body|grave|rubble|looted|тело|руин|разграб/i.test(`${marker.detail ?? ''} ${marker.label}`);
-  ctx.fillStyle = effectIsBlack ? '#000000' : markerColors[marker.kind];
-  ctx.strokeStyle = marker.kind === 'monster' && (widthCells > 1 || heightCells > 1) ? '#f5b26f' : '#111712';
-  ctx.lineWidth = marker.kind === 'monster' && (widthCells > 1 || heightCells > 1) ? Math.max(1.5, size * .12) : 1;
-  if (marker.kind === 'monster') {
-    if (widthCells > 1 || heightCells > 1) {
-      ctx.globalAlpha = .86;
-      ctx.fillRect(x0 + size * .08, y0 + size * .08, Math.max(2, width - size * .16), Math.max(2, height - size * .16));
-      ctx.globalAlpha = 1;
-      ctx.strokeRect(x0 + size * .08, y0 + size * .08, Math.max(2, width - size * .16), Math.max(2, height - size * .16));
-      ctx.beginPath();
-      ctx.moveTo(x, y0 + size * .18);
-      ctx.lineTo(x0 + width - size * .18, y0 + height - size * .18);
-      ctx.lineTo(x0 + size * .18, y0 + height - size * .18);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.beginPath(); ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y + radius); ctx.lineTo(x - radius, y + radius); ctx.closePath(); ctx.fill(); ctx.stroke();
-    }
-  } else if (marker.kind === 'army' || marker.kind === 'building' || marker.kind === 'establishment') {
-    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2); ctx.strokeRect(x - radius, y - radius, radius * 2, radius * 2);
-  } else {
-    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  }
-  if ((marker.count ?? 0) > 1 && size >= 9) {
-    ctx.fillStyle = marker.kind === 'effect' ? '#f1e7d3' : '#151a15';
-    ctx.font = `bold ${Math.max(6, radius * 1.25)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(marker.count! > 99 ? '99+' : marker.count), x, y + .5);
-  }
+  paintTextureMarker(ctx, marker, x0, y0, size);
 }
 
 function MarkerCard({ marker, world, onSelect }: { marker: LocalMarker; world: WorldState; onSelect: (ref: EntityRef) => void }) {
+  const iconKind = marker.kind === 'corpse' ? 'corpse' : marker.kind === 'grave' ? 'grave' : marker.kind === 'cemetery' ? 'cemetery' : marker.kind === 'item' ? 'item' : marker.kind === 'person' || marker.kind === 'group' ? 'character' : marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'settlement' ? 'building' : marker.kind === 'monster' ? 'monster' : marker.kind === 'army' ? 'army' : marker.kind === 'artifact' ? 'artifact' : marker.kind === 'resource' ? 'ingredient' : marker.kind === 'dungeon' ? 'dungeon' : 'terrain';
   return <div className="local-marker-card">
-    <div><i style={{ background: marker.kind === 'effect' && /body|grave|rubble|looted|тело|руин|разграб/i.test(`${marker.detail ?? ''} ${marker.label}`) ? '#000' : markerColors[marker.kind] }} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
+    <div><TextureIcon kind={iconKind} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
     {marker.refs.length > 0 && <div className="local-marker-actions">
       {marker.refs.slice(0, 12).map(ref => <button key={`${ref.kind}-${ref.id}`} onClick={() => onSelect(ref)}>{entityName(world, ref)}</button>)}
       {marker.refs.length > 12 && <small>ещё {marker.refs.length - 12}</small>}
@@ -377,12 +328,13 @@ function entityName(world: WorldState, ref: EntityRef): string {
   const collections: Record<EntityRef['kind'], readonly { id: number; name?: string; title?: string }[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
-    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, cemetery: world.cemeteries, burial: world.burials,
   };
-  const entity = collections[ref.kind].find(item => item.id === ref.id);
+  let entity = collections[ref.kind].find(item => item.id === ref.id);
+  if (!entity && (ref.kind === 'character' || ref.kind === 'monster')) entity = world.burials.find(item => item.subjectKind === ref.kind && item.subjectId === ref.id);
   return entity?.name ?? entity?.title ?? `${ref.kind} ${ref.id}`;
 }
 
 function markerLabel(kind: LocalMarker['kind']): string {
-  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'предмет', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение' } as const)[kind];
+  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'артефакт', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение', cemetery: 'кладбище', grave: 'могила', item: 'предмет', corpse: 'тело' } as const)[kind];
 }

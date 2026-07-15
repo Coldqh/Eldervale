@@ -8,16 +8,17 @@ import { createHousingProfile } from './settlements';
 import { createSimulationRuntime, ensureSimulationRuntime } from './scheduler';
 import { generatePhysicalEconomy } from './materialEconomy';
 import { rebuildTerritoryHistoryFromCurrent } from './territory';
+import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-8`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-9`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 8;
+  localized.version = 9;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -30,6 +31,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.wars ??= [];
   localized.events ??= [];
   localized.localMapChanges ??= [];
+  localized.cemeteries ??= [];
+  localized.burials ??= [];
   localized.buildings ??= [];
   localized.households ??= [];
   localized.establishments ??= [];
@@ -106,6 +109,8 @@ export function migrateWorld(input: unknown): WorldState {
   for (const army of localized.armies) {
     army.supplies ??= 70;
     army.campaignHistory ??= [];
+    army.targetMonsterId ??= undefined;
+    if (army.status === 'battle' && army.targetMonsterId) army.status = 'hunting';
   }
   for (const monster of localized.monsters) {
     monster.hunger ??= rng.int(20, 65);
@@ -151,10 +156,16 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.employment = Math.max(0, ...localized.employments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.shipment = Math.max(0, ...localized.shipments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
 
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
+  ensureCemeteries(localized as WorldState, rng);
+  compactDeadEntities(localized as WorldState, rng);
+  synchronizeMortalityIds(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
+  for (const effect of localized.localMapChanges) { effect.month ??= 1; }
   ensureSimulationRuntime(localized as WorldState);
 
   return localized as WorldState;
