@@ -2,16 +2,24 @@ import type { Dynasty, Relationship, TradeRoute, WorldState } from '../types';
 import { localizeLegacyWorld } from './localizeLegacy';
 import { APP_VERSION } from '../version';
 import { RNG } from './rng';
+import { normalizeEventCausality } from './causality';
+import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
+import { createHousingProfile } from './settlements';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-2`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-4`);
+  const previousLocalSize = localized.config?.localMapSize ?? 48;
 
-  localized.version = 3;
+  localized.version = 4;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
+  localized.config ??= {};
+  localized.config.localMapSize = [96, 128, 160].includes(localized.config.localMapSize) ? localized.config.localMapSize : 128;
+  localized.config.ecologyDensity ??= 1;
+  localized.config.huntingPressure ??= 1;
   localized.relationships ??= [];
   localized.dynasties ??= [];
   localized.tradeRoutes ??= [];
@@ -19,6 +27,14 @@ export function migrateWorld(input: unknown): WorldState {
   localized.events ??= [];
   localized.localMapChanges ??= [];
   localized.nextIds ??= {};
+
+  if (previousLocalSize !== localized.config.localMapSize) {
+    const ratio = localized.config.localMapSize / Math.max(1, previousLocalSize);
+    for (const effect of localized.localMapChanges) {
+      effect.localX = Math.max(1, Math.min(localized.config.localMapSize - 2, Math.round(effect.localX * ratio)));
+      effect.localY = Math.max(1, Math.min(localized.config.localMapSize - 2, Math.round(effect.localY * ratio)));
+    }
+  }
 
   for (const kingdom of localized.kingdoms) {
     kingdom.claims ??= [];
@@ -31,12 +47,29 @@ export function migrateWorld(input: unknown): WorldState {
     settlement.tradeRouteIds ??= [];
     settlement.unrest ??= 0;
     settlement.history ??= [`${settlement.name} существует с ${settlement.foundedYear} года.`];
+    if (!settlement.buildingCounts || !settlement.residentialCapacity || !settlement.households) {
+      const housing = createHousingProfile(settlement.population, settlement.type, rng);
+      settlement.buildingCounts = housing.buildingCounts;
+      settlement.residentialCapacity = housing.residentialCapacity;
+      settlement.households = housing.households;
+      settlement.buildings = housing.buildings;
+    }
+    settlement.districts ??= [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: settlement.type === 'fortress' ? 'крепость' : 'центр' }];
+    settlement.stockpile ??= { [settlement.resource]: 30, зерно: Math.max(12, Math.round(settlement.food / 2)), древесина: 25, камень: 12 };
+    settlement.livestock ??= { куры: Math.round(settlement.population / 8), козы: Math.round(settlement.population / 18), лошади: Math.round(settlement.population / 45) };
+    for (const district of settlement.districts) {
+      const tile = localized.tiles.find((item: any) => item.x === district.x && item.y === district.y);
+      if (tile) { tile.settlementId = settlement.id; tile.settlementDistrict = district.name; }
+    }
   }
   for (const character of localized.characters) {
     character.wealth ??= character.age < 14 ? 0 : rng.int(0, 140);
     character.loyalty ??= rng.int(30, 90);
     character.relationshipIds ??= [];
     character.injuries ??= [];
+    character.workplace ??= workplaceFor(character.profession);
+    const settlement = localized.settlements.find((item: any) => item.id === character.settlementId);
+    character.homeDistrict ??= settlement?.districts?.[0]?.name ?? 'Сердце поселения';
   }
   for (const army of localized.armies) {
     army.supplies ??= 70;
@@ -48,27 +81,15 @@ export function migrateWorld(input: unknown): WorldState {
     monster.behavior ??= monster.species === 'dragon' ? 'охраняет логово и собирает сокровища' : 'охотится в своей области';
     monster.goal ??= monster.species === 'dragon' ? 'расширить сокровищницу' : 'найти безопасное логово';
   }
-  for (const artifact of localized.artifacts) {
-    artifact.ownerHistory ??= [{ year: artifact.yearCreated, characterId: artifact.ownerId, settlementId: artifact.settlementId, reason: 'первый известный владелец' }];
-  }
-  for (const book of localized.books) {
-    book.bias ??= 'личный взгляд автора';
-    book.referencedEventIds ??= [];
-  }
-  for (const dungeon of localized.dungeons) {
-    dungeon.purpose ??= dungeon.origin;
-    dungeon.discovered ??= true;
-  }
-  for (const war of localized.wars) {
-    war.goal ??= 'добиться уступок';
-    war.contestedSettlementIds ??= [];
-    war.history ??= [];
-  }
-  for (const event of localized.events) {
-    event.cause ??= 'состояние мира и решения участников';
-    event.consequences ??= [];
-    event.traces ??= event.entityRefs ?? [];
-  }
+  for (const artifact of localized.artifacts) artifact.ownerHistory ??= [{ year: artifact.yearCreated, characterId: artifact.ownerId, settlementId: artifact.settlementId, reason: 'первый известный владелец' }];
+  for (const book of localized.books) { book.bias ??= 'личный взгляд автора'; book.referencedEventIds ??= []; }
+  for (const dungeon of localized.dungeons) { dungeon.purpose ??= dungeon.origin; dungeon.discovered ??= true; }
+  for (const war of localized.wars) { war.goal ??= 'добиться уступок'; war.contestedSettlementIds ??= []; war.history ??= []; }
+  localized.events = localized.events.map(normalizeEventCausality);
+
+  localized.animalPopulations ??= generateAnimalPopulations(localized.config.seed, localized.tiles, localized.config.ecologyDensity);
+  localized.ingredients ??= generateNaturalIngredients(localized.config.seed, localized.tiles, localized.config.ecologyDensity);
+  localized.alchemyRecipes ??= generateAlchemyRecipes({ ingredients: localized.ingredients, characters: localized.characters, year: localized.year }, rng);
 
   backfillRelationships(localized, rng);
   backfillDynasties(localized, rng);
@@ -83,8 +104,20 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.war ??= Math.max(0, ...localized.wars.map((war: any) => war.id ?? 0)) + 1;
   localized.nextIds.artifact ??= Math.max(0, ...localized.artifacts.map((artifact: any) => artifact.id ?? 0)) + 1;
   localized.nextIds.book ??= Math.max(0, ...localized.books.map((book: any) => book.id ?? 0)) + 1;
+  localized.nextIds.animalPopulation = Math.max(0, ...localized.animalPopulations.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.ingredient = Math.max(0, ...localized.ingredients.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.recipe = Math.max(0, ...localized.alchemyRecipes.map((item: any) => item.id ?? 0)) + 1;
 
   return localized as WorldState;
+}
+
+function workplaceFor(profession: string): string {
+  const map: Record<string, string> = {
+    child: 'дом семьи', farmer: 'поля и пастбища', miller: 'мельница', hunter: 'охотничьи угодья', guard: 'стража и ворота',
+    blacksmith: 'кузница', carpenter: 'плотницкая мастерская', herbalist: 'травницкая мастерская', merchant: 'рынок', scribe: 'архив или канцелярия',
+    priest: 'храм', soldier: 'казармы', fisher: 'берег или пристань', miner: 'шахта', weaver: 'ткацкая мастерская', brewer: 'пивоварня', healer: 'лечебница',
+  };
+  return map[profession] ?? 'местные работы';
 }
 
 function resourceForTerrain(world: any, x: number, y: number, rng: RNG): string {

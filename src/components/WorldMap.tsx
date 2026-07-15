@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { EntityRef, Terrain, TradeRoute, WorldState } from '../types';
 import type { AtlasMapState } from '../lib/historicalAtlas';
 
-export type MapLayer = 'terrain' | 'realms' | 'danger' | 'population' | 'trade';
+export type MapLayer = 'terrain' | 'realms' | 'danger' | 'population' | 'ecology' | 'trade';
 const terrainColors: Record<Terrain, string> = {
   ocean: '#172b32', coast: '#496b69', plains: '#75865f', forest: '#3d624a', hills: '#776f53', mountains: '#6f706b', marsh: '#46675d', desert: '#9a8259', tundra: '#89918b',
 };
@@ -31,6 +31,10 @@ export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }
       const cell = Math.min(box.width / world.config.width, box.height / world.config.height);
       const ox = (box.width - cell * world.config.width) / 2;
       const oy = (box.height - cell * world.config.height) / 2;
+      const animalByTile = new Map<string, number>();
+      const resourceByTile = new Map<string, number>();
+      for (const population of world.animalPopulations) animalByTile.set(`${population.x}:${population.y}`, (animalByTile.get(`${population.x}:${population.y}`) ?? 0) + population.count);
+      for (const ingredient of world.ingredients) resourceByTile.set(`${ingredient.x}:${ingredient.y}`, (resourceByTile.get(`${ingredient.x}:${ingredient.y}`) ?? 0) + ingredient.abundance);
 
       for (let index = 0; index < world.tiles.length; index += 1) {
         const tile = world.tiles[index]!;
@@ -47,6 +51,12 @@ export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }
           fill = settlement ? (population > 400 ? '#e1c078' : population > 150 ? '#a58f62' : '#6d795c') : '#34463c';
         }
         if (layer === 'trade' && tile.terrain !== 'ocean') fill = tile.terrain === 'mountains' ? '#2e322f' : '#26362e';
+        if (layer === 'ecology' && tile.terrain !== 'ocean') {
+          const animals = animalByTile.get(`${tile.x}:${tile.y}`) ?? 0;
+          const resources = resourceByTile.get(`${tile.x}:${tile.y}`) ?? 0;
+          const richness = Math.min(1, animals / 180 + resources / 220);
+          fill = richness > .8 ? '#4f7f55' : richness > .45 ? '#526c4d' : richness > .15 ? '#475846' : '#303b35';
+        }
         ctx.fillStyle = fill;
         ctx.fillRect(ox + tile.x * cell, oy + tile.y * cell, Math.ceil(cell + .35), Math.ceil(cell + .35));
       }

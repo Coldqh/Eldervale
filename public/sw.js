@@ -1,4 +1,4 @@
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const CACHE = `eldervale-runtime-${VERSION}`;
 const ROOT = '/Eldervale/';
 const CORE = [

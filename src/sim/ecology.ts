@@ -1,0 +1,344 @@
+import type { AlchemyRecipe, AnimalPopulation, NaturalIngredient, Settlement, Terrain, WorldState } from '../types';
+import { appendCausalEvent } from './causality';
+import { RNG } from './rng';
+
+interface AnimalDefinition {
+  species: string;
+  terrains: Terrain[];
+  diet: AnimalPopulation['diet'];
+  base: [number, number];
+  reproduction: number;
+  prey: string[];
+  predators: string[];
+}
+
+const animals: AnimalDefinition[] = [
+  { species: 'олень', terrains: ['forest', 'plains', 'hills'], diet: 'травоядное', base: [18, 90], reproduction: .22, prey: [], predators: ['волк', 'рысь', 'пещерный медведь'] },
+  { species: 'кабан', terrains: ['forest', 'marsh', 'hills'], diet: 'всеядное', base: [10, 55], reproduction: .28, prey: [], predators: ['волк', 'пещерный медведь'] },
+  { species: 'заяц', terrains: ['plains', 'forest', 'tundra'], diet: 'травоядное', base: [35, 180], reproduction: .42, prey: [], predators: ['волк', 'рысь', 'степной орёл'] },
+  { species: 'горный козёл', terrains: ['hills', 'mountains'], diet: 'травоядное', base: [12, 70], reproduction: .18, prey: [], predators: ['рысь', 'грифон'] },
+  { species: 'северный олень', terrains: ['tundra'], diet: 'травоядное', base: [25, 130], reproduction: .2, prey: [], predators: ['волк'] },
+  { species: 'болотный тур', terrains: ['marsh'], diet: 'травоядное', base: [8, 38], reproduction: .14, prey: [], predators: ['болотный змей'] },
+  { species: 'волк', terrains: ['forest', 'plains', 'hills', 'tundra'], diet: 'хищник', base: [4, 24], reproduction: .12, prey: ['олень', 'кабан', 'заяц', 'северный олень'], predators: [] },
+  { species: 'рысь', terrains: ['forest', 'hills', 'mountains'], diet: 'хищник', base: [2, 10], reproduction: .08, prey: ['заяц', 'олень', 'горный козёл'], predators: [] },
+  { species: 'пещерный медведь', terrains: ['forest', 'hills', 'mountains'], diet: 'всеядное', base: [1, 6], reproduction: .04, prey: ['олень', 'кабан'], predators: [] },
+  { species: 'степной орёл', terrains: ['plains', 'hills', 'desert'], diet: 'хищник', base: [2, 12], reproduction: .08, prey: ['заяц'], predators: [] },
+  { species: 'песчаная антилопа', terrains: ['desert'], diet: 'травоядное', base: [12, 65], reproduction: .18, prey: [], predators: ['пустынная гиена'] },
+  { species: 'пустынная гиена', terrains: ['desert'], diet: 'хищник', base: [3, 17], reproduction: .1, prey: ['песчаная антилопа'], predators: [] },
+  { species: 'береговой тюлень', terrains: ['coast'], diet: 'хищник', base: [8, 48], reproduction: .12, prey: ['рыба'], predators: [] },
+];
+
+interface IngredientDefinition {
+  name: string;
+  terrains: Terrain[];
+  kind: NaturalIngredient['kind'];
+  properties: string[];
+  toxicity: number;
+  seasons: number[];
+}
+
+const ingredients: IngredientDefinition[] = [
+  { name: 'серебряный тысячелистник', terrains: ['plains', 'hills'], kind: 'растение', properties: ['заживление', 'снижение жара'], toxicity: 4, seasons: [4, 5, 6, 7, 8] },
+  { name: 'кровавый мох', terrains: ['forest', 'marsh'], kind: 'растение', properties: ['свёртывание крови', 'раздражение'], toxicity: 24, seasons: [3, 4, 5, 6, 7, 8, 9] },
+  { name: 'лунный гриб', terrains: ['forest', 'marsh'], kind: 'гриб', properties: ['сон', 'видения'], toxicity: 38, seasons: [8, 9, 10, 11] },
+  { name: 'горький корень', terrains: ['plains', 'forest', 'hills'], kind: 'растение', properties: ['противоядие', 'тошнота'], toxicity: 12, seasons: [2, 3, 4, 9, 10] },
+  { name: 'ледяной лишайник', terrains: ['tundra', 'mountains'], kind: 'растение', properties: ['охлаждение', 'замедление'], toxicity: 18, seasons: [1, 2, 10, 11, 12] },
+  { name: 'огненная соль', terrains: ['desert', 'mountains'], kind: 'минерал', properties: ['нагрев', 'воспламенение'], toxicity: 31, seasons: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
+  { name: 'болотная желчь', terrains: ['marsh'], kind: 'животный компонент', properties: ['яд', 'разложение'], toxicity: 68, seasons: [3, 4, 5, 6, 7, 8, 9] },
+  { name: 'янтарная смола', terrains: ['forest'], kind: 'растение', properties: ['сохранение', 'связующее вещество'], toxicity: 2, seasons: [5, 6, 7, 8] },
+  { name: 'каменный цветок', terrains: ['hills', 'mountains'], kind: 'минерал', properties: ['укрепление', 'минеральная соль'], toxicity: 9, seasons: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
+  { name: 'морская полынь', terrains: ['coast'], kind: 'растение', properties: ['дыхание', 'очищение'], toxicity: 15, seasons: [4, 5, 6, 7, 8, 9] },
+  { name: 'чёрная ягода', terrains: ['forest', 'tundra'], kind: 'растение', properties: ['бодрость', 'слабый яд'], toxicity: 27, seasons: [7, 8, 9] },
+];
+
+export function generateAnimalPopulations(worldSeed: string, tiles: WorldState['tiles'], density: number): AnimalPopulation[] {
+  const result: AnimalPopulation[] = [];
+  let id = 1;
+  for (const tile of tiles) {
+    if (tile.terrain === 'ocean') continue;
+    const rng = new RNG(`${worldSeed}:животные:${tile.x}:${tile.y}`);
+    const candidates = animals.filter(definition => definition.terrains.includes(tile.terrain));
+    if (!candidates.length) continue;
+    const count = Math.max(1, Math.min(candidates.length, Math.round((rng.int(1, 2) + (rng.chance(.3) ? 1 : 0)) * density)));
+    const selected = [...candidates].sort(() => rng.next() - .5).slice(0, count);
+    for (const definition of selected) {
+      const baseCount = rng.int(definition.base[0], definition.base[1]);
+      const carryingCapacity = Math.max(baseCount, Math.round(baseCount * rng.int(130, 230) / 100));
+      result.push({
+        id: id++, species: definition.species, x: tile.x, y: tile.y, count: baseCount, carryingCapacity,
+        diet: definition.diet, preySpecies: definition.prey, predatorSpecies: definition.predators,
+        reproductionRate: definition.reproduction, migrationDrive: rng.int(5, 35), health: rng.int(70, 100),
+        huntedThisYear: 0, lastCause: 'подходящий биом и доступная пища', history: [`Популяция сформировалась в клетке ${tile.x}:${tile.y}.`],
+      });
+    }
+  }
+  return result;
+}
+
+export function generateNaturalIngredients(worldSeed: string, tiles: WorldState['tiles'], density: number): NaturalIngredient[] {
+  const result: NaturalIngredient[] = [];
+  let id = 1;
+  for (const tile of tiles) {
+    if (tile.terrain === 'ocean') continue;
+    const rng = new RNG(`${worldSeed}:ресурсы:${tile.x}:${tile.y}`);
+    const candidates = ingredients.filter(definition => definition.terrains.includes(tile.terrain));
+    if (!candidates.length || !rng.chance(Math.min(1, .62 * density))) continue;
+    const selected = [...candidates].sort(() => rng.next() - .5).slice(0, rng.chance(.22 * density) ? 2 : 1);
+    for (const definition of selected) {
+      const abundance = rng.int(24, 92);
+      result.push({
+        id: id++, name: definition.name, x: tile.x, y: tile.y, kind: definition.kind, abundance,
+        carryingCapacity: rng.int(Math.max(abundance, 65), 150), regenerationRate: rng.int(4, 16), seasonMonths: definition.seasons,
+        properties: definition.properties, toxicity: definition.toxicity, harvestedThisYear: 0,
+        history: [`Источник обнаружен в клетке ${tile.x}:${tile.y}.`],
+      });
+    }
+  }
+  return result;
+}
+
+export function generateAlchemyRecipes(world: Pick<WorldState, 'ingredients' | 'characters' | 'year'>, rng: RNG): AlchemyRecipe[] {
+  const specialists = world.characters.filter(character => character.age >= 18 && ['herbalist', 'healer', 'brewer'].includes(character.profession));
+  const distinct = [...new Map(world.ingredients.map(item => [item.name, item])).values()];
+  if (distinct.length < 2) return [];
+  const result: AlchemyRecipe[] = [];
+  const count = Math.min(28, Math.max(8, Math.round(distinct.length * .8)));
+  const effects = [
+    ['лечебная настойка', 'ускоряет заживление ран', 'передозировка вызывает слабость'],
+    ['жаропонижающий отвар', 'снижает жар и облегчает болезнь', 'ошибка дозировки вызывает озноб'],
+    ['охотничий яд', 'ослабляет зверя после попадания в кровь', 'опасен для изготовителя'],
+    ['противоядие', 'связывает распространённые природные яды', 'не действует на неизвестные токсины'],
+    ['дымная смесь', 'создаёт густой раздражающий дым', 'может воспламениться'],
+    ['укрепляющее масло', 'защищает кожу и дерево от повреждений', 'легко портится'],
+    ['сонный порошок', 'вызывает сонливость', 'в большой дозе останавливает дыхание'],
+  ] as const;
+  for (let id = 1; id <= count; id += 1) {
+    const ingredientA = rng.pick(distinct);
+    const ingredientB = rng.pick(distinct.filter(item => item.name !== ingredientA.name));
+    const specialist = specialists.length ? rng.pick(specialists) : undefined;
+    const [resultName, effect, risk] = rng.pick(effects);
+    result.push({
+      id, name: `${resultName}: ${ingredientA.name}`, ingredientIds: [ingredientA.id, ingredientB.id], result: resultName,
+      effect, risk, discoveredById: specialist?.id, discoveryYear: rng.int(Math.max(1, world.year - 120), world.year),
+      source: specialist ? `опыты ${specialist.name}` : 'старые записи неизвестного травника', batchesCreated: rng.int(0, 18),
+      history: [`Рецепт возник из сочетания «${ingredientA.name}» и «${ingredientB.name}».`],
+    });
+  }
+  return result;
+}
+
+export function advanceEcology(world: WorldState, rng: RNG): void {
+  regenerateIngredients(world);
+  if (world.month % 3 === 1) updateAnimalPopulations(world, rng);
+  gatherResources(world, rng);
+  huntAnimals(world, rng);
+  brewAlchemy(world, rng);
+  if (world.month === 1) {
+    for (const population of world.animalPopulations) population.huntedThisYear = 0;
+    for (const ingredient of world.ingredients) ingredient.harvestedThisYear = 0;
+  }
+}
+
+function regenerateIngredients(world: WorldState): void {
+  for (const ingredient of world.ingredients) {
+    if (!ingredient.seasonMonths.includes(world.month)) continue;
+    ingredient.abundance = Math.min(ingredient.carryingCapacity, ingredient.abundance + Math.max(1, Math.round(ingredient.regenerationRate / 4)));
+  }
+}
+
+function updateAnimalPopulations(world: WorldState, rng: RNG): void {
+  const populations = world.animalPopulations;
+  for (const population of [...populations]) {
+    const local = populations.filter(item => item.x === population.x && item.y === population.y && item.id !== population.id);
+    const prey = local.filter(item => population.preySpecies.includes(item.species)).reduce((sum, item) => sum + item.count, 0);
+    const predators = local.filter(item => item.preySpecies.includes(population.species)).reduce((sum, item) => sum + item.count, 0);
+    const foodFactor = population.diet === 'хищник' ? Math.min(1.25, prey / Math.max(5, population.count * 2)) : 1;
+    const crowding = population.count / Math.max(1, population.carryingCapacity);
+    const births = Math.max(0, Math.round(population.count * population.reproductionRate * foodFactor * Math.max(0, 1 - crowding) / 4));
+    const crowdingMortality = Math.max(0, crowding - 1) * .16;
+    const deaths = Math.max(0, Math.round(population.count * (.008 + predators / Math.max(100, population.count * 16) + (population.health < 45 ? .03 : 0) + crowdingMortality)));
+    population.count = Math.max(0, population.count + births - deaths);
+    population.health = Math.max(10, Math.min(100, population.health + (foodFactor > .55 ? 2 : -8) + rng.int(-2, 2)));
+    population.migrationDrive = Math.max(0, Math.min(100, population.migrationDrive + (crowding > .88 ? 10 : -2) + (foodFactor < .45 ? 18 : 0)));
+
+    if (population.count <= 0) {
+      if (population.history.some(line => line.includes('местная популяция исчезла'))) continue;
+      population.history.push(`К ${world.year} году местная популяция исчезла из-за ${population.lastCause}.`);
+      appendCausalEvent(world, {
+        kind: 'ecology', title: `Исчезла местная популяция: ${population.species}`, description: `В клетке ${population.x}:${population.y} больше не осталось устойчивой группы животных.`,
+        cause: population.lastCause || 'охота, хищники и нехватка пищи', conditions: [`численность упала до нуля`, `здоровье популяции ${population.health}%`],
+        decision: 'животные не смогли восстановить численность или уйти в безопасный район', outcome: 'локальная пищевая цепочка изменилась',
+        consequences: ['хищники теряют часть добычи', 'охотники вынуждены искать другие земли'], entityRefs: [{ kind: 'animalPopulation', id: population.id }], importance: 3,
+      });
+      continue;
+    }
+
+    if (population.migrationDrive >= 85 && rng.chance(.12)) migratePopulation(world, population, rng);
+  }
+}
+
+function migratePopulation(world: WorldState, population: AnimalPopulation, rng: RNG): void {
+  const neighbours = world.tiles.filter(tile => Math.abs(tile.x - population.x) + Math.abs(tile.y - population.y) === 1 && tile.terrain !== 'ocean');
+  const suitable = neighbours.filter(tile => {
+    if (!animals.find(definition => definition.species === population.species)?.terrains.includes(tile.terrain)) return false;
+    const resident = world.animalPopulations.find(item => item.species === population.species && item.x === tile.x && item.y === tile.y);
+    return !resident || resident.count < resident.carryingCapacity * .9;
+  });
+  if (!suitable.length) return;
+  const destination = rng.pick(suitable);
+  const resident = world.animalPopulations.find(item => item.species === population.species && item.x === destination.x && item.y === destination.y);
+  const desiredMove = Math.max(1, Math.round(population.count * rng.int(20, 45) / 100));
+  const spareCapacity = resident ? Math.max(0, resident.carryingCapacity - resident.count) : desiredMove;
+  const moved = Math.min(desiredMove, spareCapacity);
+  if (moved <= 0) return;
+  const previousDrive = population.migrationDrive;
+  population.count -= moved;
+  population.migrationDrive = 20;
+  population.lastCause = 'нехватка пищи, давление хищников или перенаселение';
+  let target = resident;
+  if (!target) {
+    const habitatCapacity = Math.max(moved, Math.round(population.carryingCapacity * rng.int(75, 115) / 100));
+    target = { ...population, id: world.nextIds.animalPopulation++, x: destination.x, y: destination.y, count: 0, carryingCapacity: habitatCapacity, huntedThisYear: 0, history: [] };
+    world.animalPopulations.push(target);
+  }
+  target.count += moved;
+  target.history.push(`В ${world.year} году прибыло ${moved} особей из клетки ${population.x}:${population.y}.`);
+  const alreadyRecorded = world.events.some(event => event.year === world.year && event.kind === 'migration' && event.entityRefs.some(ref => ref.kind === 'animalPopulation' && ref.id === population.id));
+  if (moved >= 8 && !alreadyRecorded) appendCausalEvent(world, {
+    kind: 'migration', title: `${population.species}: миграция в клетку ${destination.x}:${destination.y}`,
+    description: `${moved} особей покинули прежнюю территорию.`, cause: population.lastCause,
+    conditions: [`миграционное давление достигло ${previousDrive}%`, `рядом нашёлся подходящий биом`],
+    decision: 'стая или стадо переместилось в соседнюю клетку', outcome: `численность перераспределилась между клетками`,
+    consequences: ['изменилась доступность добычи', 'охотничьи угодья сместились'], entityRefs: [{ kind: 'animalPopulation', id: population.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
+  });
+}
+
+function nearbySettlements(world: WorldState, x: number, y: number): Settlement[] {
+  return world.settlements.filter(settlement => Math.hypot(settlement.x - x, settlement.y - y) <= 2.5);
+}
+
+function huntAnimals(world: WorldState, rng: RNG): void {
+  for (const settlement of world.settlements) {
+    const hunters = world.characters.filter(character => character.alive && character.settlementId === settlement.id && character.profession === 'hunter');
+    if (!hunters.length || world.month % 2 !== 0) continue;
+    const candidates = world.animalPopulations.filter(population => population.count > 2 && Math.hypot(population.x - settlement.x, population.y - settlement.y) <= 2.3 && population.diet !== 'хищник');
+    if (!candidates.length) continue;
+    const target = [...candidates].sort((a, b) => b.count - a.count)[0]!;
+    const need = settlement.food < 45 ? 1.45 : 1;
+    const killed = Math.min(target.count - 1, Math.max(1, Math.round(hunters.length * world.config.huntingPressure * need * rng.int(1, 3))));
+    if (killed <= 0) continue;
+    target.count -= killed;
+    target.huntedThisYear += killed;
+    target.lastCause = `охота жителей поселения ${settlement.name}`;
+    settlement.food = Math.min(240, settlement.food + killed * 2);
+    settlement.stockpile['мясо'] = (settlement.stockpile['мясо'] ?? 0) + killed * 2;
+    settlement.stockpile['шкуры'] = (settlement.stockpile['шкуры'] ?? 0) + Math.max(1, killed);
+    const dangerous = rng.chance(.012 * hunters.length + (target.species.includes('кабан') ? .04 : 0));
+    if (dangerous) {
+      const victim = rng.pick(hunters);
+      victim.health = Math.max(12, victim.health - rng.int(14, 42));
+      victim.injuries.push(`рана на охоте на ${target.species}`);
+      appendCausalEvent(world, {
+        kind: 'hunt', title: `${victim.name} ранен на охоте`, description: `Охотники добыли ${killed} животных, но один из них получил тяжёлую рану.`,
+        cause: `поселению ${settlement.name} требовались мясо и шкуры`, conditions: [`в угодьях было ${target.count + killed} животных`, `на охоту вышли ${hunters.length} охотников`],
+        decision: `охотники выбрали добычу «${target.species}»`, outcome: `получено мясо и шкуры, ${victim.name} ранен`,
+        consequences: ['запасы пищи выросли', 'численность животных снизилась', 'охотник получил постоянный след'],
+        entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'character', id: victim.id }, { kind: 'animalPopulation', id: target.id }], importance: 3,
+      });
+    } else if (killed >= 8 || settlement.food < 30) {
+      appendCausalEvent(world, {
+        kind: 'hunt', title: `Охотники ${settlement.name} вернулись с добычей`, description: `Добыто ${killed} животных вида «${target.species}».`,
+        cause: settlement.food < 45 ? 'нехватка пищи' : 'спрос на мясо и шкуры', conditions: [`рядом существовала популяция из ${target.count + killed} особей`, `в поселении работали ${hunters.length} охотников`],
+        decision: `охотники отправились в клетку ${target.x}:${target.y}`, outcome: `запасы пищи выросли на ${killed * 2}`,
+        consequences: ['поселение получило мясо и шкуры', 'животная популяция сократилась'], entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
+      });
+    }
+  }
+}
+
+function gatherResources(world: WorldState, rng: RNG): void {
+  if (![4, 7, 10].includes(world.month)) return;
+  for (const settlement of world.settlements) {
+    const gatherers = world.characters.filter(character => character.alive && character.settlementId === settlement.id && ['herbalist', 'healer', 'farmer'].includes(character.profession));
+    if (!gatherers.length) continue;
+    const candidates = world.ingredients.filter(ingredient => ingredient.abundance > 3 && ingredient.seasonMonths.includes(world.month) && Math.hypot(ingredient.x - settlement.x, ingredient.y - settlement.y) <= 2.2);
+    if (!candidates.length) continue;
+    const source = rng.pick(candidates);
+    const amount = Math.min(source.abundance, Math.max(1, Math.round(gatherers.length * rng.int(1, 3) * .55)));
+    source.abundance -= amount;
+    source.harvestedThisYear += amount;
+    settlement.stockpile[source.name] = (settlement.stockpile[source.name] ?? 0) + amount;
+    source.history.push(`В ${world.year} году жители ${settlement.name} собрали ${amount} единиц.`);
+    if (source.abundance < source.carryingCapacity * .12 || amount >= 10) {
+      appendCausalEvent(world, {
+        kind: 'foraging', title: `Сбор: ${source.name}`, description: `Жители ${settlement.name} принесли ${amount} единиц сырья.`,
+        cause: 'потребность лекарей, ремесленников и алхимиков в природном сырье', conditions: [`сезон подходит для сбора`, `источник имел запас ${source.abundance + amount}`],
+        decision: `собиратели отправились в клетку ${source.x}:${source.y}`, outcome: `сырьё доставлено в ${settlement.name}`,
+        consequences: ['запасы поселения пополнены', source.abundance < source.carryingCapacity * .12 ? 'источник истощён и будет восстанавливаться медленно' : 'источник сохранил часть запаса'],
+        entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'ingredient', id: source.id }], importance: source.abundance < source.carryingCapacity * .12 ? 3 : 2,
+      });
+    }
+  }
+}
+
+function brewAlchemy(world: WorldState, rng: RNG): void {
+  if (![4, 8, 12].includes(world.month)) return;
+  for (const settlement of world.settlements) {
+    const alchemists = world.characters.filter(character => character.alive && character.settlementId === settlement.id && ['herbalist', 'healer', 'brewer'].includes(character.profession));
+    if (!alchemists.length) continue;
+    const available = world.alchemyRecipes.filter(recipe => recipe.ingredientIds.every(id => {
+      const ingredient = world.ingredients.find(item => item.id === id);
+      return ingredient && (settlement.stockpile[ingredient.name] ?? 0) > 0;
+    }));
+    if (!available.length) continue;
+    const recipe = rng.pick(available);
+    for (const id of recipe.ingredientIds) {
+      const ingredient = world.ingredients.find(item => item.id === id)!;
+      settlement.stockpile[ingredient.name] = Math.max(0, (settlement.stockpile[ingredient.name] ?? 0) - 1);
+    }
+    recipe.batchesCreated += 1;
+    settlement.stockpile[recipe.result] = (settlement.stockpile[recipe.result] ?? 0) + 1;
+    const maker = rng.pick(alchemists);
+    const accident = rng.chance(.025 + recipe.ingredientIds.reduce((sum, id) => sum + (world.ingredients.find(item => item.id === id)?.toxicity ?? 0), 0) / 3000);
+    if (accident) {
+      maker.health = Math.max(10, maker.health - rng.int(8, 35));
+      maker.injuries.push(`алхимический ожог при создании «${recipe.name}»`);
+      appendCausalEvent(world, {
+        kind: 'alchemy', title: `Алхимический несчастный случай в ${settlement.name}`,
+        description: `${maker.name} пострадал при изготовлении состава «${recipe.name}».`, cause: recipe.risk,
+        conditions: ['ядовитые или нестабильные компоненты', `рецепт изготовлялся в ${settlement.name}`], decision: `${maker.name} провёл опасную обработку компонентов`,
+        outcome: 'состав создан, но мастер получил травму', consequences: ['в запасах появился алхимический состав', 'алхимик ранен'],
+        entityRefs: [{ kind: 'recipe', id: recipe.id }, { kind: 'character', id: maker.id }, { kind: 'settlement', id: settlement.id }], importance: 3,
+      });
+    } else if (recipe.batchesCreated === 1 || rng.chance(.08)) {
+      appendCausalEvent(world, {
+        kind: 'alchemy', title: `Создан состав «${recipe.name}»`, description: `${maker.name} изготовил ${recipe.result}.`,
+        cause: 'наличие рецепта, сырья и обученного мастера', conditions: [`в запасах были все компоненты`, `${maker.name} владеет травничеством или лекарским делом`],
+        decision: `мастер использовал рецепт «${recipe.name}»`, outcome: `состав «${recipe.result}» помещён в запасы поселения`,
+        consequences: ['алхимические запасы выросли', 'часть природного сырья израсходована'], entityRefs: [{ kind: 'recipe', id: recipe.id }, { kind: 'character', id: maker.id }, { kind: 'settlement', id: settlement.id }], importance: 2,
+      });
+    }
+  }
+}
+
+export function ecologyNear(world: WorldState, x: number, y: number): { animals: AnimalPopulation[]; ingredients: NaturalIngredient[] } {
+  return {
+    animals: world.animalPopulations.filter(item => item.x === x && item.y === y && item.count > 0),
+    ingredients: world.ingredients.filter(item => item.x === x && item.y === y && item.abundance > 0),
+  };
+}
+
+export function ecologyIntegrityIssues(world: WorldState): string[] {
+  const issues: string[] = [];
+  for (const population of world.animalPopulations) {
+    if (!world.tiles.some(tile => tile.x === population.x && tile.y === population.y)) issues.push(`Популяция ${population.id} вне карты`);
+    if (population.count < 0) issues.push(`Популяция ${population.id} имеет отрицательную численность`);
+  }
+  for (const ingredient of world.ingredients) {
+    if (ingredient.abundance < 0 || ingredient.abundance > ingredient.carryingCapacity) issues.push(`Источник ${ingredient.id} имеет неверный запас`);
+  }
+  for (const settlement of world.settlements) {
+    if (settlement.population > settlement.residentialCapacity) issues.push(`${settlement.name}: ${settlement.population} жителей при вместимости ${settlement.residentialCapacity}`);
+  }
+  return issues;
+}

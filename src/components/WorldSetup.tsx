@@ -4,9 +4,9 @@ import { defaultConfig } from '../sim/generator';
 import { APP_VERSION } from '../version';
 
 const deviceProfiles: { label: string; hint: string; config: Partial<WorldConfig> }[] = [
-  { label: 'Телефон', hint: 'Быстрая генерация и меньше нагрев', config: { width: 46, height: 30, settlementCount: 24, populationScale: .58, historyYears: 240 } },
-  { label: 'Стандарт', hint: 'Оптимально для iPhone 14 Pro и ноутбука', config: { width: 54, height: 34, settlementCount: 30, populationScale: .72, historyYears: 320 } },
-  { label: 'Большой мир', hint: 'Больше территорий, людей и истории', config: { width: 68, height: 42, settlementCount: 42, populationScale: .92, historyYears: 480 } },
+  { label: 'Телефон', hint: 'Быстрая генерация и меньше нагрев', config: { width: 46, height: 30, settlementCount: 24, populationScale: .58, historyYears: 240, localMapSize: 96, ecologyDensity: .8, huntingPressure: .85 } },
+  { label: 'Стандарт', hint: 'Оптимально для iPhone 14 Pro и ноутбука', config: { width: 54, height: 34, settlementCount: 30, populationScale: .72, historyYears: 320, localMapSize: 128, ecologyDensity: 1, huntingPressure: 1 } },
+  { label: 'Большой мир', hint: 'Больше территорий, людей и истории', config: { width: 68, height: 42, settlementCount: 42, populationScale: .92, historyYears: 480, localMapSize: 160, ecologyDensity: 1.2, huntingPressure: 1.1 } },
 ];
 
 export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { initial?: WorldConfig; onGenerate: (config: WorldConfig) => void; onClose?: () => void; onOpenSettings: () => void }) {
@@ -52,6 +52,9 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
           <Range label="Воинственность" value={config.warlike} min={0.05} max={1} step={0.05} onChange={v => set('warlike', v)} />
           <Range label="Монстры" value={config.monsterDensity} min={0.4} max={2} step={0.1} onChange={v => set('monsterDensity', v)} />
           <Range label="Артефакты" value={config.artifactDensity} min={0.4} max={2} step={0.1} onChange={v => set('artifactDensity', v)} />
+          <Range label="Размер локальной карты" value={config.localMapSize} min={96} max={160} step={32} onChange={v => set('localMapSize', v as 96 | 128 | 160)} />
+          <Range label="Плотность экологии" value={config.ecologyDensity} min={0.5} max={1.6} step={0.1} onChange={v => set('ecologyDensity', v)} />
+          <Range label="Интенсивность охоты" value={config.huntingPressure} min={0.5} max={1.6} step={0.1} onChange={v => set('huntingPressure', v)} />
         </div>
       </details>
 
@@ -62,7 +65,7 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
       </div>
 
       <button className="primary-button" onClick={() => onGenerate(config)}>Сотворить Eldervale <span>→</span></button>
-      <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Большие миры сильнее нагружают мобильный браузер. Версия приложения: {APP_VERSION}.</p>
+      <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Животные существуют популяциями, природные ресурсы восстанавливаются по сезонам, а локальная карта каждого квадрата имеет размер {config.localMapSize}×{config.localMapSize}. Версия приложения: {APP_VERSION}.</p>
     </div>
   </div>;
 }

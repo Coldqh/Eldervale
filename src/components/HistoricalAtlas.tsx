@@ -6,7 +6,7 @@ import {
   importantEventsUntil, primaryRef, type AtlasEventGroup,
 } from '../lib/historicalAtlas';
 
-const groups: AtlasEventGroup[] = ['войны', 'чудовища', 'власть', 'знания', 'поселения', 'жизни'];
+const groups: AtlasEventGroup[] = ['войны', 'чудовища', 'власть', 'знания', 'поселения', 'природа', 'жизни'];
 
 export function HistoricalAtlas({ world, onSelect, onClose }: { world: WorldState; onSelect: (ref: EntityRef) => void; onClose: () => void }) {
   const range = useMemo(() => atlasYearRange(world), [world]);
@@ -53,7 +53,7 @@ export function HistoricalAtlas({ world, onSelect, onClose }: { world: WorldStat
       <div className="window-card atlas-map-window">
         <div className="map-toolbar atlas-map-toolbar">
           <div className="layer-tabs">
-            {(['terrain', 'realms', 'danger', 'population', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
+            {(['terrain', 'realms', 'danger', 'population', 'ecology', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
           </div>
           <span className="atlas-reconstruction">Реконструкция по летописям и контролю поселений</span>
         </div>
@@ -99,7 +99,7 @@ function EventButton({ event, onSelect, detailed = false }: { event: WorldState[
   const ref = primaryRef(event);
   return <button className={`atlas-event importance-${event.importance}`} onClick={() => ref && onSelect(ref)} disabled={!ref}>
     <time>{event.year}.{String(event.month).padStart(2, '0')}</time>
-    <span><strong>{event.title}</strong><small>{event.description}</small>{detailed && <em>Причина: {event.cause}</em>}</span>
+    <span><strong>{event.title}</strong><small>{event.description}</small>{detailed && <><em>Причина: {event.cause}</em><em>Действие: {event.decision}</em><em>Результат: {event.outcome}</em></>}</span>
   </button>;
 }
 
@@ -108,5 +108,5 @@ function AtlasStat({ value, label }: { value: string | number; label: string }) 
 }
 
 function layerLabel(layer: MapLayer) {
-  return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', trade: 'Торговля' } as const)[layer];
+  return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', ecology: 'Природа', trade: 'Торговля' } as const)[layer];
 }

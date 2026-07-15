@@ -1,6 +1,7 @@
 import type { UpdateCheckResult } from '../lib/appUpdate';
 import type { WorldState } from '../types';
 import { APP_VERSION } from '../version';
+import { inspectWorldIntegrity } from '../sim/integrity';
 
 export function SettingsPanel({ world, update, onCheck, onForceUpdate, onClose }: {
   world?: WorldState;
@@ -9,6 +10,7 @@ export function SettingsPanel({ world, update, onCheck, onForceUpdate, onClose }
   onForceUpdate: () => void;
   onClose: () => void;
 }) {
+  const integrity = world ? inspectWorldIntegrity(world) : undefined;
   const status = update.updateRequired
     ? `Доступна обязательная версия ${update.remoteVersion}`
     : update.error
@@ -24,12 +26,12 @@ export function SettingsPanel({ world, update, onCheck, onForceUpdate, onClose }
         <div className="stat-row"><span>Схема сохранения</span><strong>{world ? `версия ${world.version}` : 'нет активного мира'}</strong></div>
         <div className="stat-row"><span>Хранилище</span><strong>IndexedDB с резервным локальным сохранением</strong></div>
         <div className="stat-row"><span>Обновления</span><strong>обязательные, с очисткой старого кэша</strong></div>
-        {world && <><div className="stat-row"><span>Мир</span><strong>{world.name}</strong></div><div className="stat-row"><span>Последняя эпоха</span><strong>{world.year} год</strong></div></>}
+        {world && <><div className="stat-row"><span>Мир</span><strong>{world.name}</strong></div><div className="stat-row"><span>Последняя эпоха</span><strong>{world.year} год</strong></div><div className="stat-row"><span>Локальная карта</span><strong>{world.config.localMapSize}×{world.config.localMapSize}</strong></div><div className="stat-row"><span>Животные</span><strong>{world.animalPopulations.length} популяций</strong></div><div className="stat-row"><span>Природные ресурсы</span><strong>{world.ingredients.length} источников</strong></div><div className="stat-row"><span>Алхимия</span><strong>{world.alchemyRecipes.length} рецептов</strong></div><div className="stat-row"><span>Проверка логики</span><strong>{integrity?.errors.length ? `${integrity.errors.length} ошибок` : `${integrity?.checks.toLocaleString('ru-RU')} проверок · ошибок нет`}</strong></div>{Boolean(integrity?.warnings.length) && <div className="stat-row"><span>Предупреждения</span><strong>{integrity!.warnings.slice(0, 3).join('; ')}</strong></div>}</>}
       </div>
       <div className="settings-release-notes">
         <span className="eyebrow">Последнее обновление</span>
-        <strong>0.4.0 · Исторический атлас</strong>
-        <small>Выбор года, реконструкция границ, слои эпохи, фильтры хроники и исправление вкладок архива на ПК.</small>
+        <strong>0.6.0 · Живая экология и универсальная причинность</strong>
+        <small>Крупные локальные карты, реальные жилые кварталы, многоклеточные города, животные, охота, собирательство, алхимия и полная цепочка причин у каждого события.</small>
       </div>
       <div className="settings-actions">
         <button className="ghost-button" onClick={onCheck}>Проверить обновление</button>

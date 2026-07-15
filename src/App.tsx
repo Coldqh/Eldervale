@@ -206,7 +206,7 @@ export default function App() {
       {view === 'map' && <section className="map-stage workspace-view">
         <div className="map-toolbar">
           <div className="layer-tabs">
-            {(['terrain', 'realms', 'danger', 'population', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
+            {(['terrain', 'realms', 'danger', 'population', 'ecology', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
           </div>
           <div className="map-toolbar-right"><div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div><button className="atlas-entry-button" onClick={() => setView('atlas')}>Исторический атлас</button></div>
         </div>
@@ -290,6 +290,9 @@ function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: nu
   if (ref.kind === 'war') { const item = world.wars.find(entity => entity.id === ref.id); const place = item?.contestedSettlementIds[0] ? world.settlements.find(entity => entity.id === item.contestedSettlementIds[0]) : undefined; return place && { x: place.x, y: place.y }; }
   if (ref.kind === 'tradeRoute') { const item = world.tradeRoutes.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.fromSettlementId); return place && { x: place.x, y: place.y }; }
   if (ref.kind === 'dynasty') { const item = world.dynasties.find(entity => entity.id === ref.id); const kingdom = item?.kingdomId ? world.kingdoms.find(entity => entity.id === item.kingdomId) : undefined; const place = kingdom && world.settlements.find(entity => entity.id === kingdom.capitalId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'animalPopulation') { const item = world.animalPopulations.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'ingredient') { const item = world.ingredients.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'recipe') { const item = world.alchemyRecipes.find(entity => entity.id === ref.id); const maker = item?.discoveredById ? world.characters.find(entity => entity.id === item.discoveredById) : undefined; const place = maker && world.settlements.find(entity => entity.id === maker.settlementId); return place && { x: place.x, y: place.y }; }
   return undefined;
 }
 
@@ -297,8 +300,8 @@ function ViewButton({ active, icon, label, onClick }: { active: boolean; icon: s
   return <button className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span>{label}</button>;
 }
 
-function LoadingVeil({ text }: { text: string }) { return <div className="loading-veil"><div className="loading-sigil">E</div><strong>{text}</strong><span>армии идут, люди стареют, чудовища выбирают добычу</span></div>; }
+function LoadingVeil({ text }: { text: string }) { return <div className="loading-veil"><div className="loading-sigil">E</div><strong>{text}</strong><span>жители работают, звери мигрируют, охотники ищут добычу, алхимики расходуют сырьё</span></div>; }
 function ForcedUpdate({ remoteVersion, onUpdate }: { remoteVersion: string; onUpdate: () => void }) { return <div className="loading-veil forced-update"><div className="loading-sigil">↻</div><strong>Требуется обновление</strong><span>Найдена версия {remoteVersion}. Старый кэш очищается автоматически.</span><button className="primary-button update-now" onClick={onUpdate}>Обновить сейчас <b>→</b></button></div>; }
 function Stat({ value, label }: { value: string | number; label: string }) { return <div><strong>{value}</strong><span>{label}</span></div>; }
 function monthName(month: number) { return ['Глубокая зима', 'Поздняя зима', 'Оттепель', 'Посев', 'Зелень', 'Высокое солнце', 'Жатва', 'Золотой месяц', 'Туманы', 'Листопад', 'Первые морозы', 'Долгая ночь'][month - 1]; }
-function layerLabel(layer: MapLayer) { return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', trade: 'Торговля' } as const)[layer]; }
+function layerLabel(layer: MapLayer) { return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', ecology: 'Природа', trade: 'Торговля' } as const)[layer]; }

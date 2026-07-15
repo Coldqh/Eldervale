@@ -1,10 +1,10 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 export interface WorldConfig {
@@ -19,6 +19,9 @@ export interface WorldConfig {
   warlike: number;
   monsterDensity: number;
   artifactDensity: number;
+  localMapSize: 96 | 128 | 160;
+  ecologyDensity: number;
+  huntingPressure: number;
 }
 
 export interface Tile {
@@ -29,6 +32,7 @@ export interface Tile {
   moisture: number;
   kingdomId?: number;
   settlementId?: number;
+  settlementDistrict?: string;
   dungeonId?: number;
   monsterId?: number;
 }
@@ -61,6 +65,13 @@ export interface Kingdom {
   laws: string[];
 }
 
+export interface SettlementDistrict {
+  x: number;
+  y: number;
+  name: string;
+  role: 'центр' | 'жилой район' | 'рынок' | 'ремесленный район' | 'крепость' | 'порт' | 'поля' | 'окраина';
+}
+
 export interface Settlement {
   id: number;
   name: string;
@@ -74,9 +85,15 @@ export interface Settlement {
   foundedYear: number;
   type: 'hamlet' | 'village' | 'town' | 'city' | 'fortress' | 'port';
   buildings: string[];
+  buildingCounts: Record<string, number>;
+  households: number;
+  residentialCapacity: number;
+  districts: SettlementDistrict[];
   notableCharacterIds: number[];
   damaged: number;
   resource: string;
+  stockpile: Record<string, number>;
+  livestock: Record<string, number>;
   shortages: string[];
   tradeRouteIds: number[];
   unrest: number;
@@ -95,6 +112,8 @@ export interface Character {
   kingdomId: number;
   dynastyId?: number;
   profession: string;
+  workplace: string;
+  homeDistrict?: string;
   renown: number;
   health: number;
   wealth: number;
@@ -171,6 +190,54 @@ export interface Monster {
   targetSettlementId?: number;
   lairDungeonId?: number;
   kills: number;
+  history: string[];
+}
+
+export interface AnimalPopulation {
+  id: number;
+  species: string;
+  x: number;
+  y: number;
+  count: number;
+  carryingCapacity: number;
+  diet: 'травоядное' | 'хищник' | 'всеядное';
+  preySpecies: string[];
+  predatorSpecies: string[];
+  reproductionRate: number;
+  migrationDrive: number;
+  health: number;
+  huntedThisYear: number;
+  lastCause: string;
+  history: string[];
+}
+
+export interface NaturalIngredient {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  kind: 'растение' | 'гриб' | 'минерал' | 'животный компонент';
+  abundance: number;
+  carryingCapacity: number;
+  regenerationRate: number;
+  seasonMonths: number[];
+  properties: string[];
+  toxicity: number;
+  harvestedThisYear: number;
+  history: string[];
+}
+
+export interface AlchemyRecipe {
+  id: number;
+  name: string;
+  ingredientIds: number[];
+  result: string;
+  effect: string;
+  risk: string;
+  discoveredById?: number;
+  discoveryYear: number;
+  source: string;
+  batchesCreated: number;
   history: string[];
 }
 
@@ -268,12 +335,28 @@ export interface WorldEvent {
   title: string;
   description: string;
   cause: string;
+  conditions: string[];
+  decision: string;
+  outcome: string;
   consequences: string[];
   traces: EntityRef[];
   entityRefs: EntityRef[];
   importance: number;
 }
 
+export interface CausalEventInput {
+  kind: EventKind;
+  title: string;
+  description: string;
+  cause: string;
+  conditions?: string[];
+  decision?: string;
+  outcome?: string;
+  consequences: string[];
+  entityRefs: EntityRef[];
+  importance: number;
+  traces?: EntityRef[];
+}
 
 export interface LocalMapEffect {
   id: string;
@@ -301,7 +384,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group';
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -331,7 +414,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 3;
+  version: 4;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -346,6 +429,9 @@ export interface WorldState {
   dynasties: Dynasty[];
   armies: Army[];
   monsters: Monster[];
+  animalPopulations: AnimalPopulation[];
+  ingredients: NaturalIngredient[];
+  alchemyRecipes: AlchemyRecipe[];
   artifacts: Artifact[];
   books: Book[];
   dungeons: Dungeon[];

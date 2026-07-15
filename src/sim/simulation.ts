@@ -1,27 +1,26 @@
-import type { Character, EntityRef, Kingdom, Relationship, Settlement, TradeRoute, War, WorldEvent, WorldState } from '../types';
+import type { Character, EntityRef, Kingdom, Relationship, Settlement, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
 import { RNG } from './rng';
 import { personName, placeName } from './names';
+import { appendCausalEvent } from './causality';
+import { advanceEcology } from './ecology';
+import { expandHousing } from './settlements';
 
-function addEvent(world: WorldState, data: {
-  kind: WorldEvent['kind']; title: string; description: string; cause: string; consequences: string[];
-  entityRefs: EntityRef[]; importance: number; traces?: EntityRef[];
-}): WorldEvent {
-  const event: WorldEvent = {
-    id: world.nextIds.event++, year: world.year, month: world.month, kind: data.kind, title: data.title, description: data.description,
-    cause: data.cause, consequences: data.consequences, traces: data.traces ?? data.entityRefs, entityRefs: data.entityRefs, importance: data.importance,
-  };
-  world.events.push(event);
-  if (world.events.length > 3600) world.events.splice(0, world.events.length - 3600);
-  return event;
+function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
+  return appendCausalEvent(world, data);
 }
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function workplaceFor(profession: string): string {
+  const map: Record<string, string> = { child: 'дом семьи', farmer: 'поля и пастбища', miller: 'мельница', hunter: 'охотничьи угодья', guard: 'стража и ворота', blacksmith: 'кузница', carpenter: 'плотницкая мастерская', herbalist: 'травницкая мастерская', merchant: 'рынок', scribe: 'архив или канцелярия', priest: 'храм', soldier: 'казармы', fisher: 'берег или пристань', miner: 'шахта', weaver: 'ткацкая мастерская', brewer: 'пивоварня', healer: 'лечебница' };
+  return map[profession] ?? 'местные работы';
+}
 
 function addLocalEffect(world: WorldState, globalX: number, globalY: number, kind: WorldState['localMapChanges'][number]['kind'], label: string, rng: RNG, entityRef?: EntityRef, level = 0): void {
   world.localMapChanges ??= [];
   const effect = {
     id: `${world.year}-${world.month}-${world.localMapChanges.length + 1}-${rng.int(1000, 9999)}`,
-    globalX, globalY, level, localX: rng.int(4, 43), localY: rng.int(4, 43), kind, year: world.year, label, entityRef,
+    globalX, globalY, level, localX: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), localY: rng.int(6, Math.max(7, (world.config.localMapSize ?? 128) - 7)), kind, year: world.year, label, entityRef,
   };
   world.localMapChanges.push(effect);
   if (world.localMapChanges.length > 6000) world.localMapChanges.splice(0, world.localMapChanges.length - 6000);
@@ -151,7 +150,7 @@ function advancePopulation(world: WorldState, rng: RNG): void {
   for (const character of world.characters) {
     if (!character.alive) continue;
     character.age += 1;
-    if (character.profession === 'child' && character.age >= 14) character.profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']);
+    if (character.profession === 'child' && character.age >= 14) { character.profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']); character.workplace = workplaceFor(character.profession); }
     const settlement = world.settlements.find(item => item.id === character.settlementId);
     const hungerRisk = settlement?.shortages.includes('пища') ? .035 : 0;
     const mortality = character.age < 45 ? .002 : character.age < 65 ? .01 : character.age < 85 ? .055 : .16;
@@ -176,12 +175,13 @@ function advancePopulation(world: WorldState, rng: RNG): void {
     const potential: readonly (readonly [Character, Character])[] = couples.length
       ? couples
       : adults.map((character, index) => [character, adults[index + 1]] as const).filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]));
-    const births = Math.min(8, Math.floor(potential.length / 5 * (settlement.food > 35 ? 1 : .2) * rng.next()));
+    const spareHousing = Math.max(0, settlement.residentialCapacity - settlement.population);
+    const births = Math.min(8, spareHousing, Math.floor(potential.length / 5 * (settlement.food > 35 ? 1 : .2) * rng.next()));
     for (let index = 0; index < births; index += 1) {
       const [parentA, parentB] = rng.pick(potential);
       const child: Character = {
         id: world.nextIds.character++, name: personName(rng, parentA.species), species: parentA.species, age: 0, birthYear: world.year, alive: true,
-        settlementId: settlement.id, kingdomId: settlement.kingdomId, dynastyId: parentA.dynastyId ?? parentB.dynastyId, profession: 'child', renown: 0, health: rng.int(70, 100), wealth: 0, loyalty: rng.int(35, 85),
+        settlementId: settlement.id, kingdomId: settlement.kingdomId, dynastyId: parentA.dynastyId ?? parentB.dynastyId, profession: 'child', workplace: 'дом семьи', homeDistrict: parentA.homeDistrict ?? settlement.districts[0]?.name, renown: 0, health: rng.int(70, 100), wealth: 0, loyalty: rng.int(35, 85),
         ambition: 'найти своё место в мире', parentIds: [parentA.id, parentB.id], childIds: [], relationshipIds: [], titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0,
         biography: [`Родился в ${settlement.name} в ${world.year} году.`],
       };
@@ -509,7 +509,7 @@ function writeBooks(world: WorldState, rng: RNG): void {
   const author = rng.pick(authors);
   const recent = world.events.filter(event => event.year >= world.year - 8).slice(-30);
   const source = recent.length ? rng.pick(recent) : undefined;
-  const subject = source ? source.title : rng.pick(['чудовища', 'история династий', 'торговые пути', 'богословие']);
+  const subject = source ? source.title : rng.pick(['чудовища', 'история династий', 'торговые пути', 'богословие', 'охота и миграции животных', 'алхимические составы']);
   const book = {
     id: world.nextIds.book++, title: `${rng.pick(['Хроника', 'Свидетельство', 'Рассуждение', 'Песни'])}: ${subject}`, authorId: author.id, yearWritten: world.year,
     language: world.kingdoms.find(kingdom => kingdom.id === author.kingdomId)?.culture ?? 'общий язык', subject, reliability: rng.int(35, 95),
@@ -547,6 +547,70 @@ function restoreAndFound(world: WorldState, rng: RNG): void {
   }
 }
 
+
+function advanceHousing(world: WorldState, rng: RNG): void {
+  if (world.month !== 2 && world.month !== 8) return;
+  for (const settlement of world.settlements) {
+    const residents = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
+    settlement.population = residents.length;
+    const shortage = Math.max(0, settlement.population - settlement.residentialCapacity);
+    const nearCapacity = settlement.residentialCapacity - settlement.population < Math.max(4, Math.ceil(settlement.population * .04));
+    if (shortage <= 0 && !nearCapacity) continue;
+    const peopleNeeded = shortage > 0 ? shortage : Math.max(6, Math.ceil(settlement.population * .08));
+
+    const wood = settlement.stockpile['древесина'] ?? 0;
+    const stone = settlement.stockpile['камень'] ?? 0;
+    const canBuild = settlement.prosperity >= 25 && (wood >= 8 || stone >= 8);
+    if (canBuild) {
+      const result = expandHousing(settlement, peopleNeeded, rng);
+      settlement.stockpile['древесина'] = Math.max(0, wood - Math.ceil(result.houses * 1.5));
+      settlement.stockpile['камень'] = Math.max(0, stone - Math.ceil(result.houses * .6));
+      settlement.history.push(`В ${world.year} году построено ${result.houses} жилых домов.`);
+      addEvent(world, {
+        kind: 'construction', title: `${settlement.name} расширил жилые кварталы`,
+        description: `Построено ${result.houses} домов, вместимость выросла на ${result.capacityAdded} мест.`,
+        cause: `население ${settlement.population} превысило прежнюю вместимость ${settlement.residentialCapacity - result.capacityAdded}`,
+        conditions: [`в запасах были древесина или камень`, `благосостояние ${settlement.prosperity}% позволило организовать стройку`],
+        decision: 'община и местная власть направили материалы на новое жильё',
+        outcome: `жилищная вместимость достигла ${settlement.residentialCapacity}`,
+        consequences: ['перенаселение уменьшилось', 'запасы строительных материалов сократились', 'поселение физически расширилось'],
+        entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 2,
+      });
+      continue;
+    }
+
+    if (shortage <= 0) continue;
+
+    const destination = world.settlements
+      .filter(item => item.id !== settlement.id && item.kingdomId === settlement.kingdomId && item.residentialCapacity - item.population >= 3)
+      .sort((a, b) => Math.hypot(a.x - settlement.x, a.y - settlement.y) - Math.hypot(b.x - settlement.x, b.y - settlement.y))[0];
+    if (!destination) {
+      settlement.unrest = Math.min(100, settlement.unrest + 5);
+      continue;
+    }
+    const migrants = residents.filter(character => character.age >= 14 && !character.titles.length).slice(0, Math.min(shortage, rng.int(1, 6)));
+    if (!migrants.length) continue;
+    for (const migrant of migrants) {
+      migrant.settlementId = destination.id;
+      migrant.kingdomId = destination.kingdomId;
+      migrant.homeDistrict = destination.districts[0]?.name ?? 'Сердце поселения';
+      migrant.biography.push(`В ${world.year} году переехал из ${settlement.name} в ${destination.name} из-за нехватки жилья.`);
+    }
+    settlement.population -= migrants.length;
+    destination.population += migrants.length;
+    addEvent(world, {
+      kind: 'migration', title: `Жители покинули ${settlement.name}`,
+      description: `${migrants.length} человек переселились в ${destination.name}.`,
+      cause: 'нехватка жилья и материалов для строительства',
+      conditions: [`не хватало ${shortage} жилых мест`, `${destination.name} имел свободное жильё`],
+      decision: 'семьи выбрали переселение внутри государства', outcome: 'население перераспределилось между поселениями',
+      consequences: ['перенаселение снизилось', 'новое поселение получило работников', 'семейные и рабочие связи изменились'],
+      entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'settlement', id: destination.id }, ...migrants.slice(0, 3).map(character => ({ kind: 'character' as const, id: character.id }))],
+      importance: 2,
+    });
+  }
+}
+
 export function advanceWorld(source: WorldState, months = 1): WorldState {
   const world = structuredClone(source);
   for (let step = 0; step < months; step += 1) {
@@ -555,6 +619,8 @@ export function advanceWorld(source: WorldState, months = 1): WorldState {
     const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
     advanceEconomy(world, rng);
     advancePopulation(world, rng);
+    advanceHousing(world, rng);
+    advanceEcology(world, rng);
     startWars(world, rng);
     moveArmies(world, rng);
     recoverArmies(world);

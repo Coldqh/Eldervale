@@ -1,6 +1,6 @@
 import type { EntityRef, WorldEvent, WorldState } from '../types';
 
-export type AtlasEventGroup = 'войны' | 'чудовища' | 'власть' | 'знания' | 'поселения' | 'жизни';
+export type AtlasEventGroup = 'войны' | 'чудовища' | 'власть' | 'знания' | 'поселения' | 'природа' | 'жизни';
 
 export interface AtlasMapState {
   year: number;
@@ -96,7 +96,9 @@ export function atlasEventGroup(event: WorldEvent): AtlasEventGroup {
   if (event.kind === 'dragon' || event.kind === 'monster' || event.kind === 'hero') return 'чудовища';
   if (event.kind === 'politics' || event.kind === 'dynasty') return 'власть';
   if (event.kind === 'book' || event.kind === 'artifact') return 'знания';
-  if (event.kind === 'settlement' || event.kind === 'trade' || event.kind === 'disaster') return 'поселения';
+  if (event.kind === 'ecology' || event.kind === 'hunt' || event.kind === 'foraging' || event.kind === 'migration') return 'природа';
+  if (event.kind === 'alchemy') return 'знания';
+  if (event.kind === 'settlement' || event.kind === 'trade' || event.kind === 'disaster' || event.kind === 'construction') return 'поселения';
   return 'жизни';
 }
 

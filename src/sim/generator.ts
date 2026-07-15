@@ -5,6 +5,9 @@ import type {
 import { APP_VERSION } from '../version';
 import { RNG, hashSeed, noise2D } from './rng';
 import { kingdomName, monsterName, personName, placeName } from './names';
+import { causalEvent } from './causality';
+import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
+import { createHousingProfile } from './settlements';
 
 const colors = ['#9f4d46', '#4c7396', '#6d8752', '#9a7741', '#735d8f', '#3f8a80', '#a45f78', '#7d6b55', '#587284', '#8d8248'];
 const cultures = ['Речная Корона', 'Старый Камень', 'Зелёная Клятва', 'Солнечный Берег', 'Пепельное Знамя', 'Лунный Лес', 'Железный Очаг', 'Золотая Степь'];
@@ -58,10 +61,72 @@ function settlementType(rng: RNG, tile: Tile): Settlement['type'] {
 
 function populationFor(type: Settlement['type'], rng: RNG, scale: number): number {
   const ranges: Record<Settlement['type'], [number, number]> = {
-    hamlet: [22, 55], village: [55, 140], town: [140, 320], city: [360, 750], fortress: [90, 220], port: [130, 350],
+    hamlet: [24, 75], village: [90, 360], town: [320, 920], city: [900, 2500], fortress: [160, 620], port: [420, 1350],
   };
   const [min, max] = ranges[type];
   return Math.max(12, Math.round(rng.int(min, max) * scale));
+}
+
+function districtTarget(type: Settlement['type'], rng: RNG): number {
+  if (type === 'city') return rng.int(4, 7);
+  if (type === 'port') return rng.int(2, 4);
+  if (type === 'town') return rng.int(2, 3);
+  if (type === 'fortress') return rng.int(1, 2);
+  return 1;
+}
+
+function districtRole(type: Settlement['type'], index: number, terrain: Terrain): Settlement['districts'][number]['role'] {
+  if (index === 0) return type === 'fortress' ? 'крепость' : 'центр';
+  if (type === 'port' && terrain === 'coast' && index === 1) return 'порт';
+  const roles: Settlement['districts'][number]['role'][] = ['жилой район', 'рынок', 'ремесленный район', 'поля', 'окраина'];
+  return roles[(index - 1) % roles.length]!;
+}
+
+function assignSettlementFootprints(settlements: Settlement[], tiles: Tile[], rng: RNG, width: number, height: number): void {
+  const occupied = new Set<string>();
+  const origins = new Set(settlements.map(item => `${item.x}:${item.y}`));
+  const tileAt = (x: number, y: number) => x >= 0 && y >= 0 && x < width && y < height ? tiles[y * width + x] : undefined;
+  for (const settlement of [...settlements].sort((a, b) => b.population - a.population)) {
+    const origin = tileAt(settlement.x, settlement.y);
+    if (!origin) continue;
+    const desired = districtTarget(settlement.type, rng);
+    const queue = [{ x: settlement.x, y: settlement.y }];
+    const chosen: Tile[] = [];
+    const seen = new Set<string>();
+    while (queue.length && chosen.length < desired) {
+      const point = queue.shift()!;
+      const key = `${point.x}:${point.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const tile = tileAt(point.x, point.y);
+      if (!tile || tile.terrain === 'ocean' || occupied.has(key) || (origins.has(key) && key !== `${settlement.x}:${settlement.y}`)) continue;
+      chosen.push(tile);
+      const neighbours = [
+        { x: point.x + 1, y: point.y }, { x: point.x - 1, y: point.y },
+        { x: point.x, y: point.y + 1 }, { x: point.x, y: point.y - 1 },
+      ].sort(() => rng.next() - .5);
+      queue.push(...neighbours);
+    }
+    settlement.districts = chosen.map((tile, index) => ({
+      x: tile.x, y: tile.y, role: districtRole(settlement.type, index, tile.terrain),
+      name: index === 0 ? 'Сердце поселения' : `${districtRole(settlement.type, index, tile.terrain)} ${index + 1}`,
+    }));
+    for (const district of settlement.districts) {
+      const tile = tileAt(district.x, district.y)!;
+      tile.settlementId = settlement.id;
+      tile.settlementDistrict = district.name;
+      occupied.add(`${district.x}:${district.y}`);
+    }
+  }
+}
+
+function workplaceFor(profession: string): string {
+  const map: Record<string, string> = {
+    farmer: 'поля и пастбища', miller: 'мельница', hunter: 'охотничьи угодья', guard: 'стража и ворота', blacksmith: 'кузница',
+    carpenter: 'плотницкая мастерская', herbalist: 'травницкая мастерская', merchant: 'рынок', scribe: 'архив или канцелярия', priest: 'храм',
+    soldier: 'казармы', fisher: 'берег или пристань', miner: 'шахта', weaver: 'ткацкая мастерская', brewer: 'пивоварня', healer: 'лечебница', child: 'дом семьи',
+  };
+  return map[profession] ?? 'местные работы';
 }
 
 function event(
@@ -77,7 +142,12 @@ function event(
   importance: number,
   traces: EntityRef[] = entityRefs,
 ): WorldEvent {
-  return { id, year, month, kind, title, description, cause, consequences, traces, entityRefs, importance };
+  return causalEvent(id, year, month, {
+    kind, title, description, cause, consequences, entityRefs, importance, traces,
+    conditions: [cause, 'участники и ресурсы существовали в мире до события'],
+    decision: description,
+    outcome: consequences.join('; '),
+  });
 }
 
 function createRelationships(rng: RNG, characters: Character[], settlements: Settlement[], historyYears: number): Relationship[] {
@@ -209,16 +279,22 @@ export function generateWorld(config: WorldConfig): WorldState {
 
   const settlements: Settlement[] = selected.map((tile, index) => {
     const type = settlementType(rng, tile);
+    const population = populationFor(type, rng, config.populationScale);
+    const housing = createHousingProfile(population, type, rng);
+    const resource = rng.pick(resourcesByTerrain[tile.terrain]);
     return {
       id: index + 1, name: placeName(rng), x: tile.x, y: tile.y, kingdomId: 0,
-      population: populationFor(type, rng, config.populationScale), prosperity: rng.int(35, 82),
+      population, prosperity: rng.int(35, 82),
       defense: rng.int(type === 'fortress' ? 65 : 18, type === 'city' ? 88 : 72), food: rng.int(55, 120),
       foundedYear: rng.int(1, Math.max(2, config.historyYears - 20)), type,
-      buildings: [...buildingPools[type]].sort((a, b) => a.localeCompare(b)).slice(0, rng.int(2, Math.min(5, buildingPools[type].length))),
-      notableCharacterIds: [], damaged: 0, resource: rng.pick(resourcesByTerrain[tile.terrain]), shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18),
-      history: [],
+      buildings: housing.buildings, buildingCounts: housing.buildingCounts, households: housing.households,
+      residentialCapacity: housing.residentialCapacity, districts: [], notableCharacterIds: [], damaged: 0, resource,
+      stockpile: { [resource]: rng.int(18, 80), зерно: rng.int(20, 90), древесина: rng.int(12, 70), камень: rng.int(4, 45) },
+      livestock: { куры: Math.max(0, Math.round(population / 8)), козы: Math.max(0, Math.round(population / 18)), лошади: type === 'city' || type === 'fortress' ? Math.round(population / 22) : Math.round(population / 50) },
+      shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18), history: [],
     };
   });
+  assignSettlementFootprints(settlements, tiles, rng, config.width, config.height);
 
   const kingdomCount = Math.max(2, Math.min(config.kingdomCount, settlements.length));
   const capitalChoices = [...settlements].sort((a, b) => b.population - a.population).slice(0, kingdomCount);
@@ -238,7 +314,6 @@ export function generateWorld(config: WorldConfig): WorldState {
     }, kingdoms[0]!);
     settlement.kingdomId = nearest.id;
     settlement.history.push(`${settlement.name} основан под властью государства ${nearest.name}.`);
-    tiles[settlement.y * config.width + settlement.x]!.settlementId = settlement.id;
   }
 
   for (const tile of tiles) {
@@ -269,12 +344,14 @@ export function generateWorld(config: WorldConfig): WorldState {
       const age = rng.int(0, maxAge);
       characters.push({
         id: characterId++, name: personName(rng, species), species, age, birthYear: config.historyYears - age, alive: true,
-        settlementId: settlement.id, kingdomId: kingdom.id, profession: age < 14 ? 'child' : rng.pick(professions), renown: rng.int(0, 18), health: rng.int(58, 100),
+        settlementId: settlement.id, kingdomId: kingdom.id, profession: age < 14 ? 'child' : rng.pick(professions), workplace: '',
+        homeDistrict: settlement.districts.length ? rng.pick(settlement.districts).name : 'Сердце поселения', renown: rng.int(0, 18), health: rng.int(58, 100),
         wealth: age < 14 ? 0 : rng.int(0, 180), loyalty: rng.int(25, 92), ambition: rng.pick(ambitions), parentIds: [], childIds: [], relationshipIds: [],
         titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0, biography: [`Родился в ${settlement.name}.`],
       });
     }
     const locals = characters.filter(character => character.settlementId === settlement.id);
+    for (const local of locals) local.workplace = workplaceFor(local.profession);
     for (const child of locals.filter(character => character.age < 28)) {
       const candidates = locals.filter(character => character.age >= child.age + 18 && character.age <= child.age + 48);
       if (candidates.length && rng.chance(.72)) {
@@ -386,11 +463,26 @@ export function generateWorld(config: WorldConfig): WorldState {
     author.biography.push(`Написал книгу «${book.title}».`);
   }
 
+  const animalPopulations = generateAnimalPopulations(config.seed, tiles, config.ecologyDensity);
+  const ingredients = generateNaturalIngredients(config.seed, tiles, config.ecologyDensity);
+  const alchemyRecipes = generateAlchemyRecipes({ ingredients, characters, year: config.historyYears }, rng);
+
   const events: WorldEvent[] = [];
   let eventId = 1;
   for (const settlement of settlements) events.push(event(eventId++, settlement.foundedYear, rng.int(1, 12), 'settlement', `Основан ${settlement.name}`, `${settlement.name} возник под властью государства ${kingdoms.find(kingdom => kingdom.id === settlement.kingdomId)!.name}.`, 'удобное место, ресурс и защита', [`появилось поселение`, `началась эксплуатация ресурса «${settlement.resource}»`], [{ kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: settlement.kingdomId }], 3));
   for (const dynasty of dynasties) events.push(event(eventId++, rng.int(1, config.historyYears), rng.int(1, 12), 'dynasty', `Возвысился ${dynasty.name}`, `Род получил землю, богатство и место при дворе.`, 'служба правителю и накопленное влияние', ['род получил политический вес', 'появились наследственные притязания'], [{ kind: 'dynasty', id: dynasty.id }, ...(dynasty.kingdomId ? [{ kind: 'kingdom' as const, id: dynasty.kingdomId }] : [])], 3));
   for (const route of tradeRoutes.slice(0, 60)) events.push(event(eventId++, rng.int(Math.max(1, config.historyYears - 140), config.historyYears), rng.int(1, 12), 'trade', `Открыт путь ${route.name}`, `Караваны начали перевозить ${route.goods.join(' и ')}.`, 'спрос поселений на чужие ресурсы', ['выросли рынки', 'дорога стала целью разбойников и сборщиков пошлин'], [{ kind: 'tradeRoute', id: route.id }, { kind: 'settlement', id: route.fromSettlementId }, { kind: 'settlement', id: route.toSettlementId }], 2));
+  for (const population of animalPopulations.filter(item => item.count >= item.carryingCapacity * .72).slice(0, 32)) events.push(event(
+    eventId++, rng.int(Math.max(1, config.historyYears - 90), config.historyYears), rng.int(1, 12), 'ecology',
+    `Расширился ареал: ${population.species}`, `${population.count} животных заняли устойчивую территорию в клетке ${population.x}:${population.y}.`,
+    'подходящий биом, доступная пища и умеренное давление хищников', ['появились новые охотничьи угодья', 'изменилась пищевая цепочка'],
+    [{ kind: 'animalPopulation', id: population.id }], 2,
+  ));
+  for (const recipe of alchemyRecipes.slice(0, 18)) events.push(event(
+    eventId++, recipe.discoveryYear, rng.int(1, 12), 'alchemy', `Открыт рецепт «${recipe.name}»`, `${recipe.source} привели к воспроизводимому составу.`,
+    'доступ к нужным ингредиентам и серия опытов', ['появилось новое алхимическое знание', 'сырьё получило практическую ценность'],
+    [{ kind: 'recipe', id: recipe.id }, ...(recipe.discoveredById ? [{ kind: 'character' as const, id: recipe.discoveredById }] : [])], 2,
+  ));
 
   const wars: War[] = [];
   const pastWarCount = Math.max(1, Math.round(config.kingdomCount * config.warlike * 1.5));
@@ -443,13 +535,13 @@ export function generateWorld(config: WorldConfig): WorldState {
   }
 
   return {
-    version: 3, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
-    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1 },
+    version: 4, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
+    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1 },
   };
 }
 
 export const defaultConfig: WorldConfig = {
   seed: 'Eldervale-Первая-Эпоха', width: 54, height: 34, historyYears: 320, kingdomCount: 7,
-  settlementCount: 30, populationScale: .72, magic: .38, warlike: .48, monsterDensity: 1, artifactDensity: 1,
+  settlementCount: 30, populationScale: .72, magic: .38, warlike: .48, monsterDensity: 1, artifactDensity: 1, localMapSize: 128, ecologyDensity: 1, huntingPressure: 1,
 };

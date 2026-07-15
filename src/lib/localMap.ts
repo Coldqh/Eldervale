@@ -4,7 +4,12 @@ import type {
 import { professionLabel, settlementTypeLabel } from '../i18n';
 import { hashSeed, RNG } from '../sim/rng';
 
-export const LOCAL_MAP_SIZE = 48;
+export const DEFAULT_LOCAL_MAP_SIZE = 128;
+
+function localMapSize(world: WorldState): number {
+  const value = world.config.localMapSize ?? DEFAULT_LOCAL_MAP_SIZE;
+  return value === 96 || value === 160 ? value : 128;
+}
 
 type Side = LocalExit['side'];
 type Point = { x: number; y: number };
@@ -29,15 +34,15 @@ export function generateLocalMap(world: WorldState, globalX: number, globalY: nu
 }
 
 function generateSurface(world: WorldState, tile: Tile, availableLevels: number[]): LocalMapData {
-  const width = LOCAL_MAP_SIZE;
-  const height = LOCAL_MAP_SIZE;
+  const width = localMapSize(world);
+  const height = width;
   const rng = new RNG(`${world.config.seed}:местность:${tile.x}:${tile.y}:0`);
   const cells = createBaseCells(world, tile, width, height, rng);
   const exits = roadExits(world, tile, width, height);
   drawRoadNetwork(cells, width, height, exits, rng, Boolean(tile.settlementId));
 
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
-  if (settlement) buildSettlement(cells, width, height, settlement, exits, rng);
+  if (settlement) buildSettlement(cells, width, height, settlement, tile, exits, rng);
   const dungeon = tile.dungeonId ? world.dungeons.find(item => item.id === tile.dungeonId) : world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
   if (dungeon) placeDungeonEntrance(cells, width, height, rng);
 
@@ -58,8 +63,8 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
 }
 
 function generateDungeonLevel(world: WorldState, tile: Tile, level: number, availableLevels: number[]): LocalMapData {
-  const width = LOCAL_MAP_SIZE;
-  const height = LOCAL_MAP_SIZE;
+  const width = localMapSize(world);
+  const height = width;
   const dungeon = world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
   if (!dungeon) return generateSurface(world, tile, availableLevels);
   const depth = Math.abs(level);
@@ -232,17 +237,17 @@ function boundaryPosition(seed: string, tile: Tile, side: Side, width: number, h
 function drawRoadNetwork(cells: LocalCell[], width: number, height: number, exits: LocalExit[], rng: RNG, hasSettlement: boolean): void {
   if (!exits.length && !hasSettlement) return;
   const centerPoint = { x: Math.floor(width / 2), y: Math.floor(height / 2) };
-  const endpoints = exits.map(exitPoint).concat(hasSettlement ? [centerPoint] : []);
+  const endpoints = exits.map(exit => exitPoint(exit, width, height)).concat(hasSettlement ? [centerPoint] : []);
   if (endpoints.length === 1) endpoints.push(centerPoint);
   const hub = hasSettlement ? centerPoint : endpoints[0]!;
   for (const endpoint of endpoints) drawPath(cells, width, height, endpoint, hub, rng, 2);
 }
 
-function exitPoint(exit: LocalExit): Point {
+function exitPoint(exit: LocalExit, width: number, height: number): Point {
   if (exit.side === 'north') return { x: exit.position, y: 0 };
-  if (exit.side === 'south') return { x: exit.position, y: LOCAL_MAP_SIZE - 1 };
+  if (exit.side === 'south') return { x: exit.position, y: height - 1 };
   if (exit.side === 'west') return { x: 0, y: exit.position };
-  return { x: LOCAL_MAP_SIZE - 1, y: exit.position };
+  return { x: width - 1, y: exit.position };
 }
 
 function drawPath(cells: LocalCell[], width: number, height: number, from: Point, to: Point, rng: RNG, radius: number): void {
@@ -267,25 +272,44 @@ function paintRoad(cells: LocalCell[], width: number, height: number, cx: number
   }
 }
 
-function buildSettlement(cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], exits: LocalExit[], rng: RNG): void {
-  const countByType: Record<WorldState['settlements'][number]['type'], number> = { hamlet: 7, village: 12, town: 19, city: 29, fortress: 16, port: 18 };
-  const targetCount = Math.min(settlement.buildings.length + countByType[settlement.type], 34);
-  const labels = [...settlement.buildings];
-  while (labels.length < targetCount) labels.push(rng.pick(['жилой дом', 'сарай', 'мастерская', 'склад', 'двор'])) ;
+function buildSettlement(
+  cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], tile: Tile, exits: LocalExit[], rng: RNG,
+): void {
+  const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: 'центр' as const }];
+  const districtIndex = Math.max(0, districts.findIndex(item => item.x === tile.x && item.y === tile.y));
+  const district = districts[districtIndex] ?? districts[0]!;
+  const allLabels: string[] = [];
+  for (const [label, count] of Object.entries(settlement.buildingCounts ?? {})) {
+    for (let index = 0; index < count; index += 1) allLabels.push(label);
+  }
+  if (!allLabels.length) allLabels.push(...settlement.buildings);
+  const labels = allLabels.filter((_, index) => index % districts.length === districtIndex);
+  if (district.role === 'центр') {
+    for (const label of settlement.buildings.filter(item => !item.includes('жилой дом') && !item.includes('сарай'))) {
+      const clean = label.replace(/^\d+\s*×\s*/, '');
+      if (!labels.includes(clean)) labels.unshift(clean);
+    }
+  }
+  const targetCount = Math.min(labels.length, Math.floor((width - 10) * (height - 12) / 48));
 
-  if (settlement.type === 'city' || settlement.type === 'fortress') drawSettlementWall(cells, width, height, exits);
-  placeFields(cells, width, height, rng, settlement.type === 'city' || settlement.type === 'fortress' ? 3 : 6);
+  if (district.role === 'крепость' || (district.role === 'центр' && (settlement.type === 'city' || settlement.type === 'fortress'))) {
+    drawSettlementWall(cells, width, height, exits);
+  }
+  const fieldCount = district.role === 'поля' ? Math.max(18, Math.round(width / 5)) : settlement.type === 'city' || settlement.type === 'fortress' ? 4 : Math.max(8, Math.round(width / 12));
+  placeFields(cells, width, height, rng, fieldCount);
 
   const slots: Point[] = [];
-  for (let y = 5; y < height - 8; y += 8) for (let x = 5; x < width - 8; x += 9) slots.push({ x, y });
+  for (let y = 5; y < height - 9; y += 8) for (let x = 5; x < width - 9; x += 9) slots.push({ x, y });
   slots.sort(() => rng.next() - .5);
   let built = 0;
   for (const slot of slots) {
     if (built >= targetCount) break;
-    const w = rng.int(5, 8);
-    const h = rng.int(4, 7);
+    const label = labels[built] ?? 'жилой дом';
+    const dense = label === 'доходный дом' || district.role === 'центр';
+    const w = dense ? rng.int(6, 9) : rng.int(5, 8);
+    const h = dense ? rng.int(5, 8) : rng.int(4, 7);
     if (!canBuild(cells, width, height, slot.x, slot.y, w, h)) continue;
-    drawBuilding(cells, width, slot.x, slot.y, w, h, labels[built]!, rng);
+    drawBuilding(cells, width, slot.x, slot.y, w, h, label, rng);
     built += 1;
   }
 }
@@ -303,7 +327,7 @@ function drawSettlementWall(cells: LocalCell[], width: number, height: number, e
     setCell(cells, width, maxX, y, { feature: 'wall', blocked: true, ground: 'stone', building: 'городская стена' });
   }
   for (const exit of exits) {
-    const point = exitPoint(exit);
+    const point = exitPoint(exit, width, height);
     const gate = { x: Math.max(min, Math.min(maxX, point.x)), y: Math.max(min, Math.min(maxY, point.y)) };
     for (let offset = -2; offset <= 2; offset += 1) {
       const x = exit.side === 'north' || exit.side === 'south' ? gate.x + offset : gate.x;
@@ -386,13 +410,21 @@ function buildSurfaceMarkers(
   settlement?: WorldState['settlements'][number], dungeon?: WorldState['dungeons'][number],
 ): LocalMarker[] {
   const markers: LocalMarker[] = [];
-  if (settlement) markers.push({ id: `settlement-${settlement.id}`, x: Math.floor(width / 2), y: Math.floor(height / 2), kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }], detail: `${settlement.population} жителей` });
+  if (settlement) {
+    const district = settlement.districts?.find(item => item.x === tile.x && item.y === tile.y);
+    markers.push({ id: `settlement-${settlement.id}-${tile.x}-${tile.y}`, x: Math.floor(width / 2), y: Math.floor(height / 2), kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }], detail: `${district?.name ?? 'поселение'} · ${settlement.population} жителей` });
+  }
   if (dungeon) {
     const stair = cells.find(cell => cell.feature === 'stairs-down');
     markers.push({ id: `dungeon-${dungeon.id}`, x: stair?.x ?? width - 8, y: stair?.y ?? height - 8, kind: 'dungeon', label: dungeon.name, refs: [{ kind: 'dungeon', id: dungeon.id }], detail: `${dungeon.depth} уровней` });
   }
 
-  const liveCharacters = settlement ? world.characters.filter(character => character.alive && character.settlementId === settlement.id) : [];
+  const liveCharacters = settlement ? world.characters.filter(character => {
+    if (!character.alive || character.settlementId !== settlement.id) return false;
+    const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения' }];
+    const assigned = districts[hashSeed(`${world.config.seed}:район-жителя:${character.id}`) % districts.length]!;
+    return assigned.x === tile.x && assigned.y === tile.y;
+  }) : [];
   const walkable = cells.filter(cell => !cell.blocked && cell.ground !== 'water');
   const groups = new Map<string, { point: Point; refs: EntityRef[]; names: string[]; professions: string[] }>();
   for (const character of liveCharacters) {
@@ -419,6 +451,19 @@ function buildSurfaceMarkers(
   for (const monster of world.monsters.filter(item => item.alive && item.x === tile.x && item.y === tile.y)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:чудовище:${monster.id}:${tile.x}:${tile.y}`), 6);
     markers.push({ id: `monster-${monster.id}`, x: point.x, y: point.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `${monster.species}, сила ${monster.power}` });
+  }
+
+  for (const population of world.animalPopulations.filter(item => item.count > 0 && item.x === tile.x && item.y === tile.y)) {
+    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:популяция:${population.id}:${tile.x}:${tile.y}`), 5);
+    markers.push({ id: `fauna-${population.id}`, x: point.x, y: point.y, kind: 'fauna', label: population.species, refs: [{ kind: 'animalPopulation', id: population.id }], count: population.count, detail: `${population.count} особей · ${population.diet}` });
+    const trail = cells[point.y * width + point.x];
+    if (trail && !trail.feature) trail.feature = 'animal-trail';
+  }
+  for (const ingredient of world.ingredients.filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y)) {
+    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:ингредиент:${ingredient.id}:${tile.x}:${tile.y}`), 4);
+    markers.push({ id: `resource-${ingredient.id}`, x: point.x, y: point.y, kind: 'resource', label: ingredient.name, refs: [{ kind: 'ingredient', id: ingredient.id }], count: Math.round(ingredient.abundance), detail: `${ingredient.kind} · запас ${Math.round(ingredient.abundance)}` });
+    const cell = cells[point.y * width + point.x];
+    if (cell && !cell.feature) cell.feature = ingredient.kind === 'гриб' ? 'mushroom' : ingredient.kind === 'растение' ? 'herb' : 'rock';
   }
 
   for (const artifact of world.artifacts.filter(item => item.settlementId === settlement?.id && !item.ownerId)) {
@@ -493,7 +538,7 @@ export function localCellSummary(map: LocalMapData, x: number, y: number): { tit
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
     tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'обломки', fire: 'огонь', blood: 'кровь', body: 'тело', chest: 'сундук или предметы',
-    'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост',
+    'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа',
   };
   const lines = [`Основа: ${groundNames[cell.ground]}`];
   if (cell.feature) lines.push(`Объект: ${featureNames[cell.feature] ?? cell.feature}`);

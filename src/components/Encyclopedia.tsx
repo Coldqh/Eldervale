@@ -6,14 +6,15 @@ import { getTitle } from './EntityPanel';
 const groups: { kind: EntityKind; label: string }[] = [
   { kind: 'character', label: 'Личности' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'kingdom', label: 'Государства' },
   { kind: 'monster', label: 'Существа' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
-  { kind: 'dungeon', label: 'Подземелья' }, { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'army', label: 'Армии' }, { kind: 'war', label: 'Войны' },
+  { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Животные' }, { kind: 'ingredient', label: 'Ресурсы' }, { kind: 'recipe', label: 'Алхимия' },
+  { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'army', label: 'Армии' }, { kind: 'war', label: 'Войны' },
 ];
 
 function listFor(world: WorldState, kind: EntityKind): any[] {
   const lists: Record<EntityKind, any[]> = {
     character: world.characters, settlement: world.settlements, kingdom: world.kingdoms, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, war: world.wars,
-    dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
+    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
   };
   return lists[kind];
 }
@@ -39,7 +40,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
 }
 
 function rune(kind: EntityKind): string {
-  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇' } as Record<EntityKind, string>)[kind];
+  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗' } as Record<EntityKind, string>)[kind];
 }
 
 function subtitle(kind: EntityKind, item: any): string {
@@ -54,5 +55,8 @@ function subtitle(kind: EntityKind, item: any): string {
   if (kind === 'war') return item.active ? `${item.goal} · война продолжается` : `окончена в ${item.endYear} году`;
   if (kind === 'dynasty') return `${item.memberIds.length} членов · престиж ${item.prestige}`;
   if (kind === 'tradeRoute') return `${item.goods.join(', ')} · безопасность ${item.safety}% · ${item.active ? 'открыт' : 'закрыт'}`;
+  if (kind === 'animalPopulation') return `${item.count} особей · ${item.diet} · клетка ${item.x}:${item.y}`;
+  if (kind === 'ingredient') return `${item.kind} · запас ${Math.round(item.abundance)} · клетка ${item.x}:${item.y}`;
+  if (kind === 'recipe') return `${item.result} · создано партий ${item.batchesCreated}`;
   return '';
 }

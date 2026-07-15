@@ -7,10 +7,10 @@ const groundColors: Record<LocalGround, string> = {
 };
 const featureColors: Partial<Record<LocalFeature, string>> = {
   tree: '#214d32', bush: '#375e3f', rock: '#3e4140', reeds: '#6b7951', wall: '#292d2b', door: '#bb9a5f', field: '#9b8150', rubble: '#5d5145', fire: '#e87842', blood: '#7d2d2c', body: '#201d1b', chest: '#d2aa5a',
-  'stairs-down': '#d2bd83', 'stairs-up': '#e6d69f', bridge: '#7b6042',
+  'stairs-down': '#d2bd83', 'stairs-up': '#e6d69f', bridge: '#7b6042', herb: '#75a95f', berry: '#9b4f6b', mushroom: '#b49a73', 'animal-trail': '#7b674c',
 };
 const markerColors: Record<LocalMarker['kind'], string> = {
-  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#c66852',
+  person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#c66852', fauna: '#86a76a', resource: '#80b89a',
 };
 
 export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMove, onBack, onSelect }: {
@@ -25,7 +25,7 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
   const [level, setLevel] = useState(initialLevel);
   const [zoom, setZoom] = useState(1);
   const [camera, setCamera] = useState({ x: 0, y: 0 });
-  const [selectedCell, setSelectedCell] = useState({ x: 24, y: 24 });
+  const [selectedCell, setSelectedCell] = useState({ x: 0, y: 0 });
   const map = useMemo(() => generateLocalMap(world, globalX, globalY, level), [world, globalX, globalY, level]);
   const summary = useMemo(() => localCellSummary(map, selectedCell.x, selectedCell.y), [map, selectedCell]);
 
@@ -161,21 +161,32 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
   const ox = (box.width - map.width * cellSize) / 2 + camera.x;
   const oy = (box.height - map.height * cellSize) / 2 + camera.y;
 
-  for (const cell of map.cells) {
-    const x = ox + cell.x * cellSize;
-    const y = oy + cell.y * cellSize;
-    ctx.fillStyle = groundColors[cell.ground];
-    ctx.fillRect(x, y, Math.ceil(cellSize + .4), Math.ceil(cellSize + .4));
-    if (cell.feature) drawFeature(ctx, cell.feature, x, y, cellSize);
+  const startX = Math.max(0, Math.floor((-ox) / cellSize) - 1);
+  const startY = Math.max(0, Math.floor((-oy) / cellSize) - 1);
+  const endX = Math.min(map.width - 1, Math.ceil((box.width - ox) / cellSize) + 1);
+  const endY = Math.min(map.height - 1, Math.ceil((box.height - oy) / cellSize) + 1);
+
+  for (let yIndex = startY; yIndex <= endY; yIndex += 1) {
+    for (let xIndex = startX; xIndex <= endX; xIndex += 1) {
+      const cell = map.cells[yIndex * map.width + xIndex]!;
+      const x = ox + cell.x * cellSize;
+      const y = oy + cell.y * cellSize;
+      ctx.fillStyle = groundColors[cell.ground];
+      ctx.fillRect(x, y, Math.ceil(cellSize + .4), Math.ceil(cellSize + .4));
+      if (cell.feature) drawFeature(ctx, cell.feature, x, y, cellSize);
+    }
   }
   if (cellSize >= 8) {
     ctx.strokeStyle = 'rgba(7,12,9,.16)';
     ctx.lineWidth = .5;
-    for (let x = 0; x <= map.width; x += 1) { ctx.beginPath(); ctx.moveTo(ox + x * cellSize, oy); ctx.lineTo(ox + x * cellSize, oy + map.height * cellSize); ctx.stroke(); }
-    for (let y = 0; y <= map.height; y += 1) { ctx.beginPath(); ctx.moveTo(ox, oy + y * cellSize); ctx.lineTo(ox + map.width * cellSize, oy + y * cellSize); ctx.stroke(); }
+    for (let x = startX; x <= endX + 1; x += 1) { ctx.beginPath(); ctx.moveTo(ox + x * cellSize, Math.max(0, oy + startY * cellSize)); ctx.lineTo(ox + x * cellSize, Math.min(box.height, oy + (endY + 1) * cellSize)); ctx.stroke(); }
+    for (let y = startY; y <= endY + 1; y += 1) { ctx.beginPath(); ctx.moveTo(Math.max(0, ox + startX * cellSize), oy + y * cellSize); ctx.lineTo(Math.min(box.width, ox + (endX + 1) * cellSize), oy + y * cellSize); ctx.stroke(); }
   }
 
-  for (const marker of map.markers) drawMarker(ctx, marker, ox + (marker.x + .5) * cellSize, oy + (marker.y + .5) * cellSize, cellSize);
+  for (const marker of map.markers) {
+    if (marker.x < startX || marker.x > endX || marker.y < startY || marker.y > endY) continue;
+    drawMarker(ctx, marker, ox + (marker.x + .5) * cellSize, oy + (marker.y + .5) * cellSize, cellSize);
+  }
   ctx.strokeStyle = '#f4d889';
   ctx.lineWidth = Math.max(1.5, cellSize * .13);
   ctx.strokeRect(ox + selected.x * cellSize + 1, oy + selected.y * cellSize + 1, Math.max(1, cellSize - 2), Math.max(1, cellSize - 2));
@@ -233,11 +244,12 @@ function entityName(world: WorldState, ref: EntityRef): string {
   const collections: Record<EntityRef['kind'], readonly { id: number; name?: string; title?: string }[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
   };
   const entity = collections[ref.kind].find(item => item.id === ref.id);
   return entity?.name ?? entity?.title ?? `${ref.kind} ${ref.id}`;
 }
 
 function markerLabel(kind: LocalMarker['kind']): string {
-  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'предмет', effect: 'след события' } as const)[kind];
+  return ({ person: 'житель', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'предмет', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс' } as const)[kind];
 }

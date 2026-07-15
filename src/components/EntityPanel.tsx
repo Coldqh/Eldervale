@@ -7,6 +7,7 @@ import {
 const labels: Record<EntityKind, string> = {
   kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', monster: 'Существо',
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
+  animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
@@ -20,7 +21,7 @@ export function EntityPanel({ world, selected, onSelect }: { world: WorldState; 
     <div className="entity-stats">{renderStats(world, selected, entity, onSelect)}</div>
     {relatedEvents.length > 0 && <section><h3>След в истории</h3>{relatedEvents.map(event => <div className="history-link detailed-history" key={event.id}>
       <span>{event.year}.{String(event.month).padStart(2, '0')}</span>
-      <div><strong>{event.title}</strong><small>{event.description}</small><em>Причина: {event.cause}</em>{event.consequences.length > 0 && <em>Последствия: {event.consequences.join('; ')}</em>}</div>
+      <div><strong>{event.title}</strong><small>{event.description}</small><em>Причина: {event.cause}</em><em>Условия: {event.conditions.join('; ')}</em><em>Действие: {event.decision}</em><em>Результат: {event.outcome}</em>{event.consequences.length > 0 && <em>Последствия: {event.consequences.join('; ')}</em>}</div>
     </div>)}</section>}
   </div>;
 }
@@ -29,6 +30,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
   const map: Record<EntityKind, any[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
   };
   return map[ref.kind].find(item => item.id === ref.id);
 }
@@ -68,17 +70,18 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
   }
   if (ref.kind === 'settlement') return <>
     {row('Государство', link(getTitle(world, { kind: 'kingdom', id: entity.kingdomId }), { kind: 'kingdom', id: entity.kingdomId }, onSelect))}
-    {row('Тип', settlementTypeLabel(entity.type))}{row('Население', `${entity.population} жителей`)}{row('Ресурс', entity.resource)}
+    {row('Тип', settlementTypeLabel(entity.type))}{row('Население', `${entity.population} жителей`)}{row('Жилая вместимость', `${entity.residentialCapacity} мест`)}
+    {row('Домохозяйства', entity.households)}{row('Глобальные квадраты', `${entity.districts.length} · ${entity.districts.map((item: any) => item.name).join(', ')}`)}{row('Ресурс', entity.resource)}
     {row('Благосостояние', `${entity.prosperity}%`)}{row('Защита', `${entity.defense}%`)}{row('Запасы пищи', entity.food)}
     {row('Беспорядки', `${entity.unrest}%`)}{row('Нехватка', entity.shortages.join(', ') || 'нет')}{row('Повреждения', `${entity.damaged}%`)}
     {row('Пути', links(world, entity.tradeRouteIds.map((id: number) => ({ kind: 'tradeRoute' as const, id })), onSelect))}
-    {row('Постройки', entity.buildings.join(', '))}{row('История', entity.history.join(' '))}
+    {row('Постройки', entity.buildings.join(', '))}{row('Склад', Object.entries(entity.stockpile).filter(([, value]) => Number(value) > 0).slice(0, 18).map(([name, value]) => `${name}: ${Math.round(Number(value))}`).join(', ') || 'пусто')}{row('Скот', Object.entries(entity.livestock).map(([name, value]) => `${name}: ${value}`).join(', ') || 'нет')}{row('История', entity.history.join(' '))}
   </>;
   if (ref.kind === 'character') {
     const relationships = world.relationships.filter(relation => entity.relationshipIds.includes(relation.id)).slice(0, 10);
     return <>
       {row('Состояние', entity.alive ? `${entity.age} лет` : `умер в ${entity.deathYear} году`)}{row('Вид', speciesLabel(entity.species))}
-      {row('Профессия', professionLabel(entity.profession))}{row('Родина', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
+      {row('Профессия', professionLabel(entity.profession))}{row('Рабочее место', entity.workplace)}{row('Домашний район', entity.homeDistrict ?? 'не закреплён')}{row('Родина', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
       {row('Династия', entity.dynastyId ? link(getTitle(world, { kind: 'dynasty', id: entity.dynastyId }), { kind: 'dynasty', id: entity.dynastyId }, onSelect) : 'нет')}
       {row('Супруг', entity.spouseId ? link(getTitle(world, { kind: 'character', id: entity.spouseId }), { kind: 'character', id: entity.spouseId }, onSelect) : 'нет')}
       {row('Родители', links(world, entity.parentIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}
@@ -141,6 +144,22 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Конец', link(getTitle(world, { kind: 'settlement', id: entity.toSettlementId }), { kind: 'settlement', id: entity.toSettlementId }, onSelect))}
     {row('Товары', entity.goods.join(', '))}{row('Объём', entity.volume)}{row('Безопасность', `${entity.safety}%`)}{row('Состояние', entity.active ? 'действует' : 'закрыт')}
     {row('Контроль', links(world, entity.controlledByKingdomIds.map((id: number) => ({ kind: 'kingdom' as const, id })), onSelect))}{row('История', entity.history.join(' '))}
+  </>;
+  if (ref.kind === 'animalPopulation') return <>
+    {row('Вид', entity.species)}{row('Координаты', `${entity.x}:${entity.y}`)}{row('Численность', `${entity.count} особей`)}{row('Вместимость биома', entity.carryingCapacity)}
+    {row('Питание', entity.diet)}{row('Добыча', entity.preySpecies.join(', ') || 'растительность и падаль')}{row('Хищники', entity.predatorSpecies.join(', ') || 'нет обычных хищников')}
+    {row('Здоровье', `${entity.health}%`)}{row('Размножение', entity.reproductionRate)}{row('Миграционное давление', `${entity.migrationDrive}%`)}{row('Добыто охотой за год', entity.huntedThisYear)}
+    {row('Последняя причина изменения', entity.lastCause)}{row('История', entity.history.join(' ') || 'Заметных событий не было.')}
+  </>;
+  if (ref.kind === 'ingredient') return <>
+    {row('Тип', entity.kind)}{row('Координаты', `${entity.x}:${entity.y}`)}{row('Запас', Math.round(entity.abundance))}{row('Предел восстановления', entity.carryingCapacity)}
+    {row('Скорость восстановления', entity.regenerationRate)}{row('Сезон', entity.seasonMonths.join(', '))}{row('Свойства', entity.properties.join(', '))}{row('Токсичность', `${entity.toxicity}%`)}
+    {row('Собрано за год', entity.harvestedThisYear)}{row('История', entity.history.join(' '))}
+  </>;
+  if (ref.kind === 'recipe') return <>
+    {row('Результат', entity.result)}{row('Эффект', entity.effect)}{row('Риск', entity.risk)}{row('Открыт', `${entity.discoveryYear} год`)}
+    {row('Открыватель', entity.discoveredById ? link(getTitle(world, { kind: 'character', id: entity.discoveredById }), { kind: 'character', id: entity.discoveredById }, onSelect) : 'неизвестен')}
+    {row('Ингредиенты', links(world, entity.ingredientIds.map((id: number) => ({ kind: 'ingredient' as const, id })), onSelect))}{row('Источник знания', entity.source)}{row('Создано партий', entity.batchesCreated)}{row('История', entity.history.join(' '))}
   </>;
   return null;
 }
