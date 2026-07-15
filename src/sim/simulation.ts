@@ -4,6 +4,12 @@ import { personName, placeName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
 import { expandHousing } from './settlements';
+import type { WorldIndexes } from './indexes';
+import {
+  addResidentToIndexes, buildWorldIndexes, changeProfessionInIndexes, indexRelationship,
+  moveResidentInIndexes, relationshipKey, removeResidentFromIndexes, residents, workers,
+} from './indexes';
+import { prepareMonthSchedule } from './scheduler';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   return appendCausalEvent(world, data);
@@ -68,18 +74,28 @@ function routeSettlements(world: WorldState, route: TradeRoute): [Settlement, Se
   return from && to ? [from, to] : undefined;
 }
 
-function advanceEconomy(world: WorldState, rng: RNG): void {
-  for (const settlement of world.settlements) {
-    const residents = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
-    settlement.population = residents.length;
-    const farmers = residents.filter(character => ['farmer', 'fisher', 'hunter', 'miller'].includes(character.profession)).length;
-    const merchants = residents.filter(character => character.profession === 'merchant').length;
-    const production = Math.max(1, Math.round(farmers * .45 + settlement.prosperity / 14 + rng.int(-3, 5)));
-    const consumption = Math.max(1, Math.round(settlement.population / 34));
-    settlement.food = Math.max(0, Math.min(180, settlement.food + production - consumption));
-    settlement.prosperity = Math.max(3, Math.min(100, settlement.prosperity + Math.sign(settlement.food - 45) + Math.min(2, Math.floor(merchants / 12)) - Math.ceil(settlement.damaged / 35) - Math.ceil(settlement.unrest / 45)));
-    settlement.damaged = Math.max(0, settlement.damaged - (settlement.prosperity > 45 ? 1 : 0));
-    settlement.unrest = Math.max(0, Math.min(100, settlement.unrest + (settlement.food < 22 ? 4 : -1) + (settlement.damaged > 60 ? 2 : 0)));
+function advanceEconomy(
+  world: WorldState,
+  rng: RNG,
+  indexes: WorldIndexes,
+  settlementIds: ReadonlySet<number>,
+  activeSettlementIds: ReadonlySet<number>,
+): void {
+  for (const settlementId of settlementIds) {
+    const settlement = indexes.settlementById.get(settlementId);
+    if (!settlement) continue;
+    const localResidents = residents(indexes, settlement.id);
+    settlement.population = localResidents.length;
+    const farmers = workers(indexes, settlement.id, ['farmer', 'fisher', 'hunter', 'miller']).length;
+    const merchants = workers(indexes, settlement.id, ['merchant']).length;
+    const elapsedMonths = activeSettlementIds.has(settlement.id) ? 1 : 3;
+    const production = Math.max(1, Math.round((farmers * .45 + settlement.prosperity / 14 + rng.int(-3, 5)) * elapsedMonths));
+    const consumption = Math.max(1, Math.round(settlement.population / 34 * elapsedMonths));
+    settlement.food = Math.max(0, Math.min(240, settlement.food + production - consumption));
+    const prosperityStep = Math.sign(settlement.food - 45) + Math.min(2, Math.floor(merchants / 12)) - Math.ceil(settlement.damaged / 35) - Math.ceil(settlement.unrest / 45);
+    settlement.prosperity = Math.max(3, Math.min(100, settlement.prosperity + prosperityStep * elapsedMonths));
+    settlement.damaged = Math.max(0, settlement.damaged - (settlement.prosperity > 45 ? elapsedMonths : 0));
+    settlement.unrest = Math.max(0, Math.min(100, settlement.unrest + ((settlement.food < 22 ? 4 : -1) + (settlement.damaged > 60 ? 2 : 0)) * elapsedMonths));
     const wasHungry = settlement.shortages.includes('пища');
     if (settlement.food < 18 && !wasHungry) {
       settlement.shortages.push('пища');
@@ -100,9 +116,9 @@ function advanceEconomy(world: WorldState, rng: RNG): void {
   }
 
   for (const route of world.tradeRoutes) {
-    const pair = routeSettlements(world, route);
-    if (!pair) continue;
-    const [from, to] = pair;
+    const from = indexes.settlementById.get(route.fromSettlementId);
+    const to = indexes.settlementById.get(route.toSettlementId);
+    if (!from || !to) continue;
     const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
     const nearbyThreat = world.monsters.some(monster => monster.alive && distance(monster, middle) <= monster.territoryRadius);
     const warBlocks = world.wars.some(war => war.active && [from.kingdomId, to.kingdomId].includes(war.attackerId) && [from.kingdomId, to.kingdomId].includes(war.defenderId));
@@ -113,10 +129,10 @@ function advanceEconomy(world: WorldState, rng: RNG): void {
       const gain = Math.max(1, Math.round(route.volume / 28));
       from.prosperity = Math.min(100, from.prosperity + gain);
       to.prosperity = Math.min(100, to.prosperity + gain);
-      if (from.resource === 'зерно' || from.resource === 'рыба') to.food = Math.min(180, to.food + gain * 2);
-      if (to.resource === 'зерно' || to.resource === 'рыба') from.food = Math.min(180, from.food + gain * 2);
+      if (from.resource === 'зерно' || from.resource === 'рыба') to.food = Math.min(240, to.food + gain * 2);
+      if (to.resource === 'зерно' || to.resource === 'рыба') from.food = Math.min(240, from.food + gain * 2);
       for (const kingdomId of route.controlledByKingdomIds) {
-        const kingdom = world.kingdoms.find(item => item.id === kingdomId);
+        const kingdom = indexes.kingdomById.get(kingdomId);
         if (kingdom) kingdom.treasury += Math.max(1, Math.round(route.volume / 34));
       }
     }
@@ -137,24 +153,29 @@ function advanceEconomy(world: WorldState, rng: RNG): void {
   }
 }
 
-function addRelationship(world: WorldState, a: Character, b: Character, kind: Relationship['kind'], strength: number, reason: string): void {
-  if (a.id === b.id || world.relationships.some(rel => (rel.characterAId === a.id && rel.characterBId === b.id) || (rel.characterAId === b.id && rel.characterBId === a.id))) return;
+function addRelationship(world: WorldState, indexes: WorldIndexes, a: Character, b: Character, kind: Relationship['kind'], strength: number, reason: string): void {
+  if (a.id === b.id || indexes.relationshipKeys.has(relationshipKey(a.id, b.id))) return;
   const relationship: Relationship = { id: world.nextIds.relationship++, characterAId: a.id, characterBId: b.id, kind, strength, sinceYear: world.year, public: kind !== 'ненависть', reason };
   world.relationships.push(relationship);
   a.relationshipIds.push(relationship.id);
   b.relationshipIds.push(relationship.id);
+  indexRelationship(indexes, relationship);
 }
 
-function advancePopulation(world: WorldState, rng: RNG): void {
-  if (world.month !== 1) return;
+function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   for (const character of world.characters) {
     if (!character.alive) continue;
-    character.age += 1;
-    if (character.profession === 'child' && character.age >= 14) { character.profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']); character.workplace = workplaceFor(character.profession); }
-    const settlement = world.settlements.find(item => item.id === character.settlementId);
+    character.age = Math.max(0, world.year - character.birthYear);
+    if (character.profession === 'child' && character.age >= 14) {
+      const profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']);
+      changeProfessionInIndexes(indexes, character, profession);
+      character.workplace = workplaceFor(character.profession);
+    }
+    const settlement = indexes.settlementById.get(character.settlementId);
     const hungerRisk = settlement?.shortages.includes('пища') ? .035 : 0;
     const mortality = character.age < 45 ? .002 : character.age < 65 ? .01 : character.age < 85 ? .055 : .16;
     if (rng.chance(mortality + hungerRisk + (100 - character.health) / 1500)) {
+      removeResidentFromIndexes(indexes, character);
       character.alive = false;
       character.deathYear = world.year;
       character.biography.push(`Умер в ${world.year} году.`);
@@ -167,11 +188,13 @@ function advancePopulation(world: WorldState, rng: RNG): void {
   }
 
   for (const settlement of world.settlements) {
-    const adults = world.characters.filter(character => character.alive && character.settlementId === settlement.id && character.age >= 18 && character.age <= 48);
+    const localResidents = residents(indexes, settlement.id);
+    settlement.population = localResidents.length;
+    const adults = localResidents.filter(character => character.age >= 18 && character.age <= 48);
     const couples = adults
-      .filter(character => character.spouseId && character.id < character.spouseId!)
-      .map(character => [character, adults.find(item => item.id === character.spouseId)] as const)
-      .filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]));
+      .filter(character => character.spouseId && character.id < character.spouseId)
+      .map(character => [character, indexes.characterById.get(character.spouseId!)] as const)
+      .filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]?.alive && pair[1]?.settlementId === settlement.id));
     const potential: readonly (readonly [Character, Character])[] = couples.length
       ? couples
       : adults.map((character, index) => [character, adults[index + 1]] as const).filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]));
@@ -188,8 +211,9 @@ function advancePopulation(world: WorldState, rng: RNG): void {
       parentA.childIds.push(child.id);
       parentB.childIds.push(child.id);
       world.characters.push(child);
-      addRelationship(world, parentA, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
-      addRelationship(world, parentB, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
+      addResidentToIndexes(indexes, child);
+      addRelationship(world, indexes, parentA, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
+      addRelationship(world, indexes, parentB, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
       if (child.dynastyId) world.dynasties.find(dynasty => dynasty.id === child.dynastyId)?.memberIds.push(child.id);
       if (rng.chance(.12)) addEvent(world, {
         kind: 'birth', title: `Родился ${child.name}`, description: `В семье ${parentA.name} и ${parentB.name} родился ребёнок.`, cause: 'семейная жизнь и достаточные запасы',
@@ -197,15 +221,17 @@ function advancePopulation(world: WorldState, rng: RNG): void {
         entityRefs: [{ kind: 'character', id: child.id }, { kind: 'character', id: parentA.id }, { kind: 'settlement', id: settlement.id }], importance: child.dynastyId ? 2 : 1,
       });
     }
+    settlement.population = residents(indexes, settlement.id).length;
 
     const unmarried = adults.filter(character => !character.spouseId && character.age <= 60);
     if (unmarried.length >= 2 && rng.chance(.2)) {
       const a = rng.pick(unmarried);
-      const b = rng.pick(unmarried.filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24));
-      if (b) {
+      const candidates = unmarried.filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24);
+      if (candidates.length) {
+        const b = rng.pick(candidates);
         a.spouseId = b.id;
         b.spouseId = a.id;
-        addRelationship(world, a, b, 'любовь', rng.int(45, 92), `брак в ${settlement.name}`);
+        addRelationship(world, indexes, a, b, 'любовь', rng.int(45, 92), `брак в ${settlement.name}`);
         a.biography.push(`В ${world.year} году вступил в брак с ${b.name}.`);
         b.biography.push(`В ${world.year} году вступил в брак с ${a.name}.`);
       }
@@ -220,7 +246,10 @@ function startWars(world: WorldState, rng: RNG): void {
   const attacker = [...candidates].sort((a, b) => b.aggression - a.aggression)[rng.int(0, Math.min(2, candidates.length - 1))]!;
   const possibleDefenders = candidates.filter(kingdom => kingdom.id !== attacker.id).sort((a, b) => (relationBetween(world, attacker.id, a.id)?.score ?? 0) - (relationBetween(world, attacker.id, b.id)?.score ?? 0));
   const defender = possibleDefenders[0]!;
-  const target = nearestSettlement(world, world.settlements.find(item => item.id === attacker.capitalId)!.x, world.settlements.find(item => item.id === attacker.capitalId)!.y, settlement => settlement.kingdomId === defender.id)!;
+  const capital = world.settlements.find(item => item.id === attacker.capitalId);
+  if (!capital) return;
+  const target = nearestSettlement(world, capital.x, capital.y, settlement => settlement.kingdomId === defender.id);
+  if (!target) return;
   const cause = rng.pick(['спорная пограничная крепость', 'неуплаченные торговые пошлины', 'династические притязания', 'набеги на приграничные деревни', `контроль над ресурсом «${target.resource}»`, 'убийство королевского посланника']);
   const goal = cause.includes('династические') ? 'посадить родственника на чужой престол' : `захватить ${target.name}`;
   const war: War = {
@@ -244,9 +273,11 @@ function startWars(world: WorldState, rng: RNG): void {
   });
 }
 
-function moveArmies(world: WorldState, rng: RNG): void {
-  for (const army of world.armies.filter(item => item.status === 'marching')) {
-    const target = world.settlements.find(settlement => settlement.id === army.targetSettlementId);
+function moveArmies(world: WorldState, rng: RNG, indexes: WorldIndexes, dueArmyIds: ReadonlySet<number>): void {
+  for (const armyId of dueArmyIds) {
+    const army = world.armies.find(item => item.id === armyId);
+    if (!army || army.status !== 'marching') continue;
+    const target = army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined;
     if (!target) { army.status = 'recovering'; continue; }
     army.supplies = Math.max(0, army.supplies - rng.int(2, 6));
     if (army.supplies <= 0) {
@@ -255,7 +286,7 @@ function moveArmies(world: WorldState, rng: RNG): void {
     }
     army.x += Math.sign(target.x - army.x);
     army.y += Math.sign(target.y - army.y);
-    if (army.x === target.x && army.y === target.y) resolveBattle(world, army.id, target.id, rng);
+    if (army.x === target.x && army.y === target.y) resolveBattle(world, army.id, target.id, rng, indexes);
   }
 }
 
@@ -266,9 +297,9 @@ function changeTerritoryAround(world: WorldState, target: Settlement, kingdomId:
   }
 }
 
-function resolveBattle(world: WorldState, armyId: number, settlementId: number, rng: RNG): void {
+function resolveBattle(world: WorldState, armyId: number, settlementId: number, rng: RNG, indexes: WorldIndexes): void {
   const army = world.armies.find(item => item.id === armyId)!;
-  const target = world.settlements.find(item => item.id === settlementId)!;
+  const target = indexes.settlementById.get(settlementId)!;
   const war = world.wars.find(item => item.active && item.attackerId === army.kingdomId && item.defenderId === target.kingdomId);
   if (!war) { army.status = 'recovering'; return; }
   const defenderArmy = world.armies.find(item => item.kingdomId === target.kingdomId)!;
@@ -289,7 +320,7 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
     target.defense = Math.max(10, target.defense - rng.int(8, 22));
     target.unrest = Math.min(100, target.unrest + 35);
     target.history.push(`В ${world.year} году поселение захватило войско государства ${world.kingdoms.find(item => item.id === army.kingdomId)!.name}.`);
-    world.characters.filter(character => character.settlementId === target.id).forEach(character => {
+    residents(indexes, target.id).forEach(character => {
       character.kingdomId = army.kingdomId;
       character.loyalty = Math.max(0, character.loyalty - rng.int(5, 25));
       character.biography.push(`${target.name} был захвачен государством ${world.kingdoms.find(item => item.id === army.kingdomId)!.name}.`);
@@ -359,22 +390,32 @@ function recoverArmies(world: WorldState): void {
   }
 }
 
-function transferArtifactToMonster(world: WorldState, monsterId: number, settlementId: number, rng: RNG): void {
-  const victims = world.artifacts.filter(artifact => artifact.ownerId && (artifact.settlementId === settlementId || world.characters.find(character => character.id === artifact.ownerId)?.settlementId === settlementId) && rng.chance(.2));
+function transferArtifactToMonster(world: WorldState, monsterId: number, settlementId: number, rng: RNG, indexes: WorldIndexes): void {
+  const victims = world.artifacts.filter(artifact => artifact.ownerId && (artifact.settlementId === settlementId || indexes.characterById.get(artifact.ownerId)?.settlementId === settlementId) && rng.chance(.2));
   const artifact = victims[0];
   if (!artifact) return;
-  const oldOwner = world.characters.find(character => character.id === artifact.ownerId);
+  const oldOwner = artifact.ownerId ? indexes.characterById.get(artifact.ownerId) : undefined;
   if (oldOwner) oldOwner.artifactIds = oldOwner.artifactIds.filter(id => id !== artifact.id);
   artifact.ownerHistory.push({ year: world.year, settlementId: artifact.settlementId, reason: `утрачен во время нападения существа ${world.monsters.find(monster => monster.id === monsterId)?.name}` });
   artifact.ownerId = undefined;
   artifact.history.push(`В ${world.year} году исчез после нападения чудовища.`);
 }
 
-function monsterActions(world: WorldState, rng: RNG): void {
-  for (const monster of world.monsters.filter(item => item.alive)) {
-    monster.hunger = Math.min(100, monster.hunger + rng.int(1, 5));
-    const actionChance = (monster.species === 'dragon' ? .035 : .014) + monster.hunger / 1800;
-    if (!rng.chance(actionChance * world.config.monsterDensity)) continue;
+function monsterActions(world: WorldState, rng: RNG, indexes: WorldIndexes, dueMonsterIds: ReadonlySet<number>): void {
+  for (const monsterId of dueMonsterIds) {
+    const monster = world.monsters.find(item => item.id === monsterId);
+    if (!monster?.alive) continue;
+    const elapsedMonths = monster.targetSettlementId || monster.hunger >= 70 || monster.tier === 'boss'
+      ? 1
+      : monster.tier === 'miniboss'
+        ? 2
+        : monster.tier === 'elite'
+          ? 3
+          : 4;
+    monster.hunger = Math.min(100, monster.hunger + rng.int(1, 5) * elapsedMonths);
+    const monthlyActionChance = Math.min(.9, ((monster.species === 'dragon' ? .035 : .014) + monster.hunger / 1800) * world.config.monsterDensity);
+    const scheduledActionChance = 1 - Math.pow(1 - monthlyActionChance, elapsedMonths);
+    if (!rng.chance(scheduledActionChance)) continue;
     const target = nearestSettlement(world, monster.x, monster.y, settlement => distance(monster, settlement) <= monster.territoryRadius + 5);
     if (!target) continue;
     monster.targetSettlementId = target.id;
@@ -390,8 +431,9 @@ function monsterActions(world: WorldState, rng: RNG): void {
     monster.hoard += rng.int(10, isDragon ? 160 : 45);
     monster.hunger = Math.max(0, monster.hunger - rng.int(25, 65));
     monster.kills += deaths;
-    const victims = world.characters.filter(character => character.alive && character.settlementId === target.id).sort(() => rng.next() - .5).slice(0, deaths);
+    const victims = [...residents(indexes, target.id)].sort(() => rng.next() - .5).slice(0, deaths);
     victims.forEach(victim => {
+      removeResidentFromIndexes(indexes, victim);
       victim.alive = false;
       victim.deathYear = world.year;
       victim.biography.push(`Погиб во время нападения ${monster.name} на ${target.name}.`);
@@ -402,18 +444,19 @@ function monsterActions(world: WorldState, rng: RNG): void {
     }
     monster.history.push(`Напал на ${target.name} в ${world.year} году.`);
     target.history.push(`В ${world.year} году ${monster.name} разорил часть поселения.`);
-    transferArtifactToMonster(world, monster.id, target.id, rng);
+    target.population = residents(indexes, target.id).length;
+    transferArtifactToMonster(world, monster.id, target.id, rng, indexes);
     addEvent(world, {
       kind: isDragon ? 'dragon' : 'monster', title: `${monster.name} напал на ${target.name}`,
       description: isDragon ? `Огонь уничтожил дома и амбары. Погибли ${deaths} жителей.` : `Существо разграбило окраины. Погибли ${deaths} жителей.`,
       cause: `${monster.behavior}; голод достиг ${monster.hunger}%`, consequences: ['потеря припасов', 'гибель жителей', 'правитель может отправить героя', 'опасность торговых путей выросла'],
       entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: target.id }, { kind: 'kingdom', id: target.kingdomId }], importance: isDragon ? 5 : monster.tier === 'boss' ? 4 : 3,
     });
-    if (isDragon || monster.tier === 'boss' || monster.tier === 'miniboss') dispatchHero(world, monster.id, target.kingdomId, rng);
+    if (isDragon || monster.tier === 'boss' || monster.tier === 'miniboss') dispatchHero(world, monster.id, target.kingdomId, rng, indexes);
   }
 }
 
-function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, rng: RNG): void {
+function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, rng: RNG, indexes: WorldIndexes): void {
   const monster = world.monsters.find(item => item.id === monsterId)!;
   const kingdom = world.kingdoms.find(item => item.id === kingdomId)!;
   const heroes = world.characters.filter(character => character.alive && character.kingdomId === kingdomId && character.age >= 18 && (character.profession === 'soldier' || character.profession === 'hunter' || character.renown >= 35));
@@ -444,6 +487,7 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
       entityRefs: [{ kind: 'character', id: hero.id }, { kind: 'monster', id: monster.id }, ...(lair ? [{ kind: 'dungeon' as const, id: lair.id }] : [])], importance: 5,
     });
   } else if (rng.chance(.58)) {
+    removeResidentFromIndexes(indexes, hero);
     hero.alive = false;
     hero.deathYear = world.year;
     hero.biography.push(`Погиб во время охоты на ${monster.name}.`);
@@ -548,11 +592,10 @@ function restoreAndFound(world: WorldState, rng: RNG): void {
 }
 
 
-function advanceHousing(world: WorldState, rng: RNG): void {
-  if (world.month !== 2 && world.month !== 8) return;
+function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   for (const settlement of world.settlements) {
-    const residents = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
-    settlement.population = residents.length;
+    const localResidents = residents(indexes, settlement.id);
+    settlement.population = localResidents.length;
     const shortage = Math.max(0, settlement.population - settlement.residentialCapacity);
     const nearCapacity = settlement.residentialCapacity - settlement.population < Math.max(4, Math.ceil(settlement.population * .04));
     if (shortage <= 0 && !nearCapacity) continue;
@@ -571,8 +614,7 @@ function advanceHousing(world: WorldState, rng: RNG): void {
         description: `Построено ${result.houses} домов, вместимость выросла на ${result.capacityAdded} мест.`,
         cause: `население ${settlement.population} превысило прежнюю вместимость ${settlement.residentialCapacity - result.capacityAdded}`,
         conditions: [`в запасах были древесина или камень`, `благосостояние ${settlement.prosperity}% позволило организовать стройку`],
-        decision: 'община и местная власть направили материалы на новое жильё',
-        outcome: `жилищная вместимость достигла ${settlement.residentialCapacity}`,
+        decision: 'община и местная власть направили материалы на новое жильё', outcome: `жилищная вместимость достигла ${settlement.residentialCapacity}`,
         consequences: ['перенаселение уменьшилось', 'запасы строительных материалов сократились', 'поселение физически расширилось'],
         entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 2,
       });
@@ -580,54 +622,96 @@ function advanceHousing(world: WorldState, rng: RNG): void {
     }
 
     if (shortage <= 0) continue;
-
-    const destination = world.settlements
-      .filter(item => item.id !== settlement.id && item.kingdomId === settlement.kingdomId && item.residentialCapacity - item.population >= 3)
-      .sort((a, b) => Math.hypot(a.x - settlement.x, a.y - settlement.y) - Math.hypot(b.x - settlement.x, b.y - settlement.y))[0];
+    let destination: Settlement | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of world.settlements) {
+      if (candidate.id === settlement.id || candidate.kingdomId !== settlement.kingdomId || candidate.residentialCapacity - candidate.population < 3) continue;
+      const candidateDistance = Math.hypot(candidate.x - settlement.x, candidate.y - settlement.y);
+      if (candidateDistance < bestDistance) { bestDistance = candidateDistance; destination = candidate; }
+    }
     if (!destination) {
       settlement.unrest = Math.min(100, settlement.unrest + 5);
       continue;
     }
-    const migrants = residents.filter(character => character.age >= 14 && !character.titles.length).slice(0, Math.min(shortage, rng.int(1, 6)));
+    const migrants = localResidents.filter(character => character.age >= 14 && !character.titles.length).slice(0, Math.min(shortage, rng.int(1, 6)));
     if (!migrants.length) continue;
     for (const migrant of migrants) {
-      migrant.settlementId = destination.id;
+      moveResidentInIndexes(indexes, migrant, destination.id);
       migrant.kingdomId = destination.kingdomId;
       migrant.homeDistrict = destination.districts[0]?.name ?? 'Сердце поселения';
       migrant.biography.push(`В ${world.year} году переехал из ${settlement.name} в ${destination.name} из-за нехватки жилья.`);
     }
-    settlement.population -= migrants.length;
-    destination.population += migrants.length;
+    settlement.population = residents(indexes, settlement.id).length;
+    destination.population = residents(indexes, destination.id).length;
     addEvent(world, {
-      kind: 'migration', title: `Жители покинули ${settlement.name}`,
-      description: `${migrants.length} человек переселились в ${destination.name}.`,
-      cause: 'нехватка жилья и материалов для строительства',
-      conditions: [`не хватало ${shortage} жилых мест`, `${destination.name} имел свободное жильё`],
+      kind: 'migration', title: `Жители покинули ${settlement.name}`, description: `${migrants.length} человек переселились в ${destination.name}.`,
+      cause: 'нехватка жилья и материалов для строительства', conditions: [`не хватало ${shortage} жилых мест`, `${destination.name} имел свободное жильё`],
       decision: 'семьи выбрали переселение внутри государства', outcome: 'население перераспределилось между поселениями',
       consequences: ['перенаселение снизилось', 'новое поселение получило работников', 'семейные и рабочие связи изменились'],
-      entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'settlement', id: destination.id }, ...migrants.slice(0, 3).map(character => ({ kind: 'character' as const, id: character.id }))],
-      importance: 2,
+      entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'settlement', id: destination.id }, ...migrants.slice(0, 3).map(character => ({ kind: 'character' as const, id: character.id }))], importance: 2,
     });
   }
 }
 
+export interface SimulationEngine {
+  world: WorldState;
+  indexes: WorldIndexes;
+  processedTasks: number;
+}
+
+export function createSimulationEngine(world: WorldState): SimulationEngine {
+  return { world, indexes: buildWorldIndexes(world), processedTasks: 0 };
+}
+
+export function replaceSimulationWorld(engine: SimulationEngine, world: WorldState): void {
+  engine.world = world;
+  engine.indexes = buildWorldIndexes(world);
+  engine.processedTasks = 0;
+}
+
+export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: string) => void): number {
+  const { world, indexes } = engine;
+  world.month += 1;
+  if (world.month > 12) { world.month = 1; world.year += 1; }
+  const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
+  const schedule = prepareMonthSchedule(world, indexes);
+
+  onPhase?.('Поселения и торговля');
+  advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
+
+  if (schedule.runPopulation) {
+    onPhase?.('Жители, семьи и наследование');
+    advancePopulation(world, rng, indexes);
+  }
+  if (schedule.runHousing) {
+    onPhase?.('Строительство и переселения');
+    advanceHousing(world, rng, indexes);
+  }
+
+  onPhase?.(schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы');
+  advanceEcology(world, rng, indexes, {
+    settlementIds: schedule.ecologySettlementIds,
+    activeSettlementIds: schedule.activeSettlementIds,
+    updateAnimals: schedule.runSeasonalEcology,
+  });
+
+  onPhase?.('Политика, армии и угрозы');
+  startWars(world, rng);
+  moveArmies(world, rng, indexes, schedule.dueArmyIds);
+  recoverArmies(world);
+  monsterActions(world, rng, indexes, schedule.dueMonsterIds);
+  succession(world, rng);
+
+  if (schedule.runBooks) writeBooks(world, rng);
+  if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);
+
+  engine.processedTasks += schedule.processedTasks;
+  return schedule.processedTasks;
+}
+
 export function advanceWorld(source: WorldState, months = 1): WorldState {
   const world = structuredClone(source);
-  for (let step = 0; step < months; step += 1) {
-    world.month += 1;
-    if (world.month > 12) { world.month = 1; world.year += 1; }
-    const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
-    advanceEconomy(world, rng);
-    advancePopulation(world, rng);
-    advanceHousing(world, rng);
-    advanceEcology(world, rng);
-    startWars(world, rng);
-    moveArmies(world, rng);
-    recoverArmies(world);
-    monsterActions(world, rng);
-    succession(world, rng);
-    writeBooks(world, rng);
-    restoreAndFound(world, rng);
-  }
+  const engine = createSimulationEngine(world);
+  for (let step = 0; step < months; step += 1) advanceOneMonth(engine);
   return world;
 }

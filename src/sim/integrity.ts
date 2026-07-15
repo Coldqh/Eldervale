@@ -26,6 +26,7 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   const settlementIds = new Set(world.settlements.map(item => item.id));
   const characterIds = new Set(world.characters.map(item => item.id));
   const ingredientIds = new Set(world.ingredients.map(item => item.id));
+  const tileKeys = new Set(world.tiles.map(tile => `${tile.x}:${tile.y}`));
   for (const character of world.characters) {
     if (!settlementIds.has(character.settlementId)) errors.push(`${character.name}: не существует поселение проживания ${character.settlementId}`);
     if (!character.workplace) warnings.push(`${character.name}: не определено рабочее место`);
@@ -39,6 +40,16 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
     if (population.count > population.carryingCapacity * 1.8) warnings.push(`${population.species} ${population.x}:${population.y}: сильное перенаселение`);
   }
 
-  checks += world.armies.length + world.artifacts.length + world.ingredients.length;
+  const scheduledIds = new Set<string>();
+  for (const action of world.simulation.queuedActions) {
+    if (scheduledIds.has(action.id)) errors.push(`Планировщик: повтор действия ${action.id}`);
+    scheduledIds.add(action.id);
+    if (action.kind === 'army' && !world.armies.some(item => item.id === action.entityId)) errors.push(`Планировщик: не существует армия ${action.entityId}`);
+    if (action.kind === 'monster' && !world.monsters.some(item => item.id === action.entityId)) errors.push(`Планировщик: не существует существо ${action.entityId}`);
+    if (action.kind === 'war' && !world.wars.some(item => item.id === action.entityId)) errors.push(`Планировщик: не существует война ${action.entityId}`);
+  }
+  for (const key of world.simulation.activeRegionKeys) if (!tileKeys.has(key)) warnings.push(`Планировщик: активный регион ${key} находится вне карты`);
+
+  checks += world.armies.length + world.artifacts.length + world.ingredients.length + world.simulation.queuedActions.length + world.simulation.activeRegionKeys.length;
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)], checks };
 }

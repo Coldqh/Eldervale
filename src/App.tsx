@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { EntityRef, WorldConfig, WorldState } from './types';
+import type { EntityRef, SimulationProfile, SimulationProgress, WorldConfig, WorldState } from './types';
 import { WorldMap, type MapLayer } from './components/WorldMap';
 import { EntityPanel } from './components/EntityPanel';
 import { Encyclopedia } from './components/Encyclopedia';
@@ -8,7 +8,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { HistoricalAtlas } from './components/HistoricalAtlas';
 import { LocalMapViewer } from './components/LocalMapViewer';
 import { loadWorld, saveWorld } from './lib/worldStorage';
-import { advanceWorldInBackground, generateWorldInBackground } from './lib/worldWorkerClient';
+import { advanceWorldInBackground, cancelWorldOperation, generateWorldInBackground, initializeWorldInBackground } from './lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from './lib/appUpdate';
 import { migrateWorld } from './sim/migrateWorld';
 import { APP_VERSION } from './version';
@@ -28,6 +28,8 @@ export default function App() {
   const [localPosition, setLocalPosition] = useState<{ x: number; y: number; level: number }>();
   const [simulating, setSimulating] = useState(false);
   const [loadingText, setLoadingText] = useState('Открываем сохранённый мир');
+  const [progress, setProgress] = useState<SimulationProgress>();
+  const [performanceProfile, setPerformanceProfile] = useState<SimulationProfile>();
   const [updateState, setUpdateState] = useState<UpdateCheckResult>(initialUpdate);
   const importRef = useRef<HTMLInputElement>(null);
   const selected = entityStack.at(-1);
@@ -56,12 +58,26 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadWorld(), runUpdateCheck()]).then(([saved]) => {
+    Promise.all([loadWorld(), runUpdateCheck()]).then(async ([saved]) => {
       if (!active) return;
+      if (saved) {
+        setProgress({ operation: 'загрузка', phase: 'Подготовка постоянного движка', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
+        const profile = await initializeWorldInBackground(saved, setProgress);
+        if (!active) return;
+        setPerformanceProfile(profile);
+      }
       setWorld(saved);
       setSetupOpen(!saved);
       setEntityStack([]);
       setLocalPosition(undefined);
+      setProgress(undefined);
+      setBooting(false);
+    }).catch(error => {
+      console.error('Не удалось подготовить сохранённый мир', error);
+      if (!active) return;
+      setWorld(undefined);
+      setSetupOpen(true);
+      setProgress(undefined);
       setBooting(false);
     });
     return () => { active = false; };
@@ -79,12 +95,6 @@ export default function App() {
     const timer = window.setTimeout(() => { void forceUpdate(updateState.remoteVersion); }, 2200);
     return () => window.clearTimeout(timer);
   }, [updateState]);
-
-  useEffect(() => {
-    if (!world || booting) return;
-    const timer = window.setTimeout(() => { void saveWorld(world); }, 600);
-    return () => window.clearTimeout(timer);
-  }, [world, booting]);
 
   useEffect(() => {
     if (!selected) return;
@@ -108,18 +118,32 @@ export default function App() {
 
   const generate = async (config: WorldConfig) => {
     setLoadingText('Создаём земли, народы и причинную историю');
+    setProgress(undefined);
     setSimulating(true);
+    const roundTripStarted = performance.now();
     try {
-      const created = await generateWorldInBackground(config);
-      setWorld(created);
+      const result = await generateWorldInBackground(config, setProgress);
+      if (!result.world) throw new Error('Генератор не вернул созданный мир');
+      const receivedAt = performance.now();
+      const saveStarted = performance.now();
+      await saveWorld(result.world);
+      const saveMs = performance.now() - saveStarted;
+      const profile: SimulationProfile = {
+        ...(result.profile ?? { operation: 'генерация', totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
+        workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
+        saveMs,
+        totalMs: performance.now() - roundTripStarted,
+      };
+      setPerformanceProfile(profile);
+      setWorld(result.world);
       setEntityStack([]);
       setSetupOpen(false);
       setView('map');
       setLocalPosition(undefined);
-      await saveWorld(created);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Не удалось создать мир.');
     } finally {
+      setProgress(undefined);
       setSimulating(false);
     }
   };
@@ -127,14 +151,28 @@ export default function App() {
   const advance = async (months: number) => {
     if (!world || simulating) return;
     setLoadingText(months >= 120 ? 'Проводим мир через десятилетие' : months >= 12 ? 'Симулируем новый год' : 'Мир проживает следующий месяц');
+    setProgress(undefined);
     setSimulating(true);
+    const roundTripStarted = performance.now();
     try {
-      const advanced = await advanceWorldInBackground(world, months);
-      setWorld(advanced);
-      await saveWorld(advanced);
+      const result = await advanceWorldInBackground(months, setProgress);
+      if (!result.world) throw new Error('Симуляция не вернула состояние мира');
+      const receivedAt = performance.now();
+      const saveStarted = performance.now();
+      await saveWorld(result.world);
+      const saveMs = performance.now() - saveStarted;
+      const profile: SimulationProfile = {
+        ...(result.profile ?? { operation: 'симуляция', months, totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
+        workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
+        saveMs,
+        totalMs: performance.now() - roundTripStarted,
+      };
+      setPerformanceProfile(profile);
+      setWorld(result.world);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Симуляция остановилась.');
     } finally {
+      setProgress(undefined);
       setSimulating(false);
     }
   };
@@ -154,6 +192,7 @@ export default function App() {
     if (!file) return;
     try {
       const migrated = migrateWorld(JSON.parse(await file.text()));
+      await initializeWorldInBackground(migrated, setProgress);
       setWorld(migrated);
       setSetupOpen(false);
       setEntityStack([]);
@@ -167,7 +206,7 @@ export default function App() {
     }
   };
 
-  if (booting) return <LoadingVeil text="Открываем сохранённый мир" />;
+  if (booting) return <LoadingVeil text="Открываем сохранённый мир" progress={progress} />;
 
   const forcedUpdate = updateState.updateRequired
     ? <ForcedUpdate remoteVersion={updateState.remoteVersion ?? 'новая версия'} onUpdate={() => void forceUpdate(updateState.remoteVersion)} />
@@ -175,8 +214,8 @@ export default function App() {
 
   if (!world || setupOpen) return <>
     <WorldSetup initial={world?.config} onGenerate={generate} onClose={world ? () => setSetupOpen(false) : undefined} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <SettingsPanel world={world} update={updateState} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
-    {simulating && <LoadingVeil text={loadingText} />}
+    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
+    {simulating && <LoadingVeil text={loadingText} progress={progress} onCancel={progress?.operation === 'симуляция' ? cancelWorldOperation : undefined} />}
     {forcedUpdate}
   </>;
 
@@ -249,8 +288,8 @@ export default function App() {
     </nav>
 
     {selected && <EntityWindow world={world} selected={selected} canGoBack={entityStack.length > 1} onBack={backEntity} onClose={closeEntity} onSelect={openEntity} onOpenLocal={openLocal} />}
-    {settingsOpen && <SettingsPanel world={world} update={updateState} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
-    {simulating && <LoadingVeil text={loadingText} />}
+    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
+    {simulating && <LoadingVeil text={loadingText} progress={progress} onCancel={progress?.operation === 'симуляция' ? cancelWorldOperation : undefined} />}
     {forcedUpdate}
   </div>;
 }
@@ -300,7 +339,28 @@ function ViewButton({ active, icon, label, onClick }: { active: boolean; icon: s
   return <button className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span>{label}</button>;
 }
 
-function LoadingVeil({ text }: { text: string }) { return <div className="loading-veil"><div className="loading-sigil">E</div><strong>{text}</strong><span>жители работают, звери мигрируют, охотники ищут добычу, алхимики расходуют сырьё</span></div>; }
+function LoadingVeil({ text, progress, onCancel }: { text: string; progress?: SimulationProgress; onCancel?: () => void }) {
+  const percent = Math.max(0, Math.min(100, progress?.percent ?? 0));
+  return <div className="loading-veil">
+    <div className="loading-sigil">E</div>
+    <strong>{text}</strong>
+    <span>{progress?.phase ?? 'Подготавливаем движок живого мира'}</span>
+    <div className="generation-progress" aria-label={`Выполнено ${Math.round(percent)}%`}><i style={{ width: `${percent}%` }} /></div>
+    <div className="generation-progress-meta"><b>{Math.round(percent)}%</b><span>{progress?.year ? `Год ${progress.year}, месяц ${progress.month}` : progress?.detail ?? ''}</span><em>{formatDuration(progress?.etaMs)}</em></div>
+    {progress?.detail && progress.year && <small className="generation-detail">{progress.detail}</small>}
+    {onCancel && <button className="ghost-button cancel-simulation" onClick={onCancel}>Остановить после текущего шага</button>}
+  </div>;
+}
+
+function formatDuration(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return 'оцениваем время';
+  const seconds = Math.max(0, Math.round(value / 1000));
+  if (seconds < 2) return 'почти готово';
+  if (seconds < 60) return `ещё около ${seconds} сек.`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `ещё около ${minutes} мин. ${rest ? `${rest} сек.` : ''}`.trim();
+}
 function ForcedUpdate({ remoteVersion, onUpdate }: { remoteVersion: string; onUpdate: () => void }) { return <div className="loading-veil forced-update"><div className="loading-sigil">↻</div><strong>Требуется обновление</strong><span>Найдена версия {remoteVersion}. Старый кэш очищается автоматически.</span><button className="primary-button update-now" onClick={onUpdate}>Обновить сейчас <b>→</b></button></div>; }
 function Stat({ value, label }: { value: string | number; label: string }) { return <div><strong>{value}</strong><span>{label}</span></div>; }
 function monthName(month: number) { return ['Глубокая зима', 'Поздняя зима', 'Оттепель', 'Посев', 'Зелень', 'Высокое солнце', 'Жатва', 'Золотой месяц', 'Туманы', 'Листопад', 'Первые морозы', 'Долгая ночь'][month - 1]; }

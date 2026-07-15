@@ -1,51 +1,145 @@
-import type { WorldConfig, WorldState } from '../types';
+import type { SimulationProfile, SimulationProgress, WorldConfig, WorldState } from '../types';
+import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from './worldWorkerProtocol';
 import { generateWorld } from '../sim/generator';
-import { advanceWorld } from '../sim/simulation';
+import { advanceOneMonth, createSimulationEngine, type SimulationEngine } from '../sim/simulation';
+import { countIndexedEntities } from '../sim/indexes';
 
-type WorkerCommand =
-  | { action: 'generate'; config: WorldConfig }
-  | { action: 'advance'; world: WorldState; months: number };
-
-type WorkerRequest = WorkerCommand & { id: number };
-type WorkerResponse = { id: number; world?: WorldState; error?: string };
+type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
+  ? Command extends { id: number }
+    ? Omit<Command, 'id'>
+    : never
+  : never;
 
 let nextId = 1;
 let worker: Worker | undefined;
-const pending = new Map<number, { resolve: (world: WorldState) => void; reject: (error: Error) => void }>();
+let currentOperationId: number | undefined;
+let fallbackEngine: SimulationEngine | undefined;
+let fallbackCancelled = false;
+let fallbackProfile: SimulationProfile | undefined;
+let workerHasWorld = false;
+let lastKnownWorld: WorldState | undefined;
+
+interface PendingRequest {
+  resolve: (result: WorldWorkerResult) => void;
+  reject: (error: Error) => void;
+  onProgress?: (progress: SimulationProgress) => void;
+  action: WorldWorkerCommandInput['action'];
+}
+
+const pending = new Map<number, PendingRequest>();
 
 function getWorker(): Worker | undefined {
   if (typeof Worker === 'undefined') return undefined;
   if (worker) return worker;
   worker = new Worker(new URL('../workers/world.worker.ts', import.meta.url), { type: 'module' });
-  worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+  worker.onmessage = (event: MessageEvent<WorldWorkerMessage>) => {
     const request = pending.get(event.data.id);
     if (!request) return;
+    if (event.data.type === 'progress') {
+      request.onProgress?.(event.data.progress);
+      return;
+    }
     pending.delete(event.data.id);
-    if (event.data.error || !event.data.world) request.reject(new Error(event.data.error ?? 'Симуляция не вернула мир'));
-    else request.resolve(event.data.world);
+    if (currentOperationId === event.data.id) currentOperationId = undefined;
+    if (event.data.type === 'error') request.reject(new Error(event.data.error));
+    else {
+      if (request.action === 'initialize' || request.action === 'generate') workerHasWorld = true;
+      if (event.data.world) lastKnownWorld = event.data.world;
+      request.resolve({ world: event.data.world, profile: event.data.profile, cancelled: event.data.type === 'cancelled' });
+    }
   };
   worker.onerror = () => {
     for (const request of pending.values()) request.reject(new Error('Фоновая симуляция остановилась'));
     pending.clear();
+    currentOperationId = undefined;
+    workerHasWorld = false;
     worker?.terminate();
     worker = undefined;
   };
   return worker;
 }
 
-function run(command: WorkerCommand): Promise<WorldState> {
+function runWorker(command: WorldWorkerCommandInput, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
   const activeWorker = getWorker();
-  if (!activeWorker) {
-    return Promise.resolve(command.action === 'generate'
-      ? generateWorld(command.config)
-      : advanceWorld(command.world, command.months));
-  }
+  if (!activeWorker) return runFallback(command, onProgress);
   const id = nextId++;
+  if (command.action === 'generate' || command.action === 'advance') currentOperationId = id;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    activeWorker.postMessage({ ...command, id } satisfies WorkerRequest);
+    pending.set(id, { resolve, reject, onProgress, action: command.action });
+    activeWorker.postMessage({ ...command, id } as WorldWorkerCommand);
   });
 }
 
-export const generateWorldInBackground = (config: WorldConfig) => run({ action: 'generate', config });
-export const advanceWorldInBackground = (world: WorldState, months: number) => run({ action: 'advance', world, months });
+async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
+  const startedAt = performance.now();
+  if (command.action === 'initialize') {
+    fallbackEngine = createSimulationEngine(command.world);
+    return { profile: { operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() } };
+  }
+  if (command.action === 'generate') {
+    const world = generateWorld(command.config, (phase, completed, total, detail) => {
+      const elapsedMs = performance.now() - startedAt;
+      onProgress?.({ operation: 'генерация', phase, completed, total, percent: completed / total * 100, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
+    });
+    fallbackEngine = createSimulationEngine(world);
+    const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };
+    fallbackProfile = profile;
+    return { world, profile };
+  }
+  if (command.action === 'advance') {
+    if (!fallbackEngine) throw new Error('Мир не загружен в движок симуляции');
+    fallbackCancelled = false;
+    let average = 0;
+    const startTasks = fallbackEngine.processedTasks;
+    for (let step = 0; step < command.months; step += 1) {
+      if (fallbackCancelled) return { world: fallbackEngine.world, cancelled: true };
+      const monthStart = performance.now();
+      let phase = 'Симуляция мира';
+      advanceOneMonth(fallbackEngine, value => { phase = value; });
+      const monthMs = performance.now() - monthStart;
+      average = average ? average * .72 + monthMs * .28 : monthMs;
+      const completed = step + 1;
+      onProgress?.({ operation: 'симуляция', phase, completed, total: command.months, percent: completed / command.months * 100, elapsedMs: performance.now() - startedAt, etaMs: average * (command.months - completed), year: fallbackEngine.world.year, month: fallbackEngine.world.month });
+      if (completed % 2 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+    const profile: SimulationProfile = {
+      operation: 'симуляция', months: command.months, totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt,
+      indexedEntities: countIndexedEntities(fallbackEngine.indexes), processedTasks: fallbackEngine.processedTasks - startTasks,
+      activeRegions: fallbackEngine.world.simulation.activeRegionKeys.length, sleepingRegions: fallbackEngine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
+    };
+    fallbackProfile = profile;
+    return { world: fallbackEngine.world, profile };
+  }
+  if (command.action === 'snapshot') return { world: fallbackEngine?.world, profile: fallbackProfile };
+  return {};
+}
+
+export async function initializeWorldInBackground(world: WorldState, onProgress?: (progress: SimulationProgress) => void): Promise<SimulationProfile | undefined> {
+  lastKnownWorld = world;
+  const result = await runWorker({ action: 'initialize', world }, onProgress);
+  return result.profile;
+}
+
+export async function generateWorldInBackground(config: WorldConfig, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
+  const result = await runWorker({ action: 'generate', config }, onProgress);
+  if (result.world) lastKnownWorld = result.world;
+  return result;
+}
+
+export async function advanceWorldInBackground(months: number, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
+  if (getWorker() && !workerHasWorld && lastKnownWorld) await initializeWorldInBackground(lastKnownWorld);
+  const result = await runWorker({ action: 'advance', months }, onProgress);
+  if (result.world) lastKnownWorld = result.world;
+  return result;
+}
+
+export async function snapshotWorldInBackground(): Promise<WorldState | undefined> {
+  return (await runWorker({ action: 'snapshot' })).world;
+}
+
+export function cancelWorldOperation(): void {
+  fallbackCancelled = true;
+  const activeWorker = getWorker();
+  if (!activeWorker || currentOperationId === undefined) return;
+  activeWorker.postMessage({ id: nextId++, action: 'cancel', targetId: currentOperationId } satisfies WorldWorkerCommand);
+}

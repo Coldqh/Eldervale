@@ -5,15 +5,16 @@ import { RNG } from './rng';
 import { normalizeEventCausality } from './causality';
 import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
 import { createHousingProfile } from './settlements';
+import { createSimulationRuntime, ensureSimulationRuntime } from './scheduler';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-4`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-5`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
-  localized.version = 4;
+  localized.version = 5;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -27,6 +28,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.events ??= [];
   localized.localMapChanges ??= [];
   localized.nextIds ??= {};
+  localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
 
   if (previousLocalSize !== localized.config.localMapSize) {
     const ratio = localized.config.localMapSize / Math.max(1, previousLocalSize);
@@ -107,6 +109,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.animalPopulation = Math.max(0, ...localized.animalPopulations.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.ingredient = Math.max(0, ...localized.ingredients.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.recipe = Math.max(0, ...localized.alchemyRecipes.map((item: any) => item.id ?? 0)) + 1;
+
+  ensureSimulationRuntime(localized as WorldState);
 
   return localized as WorldState;
 }

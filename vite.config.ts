@@ -4,6 +4,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: '/Eldervale/',
-  define: { __APP_VERSION__: JSON.stringify('0.6.0') },
+  define: { __APP_VERSION__: JSON.stringify('0.9.0') },
   build: { target: 'es2022', sourcemap: false },
 });

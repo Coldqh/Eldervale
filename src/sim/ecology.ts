@@ -1,6 +1,8 @@
-import type { AlchemyRecipe, AnimalPopulation, NaturalIngredient, Settlement, Terrain, WorldState } from '../types';
+import type { AlchemyRecipe, AnimalPopulation, NaturalIngredient, Terrain, WorldState } from '../types';
 import { appendCausalEvent } from './causality';
 import { RNG } from './rng';
+import type { WorldIndexes } from './indexes';
+import { addAnimalPopulationToIndexes, coordinateKey, nearbyTileKeys, rebuildAnimalIndexes, workers } from './indexes';
 
 interface AnimalDefinition {
   species: string;
@@ -127,12 +129,18 @@ export function generateAlchemyRecipes(world: Pick<WorldState, 'ingredients' | '
   return result;
 }
 
-export function advanceEcology(world: WorldState, rng: RNG): void {
+export interface EcologyAdvanceOptions {
+  settlementIds: ReadonlySet<number>;
+  activeSettlementIds: ReadonlySet<number>;
+  updateAnimals: boolean;
+}
+
+export function advanceEcology(world: WorldState, rng: RNG, indexes: WorldIndexes, options: EcologyAdvanceOptions): void {
   regenerateIngredients(world);
-  if (world.month % 3 === 1) updateAnimalPopulations(world, rng);
-  gatherResources(world, rng);
-  huntAnimals(world, rng);
-  brewAlchemy(world, rng);
+  if (options.updateAnimals) updateAnimalPopulations(world, rng, indexes);
+  gatherResources(world, rng, indexes, options.settlementIds);
+  huntAnimals(world, rng, indexes, options.settlementIds, options.activeSettlementIds);
+  brewAlchemy(world, rng, indexes, options.settlementIds);
   if (world.month === 1) {
     for (const population of world.animalPopulations) population.huntedThisYear = 0;
     for (const ingredient of world.ingredients) ingredient.harvestedThisYear = 0;
@@ -146,12 +154,18 @@ function regenerateIngredients(world: WorldState): void {
   }
 }
 
-function updateAnimalPopulations(world: WorldState, rng: RNG): void {
-  const populations = world.animalPopulations;
-  for (const population of [...populations]) {
-    const local = populations.filter(item => item.x === population.x && item.y === population.y && item.id !== population.id);
-    const prey = local.filter(item => population.preySpecies.includes(item.species)).reduce((sum, item) => sum + item.count, 0);
-    const predators = local.filter(item => item.preySpecies.includes(population.species)).reduce((sum, item) => sum + item.count, 0);
+function updateAnimalPopulations(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+  rebuildAnimalIndexes(indexes, world.animalPopulations);
+  const populations = [...world.animalPopulations];
+  for (const population of populations) {
+    const local = indexes.animalPopulationsByTile.get(coordinateKey(population.x, population.y)) ?? [];
+    let prey = 0;
+    let predators = 0;
+    for (const item of local) {
+      if (item.id === population.id) continue;
+      if (population.preySpecies.includes(item.species)) prey += item.count;
+      if (item.preySpecies.includes(population.species)) predators += item.count;
+    }
     const foodFactor = population.diet === 'хищник' ? Math.min(1.25, prey / Math.max(5, population.count * 2)) : 1;
     const crowding = population.count / Math.max(1, population.carryingCapacity);
     const births = Math.max(0, Math.round(population.count * population.reproductionRate * foodFactor * Math.max(0, 1 - crowding) / 4));
@@ -173,20 +187,28 @@ function updateAnimalPopulations(world: WorldState, rng: RNG): void {
       continue;
     }
 
-    if (population.migrationDrive >= 85 && rng.chance(.12)) migratePopulation(world, population, rng);
+    if (population.migrationDrive >= 85 && rng.chance(.12)) migratePopulation(world, population, rng, indexes);
   }
 }
 
-function migratePopulation(world: WorldState, population: AnimalPopulation, rng: RNG): void {
-  const neighbours = world.tiles.filter(tile => Math.abs(tile.x - population.x) + Math.abs(tile.y - population.y) === 1 && tile.terrain !== 'ocean');
-  const suitable = neighbours.filter(tile => {
-    if (!animals.find(definition => definition.species === population.species)?.terrains.includes(tile.terrain)) return false;
-    const resident = world.animalPopulations.find(item => item.species === population.species && item.x === tile.x && item.y === tile.y);
-    return !resident || resident.count < resident.carryingCapacity * .9;
-  });
+function migratePopulation(world: WorldState, population: AnimalPopulation, rng: RNG, indexes: WorldIndexes): void {
+  const definition = animals.find(item => item.species === population.species);
+  if (!definition) return;
+  const neighbourKeys = [
+    coordinateKey(population.x + 1, population.y), coordinateKey(population.x - 1, population.y),
+    coordinateKey(population.x, population.y + 1), coordinateKey(population.x, population.y - 1),
+  ];
+  const suitable = neighbourKeys
+    .map(key => indexes.tileByCoordinate.get(key))
+    .filter((tile): tile is NonNullable<typeof tile> => Boolean(tile && tile.terrain !== 'ocean' && definition.terrains.includes(tile.terrain)))
+    .filter(tile => {
+      const resident = indexes.animalPopulationByTileAndSpecies.get(`${coordinateKey(tile.x, tile.y)}:${population.species}`);
+      return !resident || resident.count < resident.carryingCapacity * .9;
+    });
   if (!suitable.length) return;
   const destination = rng.pick(suitable);
-  const resident = world.animalPopulations.find(item => item.species === population.species && item.x === destination.x && item.y === destination.y);
+  const destinationKey = coordinateKey(destination.x, destination.y);
+  const resident = indexes.animalPopulationByTileAndSpecies.get(`${destinationKey}:${population.species}`);
   const desiredMove = Math.max(1, Math.round(population.count * rng.int(20, 45) / 100));
   const spareCapacity = resident ? Math.max(0, resident.carryingCapacity - resident.count) : desiredMove;
   const moved = Math.min(desiredMove, spareCapacity);
@@ -200,32 +222,56 @@ function migratePopulation(world: WorldState, population: AnimalPopulation, rng:
     const habitatCapacity = Math.max(moved, Math.round(population.carryingCapacity * rng.int(75, 115) / 100));
     target = { ...population, id: world.nextIds.animalPopulation++, x: destination.x, y: destination.y, count: 0, carryingCapacity: habitatCapacity, huntedThisYear: 0, history: [] };
     world.animalPopulations.push(target);
+    addAnimalPopulationToIndexes(indexes, target);
   }
   target.count += moved;
   target.history.push(`В ${world.year} году прибыло ${moved} особей из клетки ${population.x}:${population.y}.`);
-  const alreadyRecorded = world.events.some(event => event.year === world.year && event.kind === 'migration' && event.entityRefs.some(ref => ref.kind === 'animalPopulation' && ref.id === population.id));
-  if (moved >= 8 && !alreadyRecorded) appendCausalEvent(world, {
-    kind: 'migration', title: `${population.species}: миграция в клетку ${destination.x}:${destination.y}`,
-    description: `${moved} особей покинули прежнюю территорию.`, cause: population.lastCause,
-    conditions: [`миграционное давление достигло ${previousDrive}%`, `рядом нашёлся подходящий биом`],
-    decision: 'стая или стадо переместилось в соседнюю клетку', outcome: `численность перераспределилась между клетками`,
-    consequences: ['изменилась доступность добычи', 'охотничьи угодья сместились'], entityRefs: [{ kind: 'animalPopulation', id: population.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
-  });
+  const alreadyRecorded = population.history.some(line => line === `Миграция записана в ${world.year} году.`);
+  if (moved >= 8 && !alreadyRecorded) {
+    population.history.push(`Миграция записана в ${world.year} году.`);
+    appendCausalEvent(world, {
+      kind: 'migration', title: `${population.species}: миграция в клетку ${destination.x}:${destination.y}`,
+      description: `${moved} особей покинули прежнюю территорию.`, cause: population.lastCause,
+      conditions: [`миграционное давление достигло ${previousDrive}%`, `рядом нашёлся подходящий биом`],
+      decision: 'стая или стадо переместилось в соседнюю клетку', outcome: `численность перераспределилась между клетками`,
+      consequences: ['изменилась доступность добычи', 'охотничьи угодья сместились'], entityRefs: [{ kind: 'animalPopulation', id: population.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
+    });
+  }
 }
 
-function nearbySettlements(world: WorldState, x: number, y: number): Settlement[] {
-  return world.settlements.filter(settlement => Math.hypot(settlement.x - x, settlement.y - y) <= 2.5);
+function nearbyAnimalPopulations(indexes: WorldIndexes, x: number, y: number, radius: number): AnimalPopulation[] {
+  const result: AnimalPopulation[] = [];
+  for (const key of nearbyTileKeys(x, y, radius)) {
+    for (const population of indexes.animalPopulationsByTile.get(key) ?? []) {
+      if (Math.hypot(population.x - x, population.y - y) <= radius) result.push(population);
+    }
+  }
+  return result;
 }
 
-function huntAnimals(world: WorldState, rng: RNG): void {
-  for (const settlement of world.settlements) {
-    const hunters = world.characters.filter(character => character.alive && character.settlementId === settlement.id && character.profession === 'hunter');
-    if (!hunters.length || world.month % 2 !== 0) continue;
-    const candidates = world.animalPopulations.filter(population => population.count > 2 && Math.hypot(population.x - settlement.x, population.y - settlement.y) <= 2.3 && population.diet !== 'хищник');
+function nearbyIngredients(indexes: WorldIndexes, x: number, y: number, radius: number): NaturalIngredient[] {
+  const result: NaturalIngredient[] = [];
+  for (const key of nearbyTileKeys(x, y, radius)) {
+    for (const ingredient of indexes.ingredientsByTile.get(key) ?? []) {
+      if (Math.hypot(ingredient.x - x, ingredient.y - y) <= radius) result.push(ingredient);
+    }
+  }
+  return result;
+}
+
+function huntAnimals(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>): void {
+  for (const settlementId of settlementIds) {
+    const settlement = indexes.settlementById.get(settlementId);
+    if (!settlement) continue;
+    const hunters = workers(indexes, settlement.id, ['hunter']);
+    if (!hunters.length) continue;
+    const candidates = nearbyAnimalPopulations(indexes, settlement.x, settlement.y, 2.3)
+      .filter(population => population.count > 2 && population.diet !== 'хищник');
     if (!candidates.length) continue;
-    const target = [...candidates].sort((a, b) => b.count - a.count)[0]!;
+    const target = candidates.reduce((best, item) => item.count > best.count ? item : best);
     const need = settlement.food < 45 ? 1.45 : 1;
-    const killed = Math.min(target.count - 1, Math.max(1, Math.round(hunters.length * world.config.huntingPressure * need * rng.int(1, 3))));
+    const elapsedMonths = activeSettlementIds.has(settlement.id) ? 1 : 3;
+    const killed = Math.min(target.count - 1, Math.max(1, Math.round(hunters.length * world.config.huntingPressure * need * rng.int(1, 3) * Math.min(2, elapsedMonths * .7))));
     if (killed <= 0) continue;
     target.count -= killed;
     target.huntedThisYear += killed;
@@ -256,12 +302,15 @@ function huntAnimals(world: WorldState, rng: RNG): void {
   }
 }
 
-function gatherResources(world: WorldState, rng: RNG): void {
+function gatherResources(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>): void {
   if (![4, 7, 10].includes(world.month)) return;
-  for (const settlement of world.settlements) {
-    const gatherers = world.characters.filter(character => character.alive && character.settlementId === settlement.id && ['herbalist', 'healer', 'farmer'].includes(character.profession));
+  for (const settlementId of settlementIds) {
+    const settlement = indexes.settlementById.get(settlementId);
+    if (!settlement) continue;
+    const gatherers = workers(indexes, settlement.id, ['herbalist', 'healer', 'farmer']);
     if (!gatherers.length) continue;
-    const candidates = world.ingredients.filter(ingredient => ingredient.abundance > 3 && ingredient.seasonMonths.includes(world.month) && Math.hypot(ingredient.x - settlement.x, ingredient.y - settlement.y) <= 2.2);
+    const candidates = nearbyIngredients(indexes, settlement.x, settlement.y, 2.2)
+      .filter(ingredient => ingredient.abundance > 3 && ingredient.seasonMonths.includes(world.month));
     if (!candidates.length) continue;
     const source = rng.pick(candidates);
     const amount = Math.min(source.abundance, Math.max(1, Math.round(gatherers.length * rng.int(1, 3) * .55)));
@@ -281,25 +330,27 @@ function gatherResources(world: WorldState, rng: RNG): void {
   }
 }
 
-function brewAlchemy(world: WorldState, rng: RNG): void {
+function brewAlchemy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>): void {
   if (![4, 8, 12].includes(world.month)) return;
-  for (const settlement of world.settlements) {
-    const alchemists = world.characters.filter(character => character.alive && character.settlementId === settlement.id && ['herbalist', 'healer', 'brewer'].includes(character.profession));
+  for (const settlementId of settlementIds) {
+    const settlement = indexes.settlementById.get(settlementId);
+    if (!settlement) continue;
+    const alchemists = workers(indexes, settlement.id, ['herbalist', 'healer', 'brewer']);
     if (!alchemists.length) continue;
     const available = world.alchemyRecipes.filter(recipe => recipe.ingredientIds.every(id => {
-      const ingredient = world.ingredients.find(item => item.id === id);
+      const ingredient = indexes.ingredientById.get(id);
       return ingredient && (settlement.stockpile[ingredient.name] ?? 0) > 0;
     }));
     if (!available.length) continue;
     const recipe = rng.pick(available);
     for (const id of recipe.ingredientIds) {
-      const ingredient = world.ingredients.find(item => item.id === id)!;
+      const ingredient = indexes.ingredientById.get(id)!;
       settlement.stockpile[ingredient.name] = Math.max(0, (settlement.stockpile[ingredient.name] ?? 0) - 1);
     }
     recipe.batchesCreated += 1;
     settlement.stockpile[recipe.result] = (settlement.stockpile[recipe.result] ?? 0) + 1;
     const maker = rng.pick(alchemists);
-    const accident = rng.chance(.025 + recipe.ingredientIds.reduce((sum, id) => sum + (world.ingredients.find(item => item.id === id)?.toxicity ?? 0), 0) / 3000);
+    const accident = rng.chance(.025 + recipe.ingredientIds.reduce((sum, id) => sum + (indexes.ingredientById.get(id)?.toxicity ?? 0), 0) / 3000);
     if (accident) {
       maker.health = Math.max(10, maker.health - rng.int(8, 35));
       maker.injuries.push(`алхимический ожог при создании «${recipe.name}»`);
@@ -330,8 +381,9 @@ export function ecologyNear(world: WorldState, x: number, y: number): { animals:
 
 export function ecologyIntegrityIssues(world: WorldState): string[] {
   const issues: string[] = [];
+  const tileKeys = new Set(world.tiles.map(tile => coordinateKey(tile.x, tile.y)));
   for (const population of world.animalPopulations) {
-    if (!world.tiles.some(tile => tile.x === population.x && tile.y === population.y)) issues.push(`Популяция ${population.id} вне карты`);
+    if (!tileKeys.has(coordinateKey(population.x, population.y))) issues.push(`Популяция ${population.id} вне карты`);
     if (population.count < 0) issues.push(`Популяция ${population.id} имеет отрицательную численность`);
   }
   for (const ingredient of world.ingredients) {

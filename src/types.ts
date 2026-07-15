@@ -24,6 +24,55 @@ export interface WorldConfig {
   huntingPressure: number;
 }
 
+export type SimulationOperation = 'загрузка' | 'генерация' | 'симуляция' | 'сохранение';
+
+export interface SimulationProgress {
+  operation: SimulationOperation;
+  phase: string;
+  completed: number;
+  total: number;
+  percent: number;
+  elapsedMs: number;
+  etaMs?: number;
+  year?: number;
+  month?: number;
+  detail?: string;
+}
+
+export interface SimulationProfile {
+  operation: SimulationOperation;
+  months?: number;
+  totalMs: number;
+  simulationMs?: number;
+  workerRoundTripMs?: number;
+  saveMs?: number;
+  indexedEntities?: number;
+  processedTasks?: number;
+  activeRegions?: number;
+  sleepingRegions?: number;
+  generatedAt: number;
+}
+
+export type ScheduledActionKind = 'army' | 'monster' | 'war' | 'region';
+
+export interface ScheduledAction {
+  id: string;
+  kind: ScheduledActionKind;
+  dueTick: number;
+  entityId?: number;
+  regionKey?: string;
+  repeatEvery?: number;
+}
+
+export interface SimulationRuntimeState {
+  schedulerVersion: 1;
+  clockTick: number;
+  activeRegionKeys: string[];
+  sleepingRegionCount: number;
+  queuedActions: ScheduledAction[];
+  lastProfile?: SimulationProfile;
+}
+
 export interface Tile {
   x: number;
   y: number;
@@ -414,7 +463,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 4;
+  version: 5;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -439,6 +488,7 @@ export interface WorldState {
   tradeRoutes: TradeRoute[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];
+  simulation: SimulationRuntimeState;
   nextIds: Record<string, number>;
 }
 

@@ -8,6 +8,9 @@ import { kingdomName, monsterName, personName, placeName } from './names';
 import { causalEvent } from './causality';
 import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
 import { createHousingProfile } from './settlements';
+import { createSimulationRuntime } from './scheduler';
+
+export type GenerationProgressReporter = (phase: string, completed: number, total: number, detail?: string) => void;
 
 const colors = ['#9f4d46', '#4c7396', '#6d8752', '#9a7741', '#735d8f', '#3f8a80', '#a45f78', '#7d6b55', '#587284', '#8d8248'];
 const cultures = ['Речная Корона', 'Старый Камень', 'Зелёная Клятва', 'Солнечный Берег', 'Пепельное Знамя', 'Лунный Лес', 'Железный Очаг', 'Золотая Степь'];
@@ -263,18 +266,21 @@ function createTradeRoutes(rng: RNG, settlements: Settlement[], kingdoms: Kingdo
   return routes;
 }
 
-export function generateWorld(config: WorldConfig): WorldState {
+export function generateWorld(config: WorldConfig, onProgress?: GenerationProgressReporter): WorldState {
+  const report = (phase: string, completed: number, detail?: string) => onProgress?.(phase, completed, 100, detail);
+  report('Создание рельефа и биомов', 2);
   const rng = new RNG(config.seed);
   const seed = hashSeed(config.seed);
   const tiles: Tile[] = [];
   for (let y = 0; y < config.height; y += 1) for (let x = 0; x < config.width; x += 1) tiles.push({ x, y, ...terrainAt(x, y, config.width, config.height, seed) });
+  report('Размещение поселений и районов', 14, `${tiles.length.toLocaleString('ru-RU')} глобальных клеток`);
 
   const land = tiles.filter(tile => tile.terrain !== 'ocean' && tile.terrain !== 'mountains');
   const shuffled = [...land].sort((a, b) => noise2D(a.x, a.y, seed + 77) - noise2D(b.x, b.y, seed + 77));
   const selected: Tile[] = [];
   for (const tile of shuffled) {
     if (selected.length >= config.settlementCount) break;
-    if (selected.every(other => distance(tile, other) > 2.2)) selected.push(tile);
+    if (selected.every(other => distance(tile, other) > 3.1)) selected.push(tile);
   }
 
   const settlements: Settlement[] = selected.map((tile, index) => {
@@ -294,6 +300,7 @@ export function generateWorld(config: WorldConfig): WorldState {
       shortages: [], tradeRouteIds: [], unrest: rng.int(0, 18), history: [],
     };
   });
+  report('Формирование государств и границ', 28, `${settlements.length} поселений`);
   assignSettlementFootprints(settlements, tiles, rng, config.width, config.height);
 
   const kingdomCount = Math.max(2, Math.min(config.kingdomCount, settlements.length));
@@ -305,6 +312,7 @@ export function generateWorld(config: WorldConfig): WorldState {
     culture: rng.pick(cultures), religion: rng.pick(religions), foundedYear: rng.int(1, Math.max(2, config.historyYears - 40)), enemies: [], claims: [], diplomacy: [],
     laws: [...laws].sort(() => rng.next() - .5).slice(0, rng.int(2, 4)),
   }));
+  report('Создание жителей и семей', 40, `${kingdoms.length} государств`);
 
   for (const settlement of settlements) {
     const nearest = kingdoms.reduce((best, kingdom) => {
@@ -381,6 +389,7 @@ export function generateWorld(config: WorldConfig): WorldState {
 
   const relationships = createRelationships(rng, characters, settlements, config.historyYears);
   const dynasties = createDynasties(rng, kingdoms, characters, config.historyYears);
+  report('Армии, дворы и торговые пути', 58, `${characters.length.toLocaleString('ru-RU')} именных жителей`);
   const tradeRoutes = createTradeRoutes(rng, settlements, kingdoms);
 
   const armies: Army[] = kingdoms.map((kingdom, index) => {
@@ -466,6 +475,7 @@ export function generateWorld(config: WorldConfig): WorldState {
   const animalPopulations = generateAnimalPopulations(config.seed, tiles, config.ecologyDensity);
   const ingredients = generateNaturalIngredients(config.seed, tiles, config.ecologyDensity);
   const alchemyRecipes = generateAlchemyRecipes({ ingredients, characters, year: config.historyYears }, rng);
+  report('Экология, промыслы и алхимия', 76, `${animalPopulations.length.toLocaleString('ru-RU')} популяций`);
 
   const events: WorldEvent[] = [];
   let eventId = 1;
@@ -534,11 +544,15 @@ export function generateWorld(config: WorldConfig): WorldState {
     book.referencedEventIds = referenceCount > 0 ? candidates.slice(-referenceCount).map(item => item.id) : [];
   }
 
-  return {
-    version: 4, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+  report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
+  const world: WorldState = {
+    version: 5, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
     tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
+    simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
     nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1 },
   };
+  report('Мир готов', 100);
+  return world;
 }
 
 export const defaultConfig: WorldConfig = {

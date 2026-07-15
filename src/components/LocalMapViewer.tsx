@@ -9,6 +9,9 @@ const featureColors: Partial<Record<LocalFeature, string>> = {
   tree: '#214d32', bush: '#375e3f', rock: '#3e4140', reeds: '#6b7951', wall: '#292d2b', door: '#bb9a5f', field: '#9b8150', rubble: '#5d5145', fire: '#e87842', blood: '#7d2d2c', body: '#201d1b', chest: '#d2aa5a',
   'stairs-down': '#d2bd83', 'stairs-up': '#e6d69f', bridge: '#7b6042', herb: '#75a95f', berry: '#9b4f6b', mushroom: '#b49a73', 'animal-trail': '#7b674c',
 };
+const LOCAL_MIN_ZOOM = .65;
+const LOCAL_MAX_ZOOM = 12;
+
 const markerColors: Record<LocalMarker['kind'], string> = {
   person: '#f2dfae', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#c66852', fauna: '#86a76a', resource: '#80b89a',
 };
@@ -67,10 +70,10 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
             <button onClick={() => move(1, 0)} disabled={globalX >= world.config.width - 1}>Восток →</button>
             <button onClick={() => move(0, 1)} disabled={globalY >= world.config.height - 1}>Юг ↓</button>
           </div>
-          <div className="local-zoom-controls"><button onClick={() => setZoom(value => Math.max(.65, value - .2))}>−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => setZoom(value => Math.min(3, value + .2))}>＋</button><button onClick={() => { setZoom(1); setCamera({ x: 0, y: 0 }); }}>Центр</button></div>
+          <div className="local-zoom-controls"><button onClick={() => setZoom(value => Math.max(LOCAL_MIN_ZOOM, value / 1.35))}>−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => setZoom(value => Math.min(LOCAL_MAX_ZOOM, value * 1.35))}>＋</button><button onClick={() => { setZoom(1); setCamera({ x: 0, y: 0 }); }}>Центр</button></div>
         </div>
-        <LocalCanvas map={map} zoom={zoom} camera={camera} onCamera={setCamera} selected={selectedCell} onSelectCell={setSelectedCell} />
-        <div className="local-map-footnote"><span>Каждый житель на карте — реальная личность мира.</span><span>База восстанавливается из seed, история хранится отдельными изменениями: {world.localMapChanges.filter(effect => effect.globalX === globalX && effect.globalY === globalY).length}</span></div>
+        <LocalCanvas map={map} zoom={zoom} camera={camera} onViewport={value => { setZoom(value.zoom); setCamera(value.camera); }} selected={selectedCell} onSelectCell={setSelectedCell} />
+        <div className="local-map-footnote"><span>Перетаскивай карту одним пальцем, растягивай двумя. Максимальный масштаб показывает клетки почти вплотную.</span><span>База восстанавливается из seed, история хранится отдельными изменениями: {world.localMapChanges.filter(effect => effect.globalX === globalX && effect.globalY === globalY).length}</span></div>
       </div>
 
       <aside className="window-card local-inspector">
@@ -89,16 +92,26 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
   </section>;
 }
 
-function LocalCanvas({ map, zoom, camera, onCamera, selected, onSelectCell }: {
+function LocalCanvas({ map, zoom, camera, onViewport, selected, onSelectCell }: {
   map: LocalMapData;
   zoom: number;
   camera: { x: number; y: number };
-  onCamera: (value: { x: number; y: number }) => void;
+  onViewport: (value: { zoom: number; camera: { x: number; y: number } }) => void;
   selected: { x: number; y: number };
   onSelectCell: (value: { x: number; y: number }) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const drag = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; moved: boolean } | undefined>(undefined);
+  const viewportRef = useRef({ zoom, camera });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<
+    | { kind: 'drag'; pointerId: number; startX: number; startY: number; cameraX: number; cameraY: number; moved: boolean }
+    | { kind: 'pinch'; startDistance: number; startZoom: number; anchorX: number; anchorY: number }
+    | undefined
+  >(undefined);
+
+  useEffect(() => {
+    viewportRef.current = { zoom, camera };
+  }, [zoom, camera]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -110,39 +123,136 @@ function LocalCanvas({ map, zoom, camera, onCamera, selected, onSelectCell }: {
     return () => observer.disconnect();
   }, [map, zoom, camera, selected]);
 
-  const metrics = () => {
+  const metrics = (viewport = viewportRef.current) => {
     const canvas = ref.current!;
     const box = canvas.getBoundingClientRect();
     const base = Math.min(box.width / map.width, box.height / map.height);
-    const cell = Math.max(4, base * zoom);
-    return { box, cell, ox: (box.width - map.width * cell) / 2 + camera.x, oy: (box.height - map.height * cell) / 2 + camera.y };
+    const cell = Math.max(4, base * viewport.zoom);
+    const mapWidth = map.width * cell;
+    const mapHeight = map.height * cell;
+    const baseX = (box.width - mapWidth) / 2;
+    const baseY = (box.height - mapHeight) / 2;
+    return { box, base, cell, mapWidth, mapHeight, baseX, baseY, ox: baseX + viewport.camera.x, oy: baseY + viewport.camera.y };
+  };
+
+  const normalizeViewport = (value: { zoom: number; camera: { x: number; y: number } }) => {
+    const zoomValue = Math.max(LOCAL_MIN_ZOOM, Math.min(LOCAL_MAX_ZOOM, value.zoom));
+    const current = metrics({ zoom: zoomValue, camera: value.camera });
+    const margin = Math.max(26, Math.min(70, Math.min(current.box.width, current.box.height) * .12));
+    const cameraX = current.mapWidth <= current.box.width ? 0 : Math.max(margin - current.mapWidth - current.baseX, Math.min(current.box.width - margin - current.baseX, value.camera.x));
+    const cameraY = current.mapHeight <= current.box.height ? 0 : Math.max(margin - current.mapHeight - current.baseY, Math.min(current.box.height - margin - current.baseY, value.camera.y));
+    return { zoom: zoomValue, camera: { x: cameraX, y: cameraY } };
+  };
+
+  const applyViewport = (value: { zoom: number; camera: { x: number; y: number } }) => {
+    const next = normalizeViewport(value);
+    viewportRef.current = next;
+    onViewport(next);
+  };
+
+  const beginPinch = () => {
+    if (pointers.current.size < 2) return;
+    const [first, second] = [...pointers.current.values()].slice(0, 2);
+    const current = metrics();
+    const midpointX = (first!.x + second!.x) / 2;
+    const midpointY = (first!.y + second!.y) / 2;
+    gesture.current = {
+      kind: 'pinch',
+      startDistance: Math.max(1, Math.hypot(first!.x - second!.x, first!.y - second!.y)),
+      startZoom: viewportRef.current.zoom,
+      anchorX: (midpointX - current.box.left - current.ox) / current.cell,
+      anchorY: (midpointY - current.box.top - current.oy) / current.cell,
+    };
+  };
+
+  const zoomAt = (clientX: number, clientY: number, nextZoom: number) => {
+    const current = metrics();
+    const anchorX = (clientX - current.box.left - current.ox) / current.cell;
+    const anchorY = (clientY - current.box.top - current.oy) / current.cell;
+    const zoomValue = Math.max(LOCAL_MIN_ZOOM, Math.min(LOCAL_MAX_ZOOM, nextZoom));
+    const next = metrics({ zoom: zoomValue, camera: viewportRef.current.camera });
+    applyViewport({
+      zoom: zoomValue,
+      camera: {
+        x: clientX - next.box.left - anchorX * next.cell - next.baseX,
+        y: clientY - next.box.top - anchorY * next.cell - next.baseY,
+      },
+    });
   };
 
   const pointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, cameraX: camera.x, cameraY: camera.y, moved: false };
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) {
+      gesture.current = { kind: 'drag', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, cameraX: viewportRef.current.camera.x, cameraY: viewportRef.current.camera.y, moved: false };
+    } else if (pointers.current.size === 2) beginPinch();
   };
+
   const pointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    const dx = event.clientX - drag.current.x;
-    const dy = event.clientY - drag.current.y;
-    if (Math.hypot(dx, dy) > 4) drag.current.moved = true;
-    if (drag.current.moved) onCamera({ x: drag.current.cameraX + dx, y: drag.current.cameraY + dy });
+    if (!pointers.current.has(event.pointerId)) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (pointers.current.size >= 2) {
+      if (gesture.current?.kind !== 'pinch') beginPinch();
+      const pinch = gesture.current;
+      if (pinch?.kind !== 'pinch') return;
+      const [first, second] = [...pointers.current.values()].slice(0, 2);
+      const midpointX = (first!.x + second!.x) / 2;
+      const midpointY = (first!.y + second!.y) / 2;
+      const distance = Math.max(1, Math.hypot(first!.x - second!.x, first!.y - second!.y));
+      const zoomValue = Math.max(LOCAL_MIN_ZOOM, Math.min(LOCAL_MAX_ZOOM, pinch.startZoom * distance / pinch.startDistance));
+      const next = metrics({ zoom: zoomValue, camera: viewportRef.current.camera });
+      applyViewport({
+        zoom: zoomValue,
+        camera: {
+          x: midpointX - next.box.left - pinch.anchorX * next.cell - next.baseX,
+          y: midpointY - next.box.top - pinch.anchorY * next.cell - next.baseY,
+        },
+      });
+      return;
+    }
+
+    const active = gesture.current;
+    if (active?.kind !== 'drag' || active.pointerId !== event.pointerId) return;
+    const dx = event.clientX - active.startX;
+    const dy = event.clientY - active.startY;
+    if (Math.hypot(dx, dy) > 4) active.moved = true;
+    if (active.moved) applyViewport({ zoom: viewportRef.current.zoom, camera: { x: active.cameraX + dx, y: active.cameraY + dy } });
   };
+
   const pointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const active = drag.current;
-    drag.current = undefined;
-    if (!active || active.moved) return;
+    const active = gesture.current;
+    const wasTap = pointers.current.size === 1 && active?.kind === 'drag' && active.pointerId === event.pointerId && !active.moved;
+    pointers.current.delete(event.pointerId);
+    gesture.current = undefined;
+    if (!wasTap) return;
     const { box, cell, ox, oy } = metrics();
     const x = Math.floor((event.clientX - box.left - ox) / cell);
     const y = Math.floor((event.clientY - box.top - oy) / cell);
     if (x >= 0 && y >= 0 && x < map.width && y < map.height) onSelectCell({ x, y });
   };
-  const wheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
+
+  const pointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    pointers.current.delete(event.pointerId);
+    gesture.current = undefined;
   };
 
-  return <canvas ref={ref} className="local-map-canvas" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = undefined; }} onWheel={wheel} aria-label={`Локальная карта квадрата ${map.globalX}:${map.globalY}`} />;
+  const wheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    zoomAt(event.clientX, event.clientY, viewportRef.current.zoom * Math.exp(-event.deltaY * .0015));
+  };
+
+  return <canvas
+    ref={ref}
+    className="local-map-canvas"
+    onPointerDown={pointerDown}
+    onPointerMove={pointerMove}
+    onPointerUp={pointerUp}
+    onPointerCancel={pointerCancel}
+    onWheel={wheel}
+    onDoubleClick={event => zoomAt(event.clientX, event.clientY, viewportRef.current.zoom * 1.7)}
+    aria-label={`Локальная карта квадрата ${map.globalX}:${map.globalY}`}
+  />;
 }
 
 function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number, camera: { x: number; y: number }, selected: { x: number; y: number }) {
