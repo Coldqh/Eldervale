@@ -9,7 +9,7 @@ export function migrateWorld(input: unknown): WorldState {
   const localized = localizeLegacyWorld(raw as WorldState) as any;
   const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-2`);
 
-  localized.version = 2;
+  localized.version = 3;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.relationships ??= [];
@@ -17,6 +17,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.tradeRoutes ??= [];
   localized.wars ??= [];
   localized.events ??= [];
+  localized.localMapChanges ??= [];
   localized.nextIds ??= {};
 
   for (const kingdom of localized.kingdoms) {

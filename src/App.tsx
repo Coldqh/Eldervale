@@ -6,6 +6,7 @@ import { Encyclopedia } from './components/Encyclopedia';
 import { WorldSetup } from './components/WorldSetup';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoricalAtlas } from './components/HistoricalAtlas';
+import { LocalMapViewer } from './components/LocalMapViewer';
 import { loadWorld, saveWorld } from './lib/worldStorage';
 import { advanceWorldInBackground, generateWorldInBackground } from './lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from './lib/appUpdate';
@@ -13,7 +14,7 @@ import { migrateWorld } from './sim/migrateWorld';
 import { APP_VERSION } from './version';
 import './styles.css';
 
-type View = 'map' | 'archive' | 'chronicle' | 'atlas';
+type View = 'map' | 'archive' | 'chronicle' | 'atlas' | 'local';
 const initialUpdate: UpdateCheckResult = { currentVersion: APP_VERSION, updateRequired: false, checkedAt: 0 };
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
   const [entityStack, setEntityStack] = useState<EntityRef[]>([]);
   const [layer, setLayer] = useState<MapLayer>('terrain');
   const [view, setView] = useState<View>('map');
+  const [localPosition, setLocalPosition] = useState<{ x: number; y: number; level: number }>();
   const [simulating, setSimulating] = useState(false);
   const [loadingText, setLoadingText] = useState('Открываем сохранённый мир');
   const [updateState, setUpdateState] = useState<UpdateCheckResult>(initialUpdate);
@@ -46,6 +48,11 @@ export default function App() {
 
   const closeEntity = useCallback(() => setEntityStack([]), []);
   const backEntity = useCallback(() => setEntityStack(current => current.length > 1 ? current.slice(0, -1) : []), []);
+  const openLocal = useCallback((x: number, y: number, level = 0) => {
+    setLocalPosition({ x, y, level });
+    setEntityStack([]);
+    setView('local');
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +61,7 @@ export default function App() {
       setWorld(saved);
       setSetupOpen(!saved);
       setEntityStack([]);
+      setLocalPosition(undefined);
       setBooting(false);
     });
     return () => { active = false; };
@@ -107,6 +115,7 @@ export default function App() {
       setEntityStack([]);
       setSetupOpen(false);
       setView('map');
+      setLocalPosition(undefined);
       await saveWorld(created);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Не удалось создать мир.');
@@ -149,6 +158,7 @@ export default function App() {
       setSetupOpen(false);
       setEntityStack([]);
       setView('map');
+      setLocalPosition(undefined);
       await saveWorld(migrated);
     } catch {
       alert('Не удалось прочитать сохранение Eldervale.');
@@ -180,6 +190,7 @@ export default function App() {
         <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
         <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
         <ViewButton active={view === 'atlas'} icon="◫" label="Атлас" onClick={() => setView('atlas')} />
+        {localPosition && <ViewButton active={view === 'local'} icon="▦" label="Местность" onClick={() => setView('local')} />}
       </nav>
       <div className="world-clock"><span>Год {world.year}</span><strong>{monthName(world.month)}</strong></div>
       <div className="top-actions">
@@ -199,7 +210,7 @@ export default function App() {
           </div>
           <div className="map-toolbar-right"><div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div><button className="atlas-entry-button" onClick={() => setView('atlas')}>Исторический атлас</button></div>
         </div>
-        <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={openEntity} /><div className="map-vignette" /></div>
+        <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={openEntity} onOpenTile={(x, y) => openLocal(x, y)} /><div className="map-vignette" /><div className="map-open-hint">Нажми на любой квадрат, чтобы открыть его локальную карту</div></div>
         <div className="stats-ribbon">
           <Stat value={stats!.population.toLocaleString('ru-RU')} label="живых имён" />
           <Stat value={stats!.realms} label="государств" />
@@ -211,6 +222,8 @@ export default function App() {
           <button className="primary-mini" onClick={() => void advance(1)}>Следующее событие <span>›</span></button>
         </div>
       </section>}
+
+      {view === 'local' && localPosition && <LocalMapViewer world={world} globalX={localPosition.x} globalY={localPosition.y} initialLevel={localPosition.level} onMove={(x, y, level = 0) => setLocalPosition({ x, y, level })} onBack={() => setView('map')} onSelect={openEntity} />}
 
       {view === 'archive' && <section className="workspace-view archive-workspace scrollable-tab">
         <div className="workspace-heading"><div><span className="eyebrow">Архив мира</span><h1>Всё, что существует</h1></div><p>Выбери личность, государство, книгу, чудовище или другое связанное звено мира.</p></div>
@@ -231,24 +244,25 @@ export default function App() {
 
     <nav className="mobile-nav">
       <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
-      <ViewButton active={view === 'map' || view === 'atlas'} icon="⌾" label="Карта" onClick={() => setView('map')} />
+      <ViewButton active={view === 'map' || view === 'atlas' || view === 'local'} icon="⌾" label="Карта" onClick={() => setView('map')} />
       <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
     </nav>
 
-    {selected && <EntityWindow world={world} selected={selected} canGoBack={entityStack.length > 1} onBack={backEntity} onClose={closeEntity} onSelect={openEntity} />}
+    {selected && <EntityWindow world={world} selected={selected} canGoBack={entityStack.length > 1} onBack={backEntity} onClose={closeEntity} onSelect={openEntity} onOpenLocal={openLocal} />}
     {settingsOpen && <SettingsPanel world={world} update={updateState} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
     {simulating && <LoadingVeil text={loadingText} />}
     {forcedUpdate}
   </div>;
 }
 
-function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect }: {
+function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect, onOpenLocal }: {
   world: WorldState;
   selected: EntityRef;
   canGoBack: boolean;
   onBack: () => void;
   onClose: () => void;
   onSelect: (ref: EntityRef) => void;
+  onOpenLocal: (x: number, y: number, level?: number) => void;
 }) {
   return <div className="entity-window-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира">
@@ -257,11 +271,26 @@ function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect }:
           <button className="window-control" disabled={!canGoBack} onClick={onBack} aria-label="Назад" title="Назад">←</button>
           <span>Карточка мира</span>
         </div>
-        <button className="window-control close-control" onClick={onClose} aria-label="Закрыть" title="Закрыть">×</button>
+        <div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose} aria-label="Закрыть" title="Закрыть">×</button></div>
       </header>
       <div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} /></div>
     </section>
   </div>;
+}
+
+function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: number } | undefined {
+  if (ref.kind === 'settlement') { const item = world.settlements.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'monster') { const item = world.monsters.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'army') { const item = world.armies.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'dungeon') { const item = world.dungeons.find(entity => entity.id === ref.id); return item && { x: item.x, y: item.y }; }
+  if (ref.kind === 'character') { const item = world.characters.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.settlementId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'kingdom') { const item = world.kingdoms.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.capitalId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'book') { const item = world.books.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.settlementId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'artifact') { const item = world.artifacts.find(entity => entity.id === ref.id); const owner = item?.ownerId ? world.characters.find(entity => entity.id === item.ownerId) : undefined; const settlementId = owner?.settlementId ?? item?.settlementId; const place = settlementId ? world.settlements.find(entity => entity.id === settlementId) : undefined; return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'war') { const item = world.wars.find(entity => entity.id === ref.id); const place = item?.contestedSettlementIds[0] ? world.settlements.find(entity => entity.id === item.contestedSettlementIds[0]) : undefined; return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'tradeRoute') { const item = world.tradeRoutes.find(entity => entity.id === ref.id); const place = item && world.settlements.find(entity => entity.id === item.fromSettlementId); return place && { x: place.x, y: place.y }; }
+  if (ref.kind === 'dynasty') { const item = world.dynasties.find(entity => entity.id === ref.id); const kingdom = item?.kingdomId ? world.kingdoms.find(entity => entity.id === item.kingdomId) : undefined; const place = kingdom && world.settlements.find(entity => entity.id === kingdom.capitalId); return place && { x: place.x, y: place.y }; }
+  return undefined;
 }
 
 function ViewButton({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {

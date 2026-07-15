@@ -443,8 +443,8 @@ export function generateWorld(config: WorldConfig): WorldState {
   }
 
   return {
-    version: 2, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, artifacts, books, dungeons, wars, tradeRoutes, events,
+    version: 3, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
     nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1 },
   };
 }

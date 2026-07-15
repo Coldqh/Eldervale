@@ -3,6 +3,9 @@ export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster';
 export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
+export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'fire' | 'blood' | 'body' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge';
+export type LocalEffectKind = 'burn' | 'rubble' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 export interface WorldConfig {
   seed: string;
@@ -271,8 +274,64 @@ export interface WorldEvent {
   importance: number;
 }
 
+
+export interface LocalMapEffect {
+  id: string;
+  globalX: number;
+  globalY: number;
+  level: number;
+  localX: number;
+  localY: number;
+  kind: LocalEffectKind;
+  year: number;
+  label: string;
+  entityRef?: EntityRef;
+}
+
+export interface LocalCell {
+  x: number;
+  y: number;
+  ground: LocalGround;
+  feature?: LocalFeature;
+  building?: string;
+  blocked: boolean;
+}
+
+export interface LocalMarker {
+  id: string;
+  x: number;
+  y: number;
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group';
+  label: string;
+  refs: EntityRef[];
+  count?: number;
+  detail?: string;
+}
+
+export interface LocalExit {
+  side: 'north' | 'east' | 'south' | 'west';
+  position: number;
+  road: boolean;
+}
+
+export interface LocalMapData {
+  key: string;
+  globalX: number;
+  globalY: number;
+  level: number;
+  width: number;
+  height: number;
+  title: string;
+  subtitle: string;
+  terrain: Terrain;
+  cells: LocalCell[];
+  markers: LocalMarker[];
+  exits: LocalExit[];
+  availableLevels: number[];
+}
+
 export interface WorldState {
-  version: 2;
+  version: 3;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -293,6 +352,7 @@ export interface WorldState {
   wars: War[];
   tradeRoutes: TradeRoute[];
   events: WorldEvent[];
+  localMapChanges: LocalMapEffect[];
   nextIds: Record<string, number>;
 }
 

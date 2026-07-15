@@ -7,11 +7,12 @@ const terrainColors: Record<Terrain, string> = {
   ocean: '#172b32', coast: '#496b69', plains: '#75865f', forest: '#3d624a', hills: '#776f53', mountains: '#6f706b', marsh: '#46675d', desert: '#9a8259', tundra: '#89918b',
 };
 
-export function WorldMap({ world, layer, onSelect, historicalState }: {
+export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }: {
   world: WorldState;
   layer: MapLayer;
   onSelect: (ref: EntityRef) => void;
   historicalState?: AtlasMapState;
+  onOpenTile?: (x: number, y: number) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -119,12 +120,17 @@ export function WorldMap({ world, layer, onSelect, historicalState }: {
     const oy = (box.height - cell * world.config.height) / 2;
     const px = event.clientX - box.left;
     const py = event.clientY - box.top;
+    const x = Math.floor((px - ox) / cell);
+    const y = Math.floor((py - oy) / cell);
+    if (onOpenTile && (!historicalState || historicalState.current)) {
+      const tile = world.tiles.find(item => item.x === x && item.y === y);
+      if (tile) onOpenTile(x, y);
+      return;
+    }
     if (layer === 'trade') {
       const route = nearestRoute(world, px, py, cell, ox, oy, historicalState);
       if (route) { onSelect({ kind: 'tradeRoute', id: route.id }); return; }
     }
-    const x = Math.floor((px - ox) / cell);
-    const y = Math.floor((py - oy) / cell);
     const tile = world.tiles.find(item => item.x === x && item.y === y);
     if (!tile) return;
     const monster = world.monsters.find(item => monsterVisible(item.id, item.alive, historicalState) && item.x === x && item.y === y);
@@ -138,7 +144,7 @@ export function WorldMap({ world, layer, onSelect, historicalState }: {
     }
   };
 
-  return <canvas ref={ref} className="world-canvas" onPointerUp={handlePointer} aria-label={historicalState ? `Историческая карта мира Eldervale, ${historicalState.year} год` : 'Карта мира Eldervale'} />;
+  return <canvas ref={ref} className={`world-canvas ${onOpenTile ? 'world-canvas-local-enabled' : ''}`} onPointerUp={handlePointer} aria-label={historicalState ? `Историческая карта мира Eldervale, ${historicalState.year} год` : 'Карта мира Eldervale'} />;
 }
 
 function settlementVisible(id: number, state?: AtlasMapState): boolean {

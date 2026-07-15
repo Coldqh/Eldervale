@@ -17,6 +17,24 @@ function addEvent(world: WorldState, data: {
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
+function addLocalEffect(world: WorldState, globalX: number, globalY: number, kind: WorldState['localMapChanges'][number]['kind'], label: string, rng: RNG, entityRef?: EntityRef, level = 0): void {
+  world.localMapChanges ??= [];
+  const effect = {
+    id: `${world.year}-${world.month}-${world.localMapChanges.length + 1}-${rng.int(1000, 9999)}`,
+    globalX, globalY, level, localX: rng.int(4, 43), localY: rng.int(4, 43), kind, year: world.year, label, entityRef,
+  };
+  world.localMapChanges.push(effect);
+  if (world.localMapChanges.length > 6000) world.localMapChanges.splice(0, world.localMapChanges.length - 6000);
+}
+
+function addBattlefieldEffects(world: WorldState, x: number, y: number, losses: number, rng: RNG, armyId: number): void {
+  const count = Math.min(28, Math.max(5, Math.round(losses / 4)));
+  for (let index = 0; index < count; index += 1) {
+    const kind = index % 5 === 0 ? 'body' : index % 3 === 0 ? 'blood' : 'rubble';
+    addLocalEffect(world, x, y, kind, kind === 'body' ? 'Тело погибшего воина' : kind === 'blood' ? 'Следы сражения' : 'Разрушения после боя', rng, { kind: 'army', id: armyId });
+  }
+}
+
 function nearestSettlement(world: WorldState, x: number, y: number, filter?: (settlement: Settlement) => boolean): Settlement | undefined {
   return world.settlements.filter(filter ?? (() => true)).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
 }
@@ -297,6 +315,7 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
       entityRefs: [{ kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'war', id: war.id }], importance: 4,
     });
   }
+  addBattlefieldEffects(world, target.x, target.y, attackLoss + defenseLoss, rng, army.id);
   army.status = 'recovering';
   army.targetSettlementId = undefined;
   army.targetKingdomId = undefined;
@@ -376,7 +395,11 @@ function monsterActions(world: WorldState, rng: RNG): void {
       victim.alive = false;
       victim.deathYear = world.year;
       victim.biography.push(`Погиб во время нападения ${monster.name} на ${target.name}.`);
+      addLocalEffect(world, target.x, target.y, 'body', `Тело ${victim.name}`, rng, { kind: 'character', id: victim.id });
     });
+    for (let index = 0; index < Math.min(18, Math.max(4, Math.round(damage / 2))); index += 1) {
+      addLocalEffect(world, target.x, target.y, isDragon && index % 2 === 0 ? 'burn' : index % 3 === 0 ? 'blood' : 'rubble', isDragon ? 'След огня дракона' : 'Разорённая окраина', rng, { kind: 'monster', id: monster.id });
+    }
     monster.history.push(`Напал на ${target.name} в ${world.year} году.`);
     target.history.push(`В ${world.year} году ${monster.name} разорил часть поселения.`);
     transferArtifactToMonster(world, monster.id, target.id, rng);
@@ -411,6 +434,8 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
     hero.titles.push(monster.species === 'dragon' ? 'Драконоборец' : 'Убийца чудовищ');
     hero.biography.push(`Убил ${monster.name} в ${world.year} году.`);
     monster.history.push(`Убит героем ${hero.name}.`);
+    addLocalEffect(world, monster.x, monster.y, 'body', `Останки ${monster.name}`, rng, { kind: 'monster', id: monster.id });
+    addLocalEffect(world, monster.x, monster.y, 'blood', `Место победы ${hero.name}`, rng, { kind: 'character', id: hero.id });
     const lair = world.dungeons.find(dungeon => dungeon.id === monster.lairDungeonId);
     if (lair) lair.history.push(`В ${world.year} году ${hero.name} убил хозяина логова.`);
     addEvent(world, {
@@ -423,6 +448,8 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
     hero.deathYear = world.year;
     hero.biography.push(`Погиб во время охоты на ${monster.name}.`);
     monster.kills += 1;
+    addLocalEffect(world, monster.x, monster.y, 'body', `Тело ${hero.name}`, rng, { kind: 'character', id: hero.id });
+    if (hero.artifactIds.length) addLocalEffect(world, monster.x, monster.y, 'lost-item', `Утерянное снаряжение ${hero.name}`, rng, { kind: 'artifact', id: hero.artifactIds[0]! });
     addEvent(world, {
       kind: 'hero', title: `${hero.name} погиб на охоте за ${monster.name}`, description: `Выжившие вернулись с разными рассказами о последнем бое.`, cause: 'чудовище оказалось сильнее экспедиции',
       consequences: ['угроза сохранилась', 'оружие героя могло остаться в логове', 'семья потеряла родственника'],
@@ -511,6 +538,7 @@ function restoreAndFound(world: WorldState, rng: RNG): void {
         danger: rng.int(2, 7), depth: 1, currentInhabitants: rng.pick(['разбойники', 'дикие звери', 'нежить', 'никто']), ownerKingdomId: settlement.kingdomId, discovered: true, artifactIds: [], history: [...settlement.history],
       });
       world.tiles[settlement.y * world.config.width + settlement.x]!.dungeonId = dungeonId;
+      for (let index = 0; index < 16; index += 1) addLocalEffect(world, settlement.x, settlement.y, 'rubble', `Руины ${settlement.name}`, rng, { kind: 'dungeon', id: dungeonId });
       addEvent(world, {
         kind: 'settlement', title: `${settlement.name} стал руинами`, description: `Последние жители покинули поселение.`, cause: settlement.shortages.length ? 'голод и разрушения' : 'война, упадок и отток людей',
         consequences: ['на карте появились руины', 'здания могут занять чудовища или разбойники'], entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'dungeon', id: dungeonId }], importance: 4,
