@@ -20,13 +20,14 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [setupOpen, setSetupOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [selected, setSelected] = useState<EntityRef>();
+  const [entityStack, setEntityStack] = useState<EntityRef[]>([]);
   const [layer, setLayer] = useState<MapLayer>('terrain');
   const [view, setView] = useState<View>('map');
   const [simulating, setSimulating] = useState(false);
   const [loadingText, setLoadingText] = useState('Открываем сохранённый мир');
   const [updateState, setUpdateState] = useState<UpdateCheckResult>(initialUpdate);
   const importRef = useRef<HTMLInputElement>(null);
+  const selected = entityStack.at(-1);
 
   const runUpdateCheck = useCallback(async () => {
     const result = await checkForUpdate();
@@ -34,13 +35,24 @@ export default function App() {
     return result;
   }, []);
 
+  const openEntity = useCallback((ref: EntityRef) => {
+    setEntityStack(current => {
+      const last = current.at(-1);
+      if (last?.kind === ref.kind && last.id === ref.id) return current;
+      return [...current, ref].slice(-24);
+    });
+  }, []);
+
+  const closeEntity = useCallback(() => setEntityStack([]), []);
+  const backEntity = useCallback(() => setEntityStack(current => current.length > 1 ? current.slice(0, -1) : []), []);
+
   useEffect(() => {
     let active = true;
     Promise.all([loadWorld(), runUpdateCheck()]).then(([saved]) => {
       if (!active) return;
       setWorld(saved);
       setSetupOpen(!saved);
-      if (saved?.kingdoms[0]) setSelected({ kind: 'settlement', id: saved.kingdoms[0].capitalId });
+      setEntityStack([]);
       setBooting(false);
     });
     return () => { active = false; };
@@ -65,6 +77,19 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [world, booting]);
 
+  useEffect(() => {
+    if (!selected) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeEntity();
+      if (event.key === 'Backspace' && entityStack.length > 1 && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        backEntity();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selected, entityStack.length, closeEntity, backEntity]);
+
   const stats = useMemo(() => world ? {
     population: world.characters.filter(character => character.alive).length,
     activeWars: world.wars.filter(war => war.active).length,
@@ -78,7 +103,7 @@ export default function App() {
     try {
       const created = await generateWorldInBackground(config);
       setWorld(created);
-      setSelected({ kind: 'settlement', id: created.kingdoms[0]!.capitalId });
+      setEntityStack([]);
       setSetupOpen(false);
       setView('map');
       await saveWorld(created);
@@ -121,7 +146,8 @@ export default function App() {
       const migrated = migrateWorld(JSON.parse(await file.text()));
       setWorld(migrated);
       setSetupOpen(false);
-      setSelected(migrated.kingdoms[0] ? { kind: 'settlement', id: migrated.kingdoms[0].capitalId } : undefined);
+      setEntityStack([]);
+      setView('map');
       await saveWorld(migrated);
     } catch {
       alert('Не удалось прочитать сохранение Eldervale.');
@@ -143,35 +169,35 @@ export default function App() {
     {forcedUpdate}
   </>;
 
-  const recentEvents = [...world.events].sort((a, b) => b.year - a.year || b.month - a.month || b.id - a.id).slice(0, 120);
+  const recentEvents = [...world.events].sort((a, b) => b.year - a.year || b.month - a.month || b.id - a.id).slice(0, 180);
 
-  return <div className="app-shell">
-    <header className="topbar">
+  return <div className="app-shell app-shell-v2">
+    <header className="topbar topbar-v2">
       <button className="brand" onClick={() => setView('map')}><img src="./crest.svg" alt="" /><span><strong>Eldervale</strong><small>{world.name}</small></span></button>
+      <nav className="desktop-view-tabs" aria-label="Разделы мира">
+        <ViewButton active={view === 'map'} icon="⌾" label="Карта" onClick={() => setView('map')} />
+        <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
+        <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
+      </nav>
       <div className="world-clock"><span>Год {world.year}</span><strong>{monthName(world.month)}</strong></div>
       <div className="top-actions">
         <button className="ghost-button new-world-button" onClick={() => setSetupOpen(true)} title="Создать новый мир"><span className="desktop-label">Новый мир</span><span className="mobile-label">＋</span></button>
         <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Настройки" aria-label="Настройки">⚙</button>
-        <button className="icon-button" onClick={exportWorld} title="Экспортировать мир" aria-label="Экспортировать мир">⇩</button>
-        <button className="icon-button" onClick={() => importRef.current?.click()} title="Импортировать мир" aria-label="Импортировать мир">⇧</button>
+        <button className="icon-button secondary-top-action" onClick={exportWorld} title="Экспортировать мир" aria-label="Экспортировать мир">⇩</button>
+        <button className="icon-button secondary-top-action" onClick={() => importRef.current?.click()} title="Импортировать мир" aria-label="Импортировать мир">⇧</button>
         <input ref={importRef} hidden type="file" accept="application/json" onChange={event => void importWorld(event.target.files?.[0])} />
       </div>
     </header>
 
-    <main className="main-grid">
-      <aside className={`left-panel scrollable-tab ${view === 'archive' ? 'mobile-active' : ''}`}>
-        <div className="panel-title"><span className="eyebrow">Архив мира</span><h2>Всё, что существует</h2></div>
-        <Encyclopedia world={world} onSelect={ref => { setSelected(ref); setView('chronicle'); }} />
-      </aside>
-
-      <section className={`map-stage scrollable-tab ${view === 'map' ? 'mobile-active' : ''}`}>
+    <main className="world-workspace">
+      {view === 'map' && <section className="map-stage workspace-view">
         <div className="map-toolbar">
           <div className="layer-tabs">
             {(['terrain', 'realms', 'danger', 'population', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
           </div>
           <div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div>
         </div>
-        <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={ref => { setSelected(ref); setView('chronicle'); }} /><div className="map-vignette" /></div>
+        <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={openEntity} /><div className="map-vignette" /></div>
         <div className="stats-ribbon">
           <Stat value={stats!.population.toLocaleString('ru-RU')} label="живых имён" />
           <Stat value={stats!.realms} label="государств" />
@@ -182,28 +208,60 @@ export default function App() {
           <button onClick={() => void advance(1)}>+ месяц</button><button onClick={() => void advance(12)}>+ год</button><button onClick={() => void advance(120)}>+ 10 лет</button>
           <button className="primary-mini" onClick={() => void advance(1)}>Следующее событие <span>›</span></button>
         </div>
-      </section>
+      </section>}
 
-      <aside className={`right-panel scrollable-tab ${view === 'chronicle' ? 'mobile-active' : ''}`}>
-        <div className="detail-scroll"><EntityPanel world={world} selected={selected} onSelect={ref => { setSelected(ref); setView('chronicle'); }} /></div>
-        <div className="chronicle-block">
-          <div className="panel-title compact"><span className="eyebrow">Живая хроника</span><h3>Последние события</h3></div>
-          <div className="event-list">{recentEvents.map(event => <button key={event.id} className={`event-item importance-${event.importance}`} onClick={() => { const ref = event.entityRefs[0]; if (ref) setSelected(ref); }}>
-            <time>{event.year}.{String(event.month).padStart(2, '0')}</time><span><strong>{event.title}</strong><small>{event.description}</small></span>
+      {view === 'archive' && <section className="workspace-view archive-workspace scrollable-tab">
+        <div className="workspace-heading"><div><span className="eyebrow">Архив мира</span><h1>Всё, что существует</h1></div><p>Выбери личность, государство, книгу, чудовище или другое связанное звено мира.</p></div>
+        <div className="window-card archive-window"><Encyclopedia world={world} onSelect={openEntity} /></div>
+      </section>}
+
+      {view === 'chronicle' && <section className="workspace-view chronicle-workspace scrollable-tab">
+        <div className="workspace-heading"><div><span className="eyebrow">Живая хроника</span><h1>Последние события</h1></div><p>Войны, смерти, книги, нападения и решения правителей в одном потоке.</p></div>
+        <div className="window-card chronicle-window">
+          <div className="event-list event-list-full">{recentEvents.map(event => <button key={event.id} className={`event-item importance-${event.importance}`} onClick={() => { const ref = event.entityRefs[0]; if (ref) openEntity(ref); }}>
+            <time>{event.year}.{String(event.month).padStart(2, '0')}</time><span><strong>{event.title}</strong><small>{event.description}</small>{event.cause && <em>Причина: {event.cause}</em>}</span>
           </button>)}</div>
         </div>
-      </aside>
+      </section>}
     </main>
 
     <nav className="mobile-nav">
-      <button className={view === 'archive' ? 'active' : ''} onClick={() => setView('archive')}><span>⌕</span>Архив</button>
-      <button className={view === 'map' ? 'active' : ''} onClick={() => setView('map')}><span>⌾</span>Карта</button>
-      <button className={view === 'chronicle' ? 'active' : ''} onClick={() => setView('chronicle')}><span>▤</span>Хроника</button>
+      <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
+      <ViewButton active={view === 'map'} icon="⌾" label="Карта" onClick={() => setView('map')} />
+      <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
     </nav>
+
+    {selected && <EntityWindow world={world} selected={selected} canGoBack={entityStack.length > 1} onBack={backEntity} onClose={closeEntity} onSelect={openEntity} />}
     {settingsOpen && <SettingsPanel world={world} update={updateState} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
     {simulating && <LoadingVeil text={loadingText} />}
     {forcedUpdate}
   </div>;
+}
+
+function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect }: {
+  world: WorldState;
+  selected: EntityRef;
+  canGoBack: boolean;
+  onBack: () => void;
+  onClose: () => void;
+  onSelect: (ref: EntityRef) => void;
+}) {
+  return <div className="entity-window-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира">
+      <header className="entity-window-header">
+        <div className="entity-window-nav">
+          <button className="window-control" disabled={!canGoBack} onClick={onBack} aria-label="Назад" title="Назад">←</button>
+          <span>Карточка мира</span>
+        </div>
+        <button className="window-control close-control" onClick={onClose} aria-label="Закрыть" title="Закрыть">×</button>
+      </header>
+      <div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} /></div>
+    </section>
+  </div>;
+}
+
+function ViewButton({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
+  return <button className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span>{label}</button>;
 }
 
 function LoadingVeil({ text }: { text: string }) { return <div className="loading-veil"><div className="loading-sigil">E</div><strong>{text}</strong><span>армии идут, люди стареют, чудовища выбирают добычу</span></div>; }
