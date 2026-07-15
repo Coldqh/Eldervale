@@ -74,7 +74,16 @@ export default function App() {
     let active = true;
     void (async () => {
       try {
-        const [, saved, slotId] = await Promise.all([runUpdateCheck(), loadWorld(), getActiveWorldSlotId()]);
+        // Сначала проверяем версию. Нельзя одновременно мигрировать большой старый мир
+        // и через две секунды перезагружать страницу ради обновления.
+        const update = await runUpdateCheck();
+        if (!active) return;
+        if (update.updateRequired) {
+          setProgress(undefined);
+          return;
+        }
+
+        const [saved, slotId] = await Promise.all([loadWorld(), getActiveWorldSlotId()]);
         if (!active) return;
         if (saved) {
           setProgress({ operation: 'загрузка', phase: 'Подготовка постоянного движка', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
@@ -112,10 +121,18 @@ export default function App() {
   }, [runUpdateCheck]);
 
   useEffect(() => {
-    if (!updateState.updateRequired) return;
+    if (booting || !updateState.updateRequired) return;
+    const remoteVersion = updateState.remoteVersion ?? 'неизвестная';
+    const attemptKey = `eldervale-auto-update:${remoteVersion}`;
+
+    // Одна версия может автоматически отправить браузер на восстановление только один раз
+    // за вкладку. Даже при ошибке публикации бесконечного цикла больше не будет.
+    if (sessionStorage.getItem(attemptKey) === APP_VERSION) return;
+    sessionStorage.setItem(attemptKey, APP_VERSION);
+
     const timer = window.setTimeout(() => { void forceUpdate(updateState.remoteVersion); }, 2200);
     return () => window.clearTimeout(timer);
-  }, [updateState]);
+  }, [booting, updateState.updateRequired, updateState.remoteVersion]);
 
   useEffect(() => {
     if (!selected) return;
