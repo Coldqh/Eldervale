@@ -26,6 +26,11 @@ export function SettingsPanel({ world, update, onCheck, onForceUpdate, onClose }
         <div className="stat-row"><span>Обновления</span><strong>обязательные, с очисткой старого кэша</strong></div>
         {world && <><div className="stat-row"><span>Мир</span><strong>{world.name}</strong></div><div className="stat-row"><span>Последняя эпоха</span><strong>{world.year} год</strong></div></>}
       </div>
+      <div className="settings-release-notes">
+        <span className="eyebrow">Последнее обновление</span>
+        <strong>0.4.0 · Исторический атлас</strong>
+        <small>Выбор года, реконструкция границ, слои эпохи, фильтры хроники и исправление вкладок архива на ПК.</small>
+      </div>
       <div className="settings-actions">
         <button className="ghost-button" onClick={onCheck}>Проверить обновление</button>
         <button className="primary-button compact-primary" onClick={onForceUpdate}>Принудительно обновить <span>↻</span></button>

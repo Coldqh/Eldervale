@@ -430,3 +430,110 @@ button { border: 0; cursor: pointer; }
   .entity-window-nav span { letter-spacing: .11em; }
   .entity-window-body .stat-row { grid-template-columns: 84px minmax(0, 1fr); font-size: 10px; }
 }
+
+/* Патч 008: исторический атлас и исправление десктопного архива */
+.map-toolbar-right { display: flex; align-items: center; gap: 12px; }
+.atlas-entry-button { padding: 7px 10px; border: 1px solid rgba(214,181,109,.24); border-radius: 9px; background: rgba(214,181,109,.08); color: var(--gold-pale); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.atlas-entry-button:hover { background: rgba(214,181,109,.14); border-color: rgba(214,181,109,.42); }
+
+.atlas-workspace { overflow-y: auto; overscroll-behavior: contain; padding: 22px clamp(16px, 2.5vw, 38px) 34px; background: radial-gradient(circle at 50% -16%, rgba(105,137,96,.18), transparent 42%), #0e1611; }
+.atlas-topline { width: min(1440px, 100%); margin: 0 auto 14px; display: flex; align-items: end; justify-content: space-between; gap: 22px; }
+.atlas-topline h1 { margin: 4px 0 0; color: var(--gold-pale); font: 500 clamp(25px, 2.6vw, 38px)/1.12 Georgia, serif; }
+.atlas-topline p { margin: 7px 0 0; color: #778179; font-size: 11px; }
+.atlas-close { flex: 0 0 auto; }
+.atlas-time-card { width: min(1440px, 100%); margin: 0 auto 14px; padding: 12px 14px 10px; border: 1px solid var(--line); border-radius: 15px; background: rgba(18,28,21,.92); box-shadow: 0 14px 42px rgba(0,0,0,.16); }
+.atlas-year-controls { display: grid; grid-template-columns: auto auto minmax(84px, auto) auto auto minmax(92px, auto); align-items: center; justify-content: center; gap: 7px; }
+.atlas-year-controls button { min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.025); color: #9da498; font-size: 10px; }
+.atlas-year-controls button:hover { border-color: var(--line-strong); color: var(--gold-pale); }
+.atlas-year-controls strong { min-width: 84px; text-align: center; color: var(--gold-pale); font: 500 24px/1 Georgia, serif; }
+.atlas-year-controls .atlas-now { color: var(--gold); }
+.atlas-range { width: 100%; margin: 10px 0 0; accent-color: #b99b5f; }
+.atlas-range-labels { display: flex; justify-content: space-between; margin-top: -2px; color: #59635c; font-size: 8px; }
+.atlas-grid { width: min(1440px, 100%); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(290px, .75fr); gap: 14px; align-items: stretch; }
+.atlas-map-window { min-width: 0; height: min(66vh, 720px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.atlas-map-toolbar { border-radius: 0; }
+.atlas-reconstruction { color: #69736b; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; text-align: right; }
+.atlas-map-wrap { min-height: 0; position: relative; overflow: hidden; background: radial-gradient(circle at center, #28372e, #0d1410 78%); }
+.atlas-map-wrap .world-canvas { position: relative; z-index: 1; }
+.atlas-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid var(--line); background: rgba(11,18,13,.96); }
+.atlas-stats div { min-width: 0; padding: 9px 10px; border-right: 1px solid var(--line); }
+.atlas-stats div:last-child { border-right: 0; }
+.atlas-stats strong { display: block; color: var(--gold-pale); font: 500 15px/1.1 Georgia, serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atlas-stats span { display: block; margin-top: 3px; color: #667067; font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
+.atlas-sidebar { min-height: 0; display: grid; grid-template-rows: auto minmax(190px, 1fr) auto; gap: 12px; }
+.atlas-filter-window, .atlas-year-window, .atlas-war-window { width: 100%; margin: 0; padding: 14px; }
+.atlas-section-title { display: grid; gap: 3px; margin-bottom: 10px; }
+.atlas-section-title strong { color: #d3cbb4; font: 500 16px/1.2 Georgia, serif; }
+.atlas-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.atlas-filter-grid button { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.018); color: #717b73; font-size: 9px; text-transform: capitalize; }
+.atlas-filter-grid button small { color: #566058; font-size: 8px; }
+.atlas-filter-grid button.active { border-color: rgba(214,181,109,.35); color: var(--gold-pale); background: rgba(214,181,109,.09); }
+.atlas-year-window { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.atlas-event-list { min-height: 0; overflow-y: auto; padding-right: 4px; }
+.atlas-event-list::-webkit-scrollbar, .atlas-chronicle-list::-webkit-scrollbar { width: 5px; }
+.atlas-event-list::-webkit-scrollbar-thumb, .atlas-chronicle-list::-webkit-scrollbar-thumb { background: rgba(214,181,109,.2); border-radius: 8px; }
+.atlas-event { width: 100%; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; padding: 9px 6px; border-bottom: 1px solid rgba(255,255,255,.045); background: transparent; text-align: left; position: relative; }
+.atlas-event::before { content: ""; position: absolute; left: 0; top: 11px; width: 2px; height: 20px; background: rgba(214,181,109,.2); }
+.atlas-event.importance-5::before { background: var(--danger); }
+.atlas-event.importance-4::before { background: var(--gold); }
+.atlas-event time { color: #657068; font-size: 8px; }
+.atlas-event strong { display: block; color: #c7c0ad; font: 500 11px/1.25 Georgia, serif; }
+.atlas-event small { display: block; margin-top: 3px; color: #727c74; font-size: 9px; line-height: 1.4; }
+.atlas-event em { display: block; margin-top: 4px; color: #8b8979; font-size: 8px; font-style: normal; line-height: 1.4; }
+.atlas-war-window { max-height: 210px; overflow-y: auto; }
+.atlas-war-card { width: 100%; display: grid; gap: 3px; padding: 9px 5px; border-top: 1px solid rgba(255,255,255,.045); background: transparent; text-align: left; }
+.atlas-war-card strong { color: #d2c8ad; font: 500 11px/1.25 Georgia, serif; }
+.atlas-war-card small { color: #727c74; font-size: 8px; line-height: 1.35; }
+.atlas-war-card span { color: #9d755f; font-size: 8px; }
+.atlas-chronicle-window { width: min(1440px, 100%); margin: 14px auto 0; padding: 15px; }
+.atlas-chronicle-list { max-height: 420px; overflow-y: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; padding-right: 5px; }
+.atlas-chronicle-list .atlas-event { grid-template-columns: 58px minmax(0, 1fr); }
+
+@media (min-width: 761px) {
+  /* Исправление только для ПК: список больше не налезает на строку вкладок. */
+  .archive-workspace { overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  .archive-window { height: auto; min-height: 0; }
+  .archive-window .encyclopedia { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+  .archive-window .search-box { position: relative; z-index: 3; }
+  .archive-window .chip-row { min-height: 43px; position: relative; z-index: 2; align-items: center; }
+  .archive-window .entity-list { min-height: 0; height: 100%; overflow-y: auto; position: relative; z-index: 1; }
+}
+
+@media (max-width: 1040px) and (min-width: 761px) {
+  .desktop-view-tabs button { padding-inline: 9px; }
+  .atlas-grid { grid-template-columns: minmax(0, 1.45fr) minmax(265px, .75fr); }
+  .atlas-stats { grid-template-columns: repeat(3, 1fr); }
+  .atlas-stats div:nth-child(3) { border-right: 0; }
+  .atlas-stats div:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+}
+
+@media (max-width: 760px) {
+  .map-toolbar-right { flex: 0 0 auto; }
+  .atlas-entry-button { padding: 7px 8px; font-size: 8px; }
+  .atlas-workspace { padding: 13px 10px 24px; -webkit-overflow-scrolling: touch; }
+  .atlas-topline { display: block; margin-bottom: 11px; }
+  .atlas-topline h1 { font-size: 25px; }
+  .atlas-close { margin-top: 10px; width: 100%; }
+  .atlas-time-card { padding: 10px; }
+  .atlas-year-controls { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+  .atlas-year-controls strong { min-width: 0; font-size: 21px; }
+  .atlas-year-controls button { min-width: 0; padding: 7px 3px; }
+  .atlas-year-controls .atlas-now { grid-column: 1 / -1; }
+  .atlas-grid { display: block; }
+  .atlas-map-window { height: auto; min-height: 0; grid-template-rows: auto 52svh auto; }
+  .atlas-map-toolbar { overflow-x: auto; }
+  .atlas-map-toolbar .layer-tabs { min-width: 430px; }
+  .atlas-reconstruction { display: none; }
+  .atlas-stats { grid-template-columns: repeat(3, 1fr); }
+  .atlas-stats div:nth-child(3) { border-right: 0; }
+  .atlas-stats div:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .atlas-sidebar { display: grid; margin-top: 11px; }
+  .atlas-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .atlas-year-window { max-height: none; }
+  .atlas-event-list { overflow: visible; }
+  .atlas-chronicle-window { margin-top: 11px; }
+  .atlas-chronicle-list { max-height: none; overflow: visible; display: block; }
+}
+.settings-release-notes { display: grid; gap: 5px; margin: 0 0 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(214,181,109,.045); }
+.settings-release-notes strong { color: var(--gold-pale); font: 500 15px/1.25 Georgia, serif; }
+.settings-release-notes small { color: #7d867e; font-size: 9px; line-height: 1.5; }

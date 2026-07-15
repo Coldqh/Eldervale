@@ -5,6 +5,7 @@ import { EntityPanel } from './components/EntityPanel';
 import { Encyclopedia } from './components/Encyclopedia';
 import { WorldSetup } from './components/WorldSetup';
 import { SettingsPanel } from './components/SettingsPanel';
+import { HistoricalAtlas } from './components/HistoricalAtlas';
 import { loadWorld, saveWorld } from './lib/worldStorage';
 import { advanceWorldInBackground, generateWorldInBackground } from './lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from './lib/appUpdate';
@@ -12,7 +13,7 @@ import { migrateWorld } from './sim/migrateWorld';
 import { APP_VERSION } from './version';
 import './styles.css';
 
-type View = 'map' | 'archive' | 'chronicle';
+type View = 'map' | 'archive' | 'chronicle' | 'atlas';
 const initialUpdate: UpdateCheckResult = { currentVersion: APP_VERSION, updateRequired: false, checkedAt: 0 };
 
 export default function App() {
@@ -178,6 +179,7 @@ export default function App() {
         <ViewButton active={view === 'map'} icon="⌾" label="Карта" onClick={() => setView('map')} />
         <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
         <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
+        <ViewButton active={view === 'atlas'} icon="◫" label="Атлас" onClick={() => setView('atlas')} />
       </nav>
       <div className="world-clock"><span>Год {world.year}</span><strong>{monthName(world.month)}</strong></div>
       <div className="top-actions">
@@ -195,7 +197,7 @@ export default function App() {
           <div className="layer-tabs">
             {(['terrain', 'realms', 'danger', 'population', 'trade'] as MapLayer[]).map(item => <button className={layer === item ? 'active' : ''} key={item} onClick={() => setLayer(item)}>{layerLabel(item)}</button>)}
           </div>
-          <div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div>
+          <div className="map-toolbar-right"><div className="map-legend"><span><i className="dot settlement-dot" />Поселение</span><span><i className="triangle" />Угроза</span><span><i className="army-mark" />Армия</span></div><button className="atlas-entry-button" onClick={() => setView('atlas')}>Исторический атлас</button></div>
         </div>
         <div className="map-wrap"><WorldMap world={world} layer={layer} onSelect={openEntity} /><div className="map-vignette" /></div>
         <div className="stats-ribbon">
@@ -215,6 +217,8 @@ export default function App() {
         <div className="window-card archive-window"><Encyclopedia world={world} onSelect={openEntity} /></div>
       </section>}
 
+      {view === 'atlas' && <HistoricalAtlas world={world} onSelect={openEntity} onClose={() => setView('map')} />}
+
       {view === 'chronicle' && <section className="workspace-view chronicle-workspace scrollable-tab">
         <div className="workspace-heading"><div><span className="eyebrow">Живая хроника</span><h1>Последние события</h1></div><p>Войны, смерти, книги, нападения и решения правителей в одном потоке.</p></div>
         <div className="window-card chronicle-window">
@@ -227,7 +231,7 @@ export default function App() {
 
     <nav className="mobile-nav">
       <ViewButton active={view === 'archive'} icon="⌕" label="Архив" onClick={() => setView('archive')} />
-      <ViewButton active={view === 'map'} icon="⌾" label="Карта" onClick={() => setView('map')} />
+      <ViewButton active={view === 'map' || view === 'atlas'} icon="⌾" label="Карта" onClick={() => setView('map')} />
       <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" onClick={() => setView('chronicle')} />
     </nav>
 
