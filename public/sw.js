@@ -1,4 +1,4 @@
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const CACHE = `eldervale-runtime-${VERSION}`;
 const ROOT = '/Eldervale/';
 const CORE = [
@@ -13,7 +13,8 @@ self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     await cache.addAll(CORE);
-    await self.skipWaiting();
+    // Новый worker ждёт явного подтверждения обновления.
+    // Первая установка больше не перехватывает вкладку посреди генерации мира.
   })());
 });
 

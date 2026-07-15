@@ -36,16 +36,9 @@ if (!root) throw new Error('Корневой элемент приложения
 createRoot(root).render(<StrictMode><AppErrorBoundary><App /></AppErrorBoundary></StrictMode>);
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  let reloadingForWorker = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloadingForWorker) return;
-    const key = `eldervale-controller-${APP_VERSION}`;
-    if (sessionStorage.getItem(key) === '1') return;
-    reloadingForWorker = true;
-    sessionStorage.setItem(key, '1');
-    window.location.reload();
-  });
-
+  // controllerchange больше не перезагружает вкладку автоматически.
+  // Явное обновление проходит через forceUpdate() и repair.html,
+  // поэтому первая активация worker не может оборвать генерацию мира.
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { updateViaCache: 'none' }).then(registration => {
       void registration.update();
