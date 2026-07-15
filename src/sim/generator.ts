@@ -446,7 +446,7 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
       id: index + 1, name: `${rng.pick(['Корона', 'Клинок', 'Чаша', 'Знамя', 'Маска', 'Кольцо', 'Рог', 'Щит'])} ${placeName(rng)}`,
       type: rng.pick(['оружие', 'регалия', 'ритуальный предмет', 'драгоценность', 'доспех', 'инструмент']),
       material: rng.pick(['серебро', 'чёрное железо', 'золото', 'драконья кость', 'лунный камень', 'бронза', 'тис']),
-      creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(1, config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions),
+      creatorId: creator.id, ownerId: owner.id, settlementId: creator.settlementId, yearCreated: rng.int(Math.max(1, creator.birthYear), config.historyYears), power: rng.int(0, Math.round(config.magic * 22)), depiction: rng.pick(depictions),
       ownerHistory: [{ year: config.historyYears, characterId: owner.id, settlementId: owner.settlementId, reason: 'последний известный переход права владения' }],
       history: [`Создан мастером ${creator.name}.`, `Сейчас принадлежит ${owner.name}.`],
     };
@@ -546,9 +546,10 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
 
   report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
   const world: WorldState = {
-    version: 5, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    version: 6, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
     tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, events, localMapChanges: [],
     simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
+    history: { engineVersion: 1, generatedYears: config.historyYears, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },
     nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1 },
   };
   report('Мир готов', 100);

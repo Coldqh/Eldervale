@@ -1,6 +1,6 @@
 import type { SimulationProfile, SimulationProgress, WorldConfig, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from './worldWorkerProtocol';
-import { generateWorld } from '../sim/generator';
+import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
@@ -77,9 +77,10 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     return { profile: { operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() } };
   }
   if (command.action === 'generate') {
-    const world = generateWorld(command.config, (phase, completed, total, detail) => {
+    const world = generateHistoricalWorld(command.config, (phase, completed, total, detail) => {
       const elapsedMs = performance.now() - startedAt;
-      onProgress?.({ operation: 'генерация', phase, completed, total, percent: completed / total * 100, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
+      const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
+      onProgress?.({ operation, phase, completed, total, percent: completed / total * 100, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
     });
     fallbackEngine = createSimulationEngine(world);
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };

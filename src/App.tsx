@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { EntityRef, SimulationProfile, SimulationProgress, WorldConfig, WorldState } from './types';
+import type { EntityRef, SimulationProfile, SimulationProgress, StorageProfile, WorldConfig, WorldSlotMeta, WorldSnapshotMeta, WorldState } from './types';
 import { WorldMap, type MapLayer } from './components/WorldMap';
 import { EntityPanel } from './components/EntityPanel';
 import { Encyclopedia } from './components/Encyclopedia';
@@ -7,7 +7,10 @@ import { WorldSetup } from './components/WorldSetup';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoricalAtlas } from './components/HistoricalAtlas';
 import { LocalMapViewer } from './components/LocalMapViewer';
-import { loadWorld, saveWorld } from './lib/worldStorage';
+import {
+  createWorldSlot, createWorldSnapshot, deleteWorldSlot, duplicateWorldSlot, getActiveWorldSlotId, listWorldSlots,
+  listWorldSnapshots, loadWorld, loadWorldSlot, renameWorldSlot, restoreWorldSnapshot, saveWorld,
+} from './lib/worldStorage';
 import { advanceWorldInBackground, cancelWorldOperation, generateWorldInBackground, initializeWorldInBackground } from './lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from './lib/appUpdate';
 import { migrateWorld } from './sim/migrateWorld';
@@ -30,6 +33,10 @@ export default function App() {
   const [loadingText, setLoadingText] = useState('Открываем сохранённый мир');
   const [progress, setProgress] = useState<SimulationProgress>();
   const [performanceProfile, setPerformanceProfile] = useState<SimulationProfile>();
+  const [storageProfile, setStorageProfile] = useState<StorageProfile>();
+  const [activeSlotId, setActiveSlotId] = useState<string>();
+  const [worldSlots, setWorldSlots] = useState<WorldSlotMeta[]>([]);
+  const [worldSnapshots, setWorldSnapshots] = useState<WorldSnapshotMeta[]>([]);
   const [updateState, setUpdateState] = useState<UpdateCheckResult>(initialUpdate);
   const importRef = useRef<HTMLInputElement>(null);
   const selected = entityStack.at(-1);
@@ -56,32 +63,46 @@ export default function App() {
     setView('local');
   }, []);
 
+  const refreshStorage = useCallback(async (slotId?: string) => {
+    const slots = await listWorldSlots();
+    setWorldSlots(slots);
+    const resolved = slotId ?? activeSlotId ?? await getActiveWorldSlotId();
+    setWorldSnapshots(resolved ? await listWorldSnapshots(resolved) : []);
+  }, [activeSlotId]);
+
   useEffect(() => {
     let active = true;
-    Promise.all([loadWorld(), runUpdateCheck()]).then(async ([saved]) => {
-      if (!active) return;
-      if (saved) {
-        setProgress({ operation: 'загрузка', phase: 'Подготовка постоянного движка', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
-        const profile = await initializeWorldInBackground(saved, setProgress);
+    void (async () => {
+      try {
+        const [, saved, slotId] = await Promise.all([runUpdateCheck(), loadWorld(), getActiveWorldSlotId()]);
         if (!active) return;
-        setPerformanceProfile(profile);
+        if (saved) {
+          setProgress({ operation: 'загрузка', phase: 'Подготовка постоянного движка', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
+          const profile = await initializeWorldInBackground(saved, setProgress);
+          if (!active) return;
+          setPerformanceProfile(profile);
+        }
+        const resolvedSlotId = slotId ?? await getActiveWorldSlotId();
+        setActiveSlotId(resolvedSlotId);
+        setWorld(saved);
+        setSetupOpen(!saved);
+        setEntityStack([]);
+        setLocalPosition(undefined);
+        setProgress(undefined);
+        await refreshStorage(resolvedSlotId);
+      } catch (error) {
+        console.error('Не удалось подготовить сохранённый мир', error);
+        if (!active) return;
+        setWorld(undefined);
+        setSetupOpen(true);
+        setProgress(undefined);
+      } finally {
+        if (active) setBooting(false);
       }
-      setWorld(saved);
-      setSetupOpen(!saved);
-      setEntityStack([]);
-      setLocalPosition(undefined);
-      setProgress(undefined);
-      setBooting(false);
-    }).catch(error => {
-      console.error('Не удалось подготовить сохранённый мир', error);
-      if (!active) return;
-      setWorld(undefined);
-      setSetupOpen(true);
-      setProgress(undefined);
-      setBooting(false);
-    });
+    })();
     return () => { active = false; };
   }, [runUpdateCheck]);
+
 
   useEffect(() => {
     const interval = window.setInterval(() => { void runUpdateCheck(); }, 5 * 60 * 1000);
@@ -126,8 +147,11 @@ export default function App() {
       if (!result.world) throw new Error('Генератор не вернул созданный мир');
       const receivedAt = performance.now();
       const saveStarted = performance.now();
-      await saveWorld(result.world);
+      const createdSlot = await createWorldSlot(result.world);
       const saveMs = performance.now() - saveStarted;
+      setActiveSlotId(createdSlot.slotId);
+      setStorageProfile(createdSlot.profile);
+      await refreshStorage(createdSlot.slotId);
       const profile: SimulationProfile = {
         ...(result.profile ?? { operation: 'генерация', totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
         workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
@@ -159,8 +183,11 @@ export default function App() {
       if (!result.world) throw new Error('Симуляция не вернула состояние мира');
       const receivedAt = performance.now();
       const saveStarted = performance.now();
-      await saveWorld(result.world);
+      const stored = await saveWorld(result.world, activeSlotId);
       const saveMs = performance.now() - saveStarted;
+      setActiveSlotId(stored.slotId);
+      setStorageProfile(stored);
+      await refreshStorage(stored.slotId);
       const profile: SimulationProfile = {
         ...(result.profile ?? { operation: 'симуляция', months, totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
         workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
@@ -198,12 +225,92 @@ export default function App() {
       setEntityStack([]);
       setView('map');
       setLocalPosition(undefined);
-      await saveWorld(migrated);
+      const createdSlot = await createWorldSlot(migrated, `import-${Date.now()}`);
+      setActiveSlotId(createdSlot.slotId);
+      setStorageProfile(createdSlot.profile);
+      await refreshStorage(createdSlot.slotId);
     } catch {
       alert('Не удалось прочитать сохранение Eldervale.');
     } finally {
       if (importRef.current) importRef.current.value = '';
     }
+  };
+
+  useEffect(() => {
+    if (settingsOpen) void refreshStorage(activeSlotId);
+  }, [settingsOpen, activeSlotId, refreshStorage]);
+
+  const switchWorld = async (slotId: string) => {
+    if (slotId === activeSlotId || simulating) return;
+    setLoadingText('Открываем выбранный мир');
+    setProgress({ operation: 'загрузка', phase: 'Чтение разделённого сохранения', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
+    setSimulating(true);
+    try {
+      const loaded = await loadWorldSlot(slotId);
+      if (!loaded) throw new Error('Мир не найден');
+      const profile = await initializeWorldInBackground(loaded, setProgress);
+      setPerformanceProfile(profile);
+      setWorld(loaded);
+      setActiveSlotId(slotId);
+      setEntityStack([]);
+      setLocalPosition(undefined);
+      setView('map');
+      await refreshStorage(slotId);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Не удалось открыть мир.');
+    } finally {
+      setProgress(undefined);
+      setSimulating(false);
+    }
+  };
+
+  const renameSlot = async (slotId: string) => {
+    const current = worldSlots.find(slot => slot.id === slotId)?.name ?? '';
+    const name = window.prompt('Новое название мира', current);
+    if (!name?.trim()) return;
+    await renameWorldSlot(slotId, name.trim());
+    if (slotId === activeSlotId && world) setWorld({ ...world, name: name.trim() });
+    await refreshStorage(slotId);
+  };
+
+  const removeSlot = async (slotId: string) => {
+    const meta = worldSlots.find(slot => slot.id === slotId);
+    if (!window.confirm(`Удалить мир «${meta?.name ?? slotId}» и его снимки?`)) return;
+    await deleteWorldSlot(slotId);
+    const remaining = await listWorldSlots();
+    setWorldSlots(remaining);
+    if (slotId === activeSlotId) {
+      const next = remaining[0];
+      if (next) await switchWorld(next.id);
+      else {
+        setWorld(undefined);
+        setActiveSlotId(undefined);
+        setSetupOpen(true);
+        setSettingsOpen(false);
+      }
+    } else await refreshStorage(activeSlotId);
+  };
+
+  const duplicateSlot = async (slotId: string) => {
+    await duplicateWorldSlot(slotId);
+    await refreshStorage(activeSlotId);
+  };
+
+  const makeSnapshot = async () => {
+    if (!world || !activeSlotId) return;
+    await createWorldSnapshot(world, activeSlotId, 'ручной');
+    await refreshStorage(activeSlotId);
+  };
+
+  const restoreSnapshot = async (snapshotId: string) => {
+    if (!window.confirm('Вернуть мир к выбранному снимку? Текущее состояние останется в автоматическом снимке только если оно уже было сохранено.')) return;
+    const restored = await restoreWorldSnapshot(snapshotId);
+    await initializeWorldInBackground(restored.world, setProgress);
+    setWorld(restored.world);
+    setActiveSlotId(restored.slotId);
+    setEntityStack([]);
+    setView('map');
+    await refreshStorage(restored.slotId);
   };
 
   if (booting) return <LoadingVeil text="Открываем сохранённый мир" progress={progress} />;
@@ -214,12 +321,13 @@ export default function App() {
 
   if (!world || setupOpen) return <>
     <WorldSetup initial={world?.config} onGenerate={generate} onClose={world ? () => setSetupOpen(false) : undefined} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} storage={storageProfile} slots={worldSlots} activeSlotId={activeSlotId} snapshots={worldSnapshots} onSwitchWorld={slotId => void switchWorld(slotId)} onRenameWorld={slotId => void renameSlot(slotId)} onDeleteWorld={slotId => void removeSlot(slotId)} onDuplicateWorld={slotId => void duplicateSlot(slotId)} onCreateSnapshot={() => void makeSnapshot()} onRestoreSnapshot={snapshotId => void restoreSnapshot(snapshotId)} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
     {simulating && <LoadingVeil text={loadingText} progress={progress} onCancel={progress?.operation === 'симуляция' ? cancelWorldOperation : undefined} />}
     {forcedUpdate}
   </>;
 
   const recentEvents = [...world.events].sort((a, b) => b.year - a.year || b.month - a.month || b.id - a.id).slice(0, 180);
+  const landmarkEvents = world.history.landmarkEventIds.map(id => world.events.find(event => event.id === id)).filter((event): event is WorldState['events'][number] => Boolean(event)).sort((a, b) => a.year - b.year || a.month - b.month).slice(0, 24);
 
   return <div className="app-shell app-shell-v2">
     <header className="topbar topbar-v2">
@@ -273,6 +381,11 @@ export default function App() {
 
       {view === 'chronicle' && <section className="workspace-view chronicle-workspace scrollable-tab">
         <div className="workspace-heading"><div><span className="eyebrow">Живая хроника</span><h1>Последние события</h1></div><p>Войны, смерти, книги, нападения и решения правителей в одном потоке.</p></div>
+        <div className="window-card history-overview-window">
+          <div className="history-overview-head"><div><span className="eyebrow">История мира</span><strong>{world.history.generatedYears} прожитых лет</strong></div><small>{world.history.fallenRealms.length} павших держав · {world.history.compressedEventCount.toLocaleString('ru-RU')} обычных изменений сведено в хроники</small></div>
+          <div className="history-overview-eras">{world.history.eras.map(era => <div key={era.id}><span>{era.startYear}–{era.endYear}</span><strong>{era.name}</strong><small>{era.summary}</small></div>)}</div>
+          <div className="landmark-event-grid">{landmarkEvents.map(event => <button key={event.id} onClick={() => { const ref = event.entityRefs[0]; if (ref) openEntity(ref); }}><time>{event.year}</time><span><strong>{event.title}</strong><small>{event.outcome}</small></span></button>)}</div>
+        </div>
         <div className="window-card chronicle-window">
           <div className="event-list event-list-full">{recentEvents.map(event => <button key={event.id} className={`event-item importance-${event.importance}`} onClick={() => { const ref = event.entityRefs[0]; if (ref) openEntity(ref); }}>
             <time>{event.year}.{String(event.month).padStart(2, '0')}</time><span><strong>{event.title}</strong><small>{event.description}</small>{event.cause && <em>Причина: {event.cause}</em>}</span>
@@ -288,7 +401,7 @@ export default function App() {
     </nav>
 
     {selected && <EntityWindow world={world} selected={selected} canGoBack={entityStack.length > 1} onBack={backEntity} onClose={closeEntity} onSelect={openEntity} onOpenLocal={openLocal} />}
-    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsPanel world={world} update={updateState} performance={performanceProfile} storage={storageProfile} slots={worldSlots} activeSlotId={activeSlotId} snapshots={worldSnapshots} onSwitchWorld={slotId => void switchWorld(slotId)} onRenameWorld={slotId => void renameSlot(slotId)} onDeleteWorld={slotId => void removeSlot(slotId)} onDuplicateWorld={slotId => void duplicateSlot(slotId)} onCreateSnapshot={() => void makeSnapshot()} onRestoreSnapshot={snapshotId => void restoreSnapshot(snapshotId)} onCheck={() => void runUpdateCheck()} onForceUpdate={() => void forceUpdate(updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}
     {simulating && <LoadingVeil text={loadingText} progress={progress} onCancel={progress?.operation === 'симуляция' ? cancelWorldOperation : undefined} />}
     {forcedUpdate}
   </div>;

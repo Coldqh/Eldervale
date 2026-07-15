@@ -18,6 +18,7 @@ export function HistoricalAtlas({ world, onSelect, onClose }: { world: WorldStat
   const yearEvents = useMemo(() => eventsAtYear(world, atlas.year, enabledGroups), [world, atlas.year, enabledGroups]);
   const recent = useMemo(() => importantEventsUntil(world, atlas.year, enabledGroups, 90), [world, atlas.year, enabledGroups]);
   const wars = world.wars.filter(war => atlas.activeWarIds.has(war.id));
+  const activeEra = world.history.eras.find(era => atlas.year >= era.startYear && atlas.year <= era.endYear);
 
   const setClampedYear = (value: number) => setYear(Math.max(range.min, Math.min(range.max, Math.round(value))));
   const toggleGroup = (group: AtlasEventGroup) => setEnabledGroups(current => {
@@ -35,6 +36,12 @@ export function HistoricalAtlas({ world, onSelect, onClose }: { world: WorldStat
       </div>
       <button className="ghost-button atlas-close" onClick={onClose}>Вернуться к карте</button>
     </div>
+
+    {world.history.eras.length > 0 && <div className="history-era-strip">
+      {world.history.eras.map(era => <button key={era.id} className={`history-era-card ${activeEra?.id === era.id ? 'active' : ''}`} onClick={() => setClampedYear(era.endYear)}>
+        <span>{era.startYear}–{era.endYear}</span><strong>{era.name}</strong><small>{era.eventIds.length} подробных событий · шаг {era.stepYears} г.</small>
+      </button>)}
+    </div>}
 
     <div className="atlas-time-card">
       <div className="atlas-year-controls">

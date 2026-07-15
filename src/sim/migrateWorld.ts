@@ -11,10 +11,10 @@ export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-5`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-6`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
-  localized.version = 5;
+  localized.version = 6;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -29,6 +29,17 @@ export function migrateWorld(input: unknown): WorldState {
   localized.localMapChanges ??= [];
   localized.nextIds ??= {};
   localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
+  localized.history ??= {
+    engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
+    landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
+  };
+  localized.history.engineVersion = 1;
+  localized.history.generatedYears ??= localized.config.historyYears ?? localized.year ?? 1;
+  localized.history.eras ??= [];
+  localized.history.landmarkEventIds ??= [...localized.events].sort((a: any, b: any) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 32).map((event: any) => event.id);
+  localized.history.fallenRealms ??= [];
+  localized.history.compressedEventCount ??= 0;
+  localized.history.logicWarnings ??= [];
 
   if (previousLocalSize !== localized.config.localMapSize) {
     const ratio = localized.config.localMapSize / Math.max(1, previousLocalSize);

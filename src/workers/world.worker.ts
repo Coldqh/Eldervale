@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import type { SimulationProfile, SimulationProgress, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage } from '../lib/worldWorkerProtocol';
-import { generateWorld } from '../sim/generator';
+import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
@@ -44,8 +44,9 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   activeOperationId = message.id;
   cancelRequestedFor = undefined;
   const startedAt = performance.now();
-  const world = generateWorld(message.config, (phase, completed, total, detail) => {
-    post({ id: message.id, type: 'progress', progress: progressMessage('генерация', phase, completed, total, startedAt, { detail }) });
+  const world = generateHistoricalWorld(message.config, (phase, completed, total, detail) => {
+    const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
+    post({ id: message.id, type: 'progress', progress: progressMessage(operation, phase, completed, total, startedAt, { detail }) });
   });
   engine = createSimulationEngine(world);
   const totalMs = performance.now() - startedAt;

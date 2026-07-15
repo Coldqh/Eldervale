@@ -700,3 +700,61 @@ button { border: 0; cursor: pointer; }
   .world-map-zoom strong { min-width: 40px; }
   .world-map-zoom .world-map-center { display: none; }
 }
+
+/* Патчи 014–015: библиотека миров, снимки и исторический движок */
+.settings-panel-wide { width: min(760px, 100%); }
+.world-library-section { margin: 14px 0; padding: 14px; border: 1px solid rgba(214,181,109,.16); border-radius: 14px; background: rgba(255,255,255,.02); }
+.settings-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.settings-section-heading h3 { margin: 3px 0 0; color: var(--gold-pale); font: 500 19px/1.2 Georgia, serif; }
+.world-slot-list { display: grid; gap: 8px; }
+.world-slot-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: rgba(8,13,10,.7); }
+.world-slot-card.active { border-color: rgba(214,181,109,.38); background: rgba(214,181,109,.055); box-shadow: inset 3px 0 0 rgba(214,181,109,.7); }
+.world-slot-main { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 9px; border: 0; background: transparent; color: inherit; text-align: left; }
+.world-slot-main:disabled { cursor: default; opacity: 1; }
+.world-slot-main span { min-width: 0; display: grid; gap: 2px; }
+.world-slot-main strong { overflow: hidden; color: #d5d2bb; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.world-slot-main small { overflow: hidden; color: #687268; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
+.world-slot-main em { color: #8e958b; font-style: normal; font-size: 8px; white-space: nowrap; }
+.world-slot-actions { display: flex; align-items: center; gap: 4px; }
+.world-slot-actions button { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.03); color: #9ba096; }
+.world-slot-actions button:hover { border-color: var(--line-strong); color: var(--gold-pale); }
+.snapshot-list { margin-top: 12px; display: grid; gap: 6px; }
+.snapshot-list > span { margin-bottom: 2px; }
+.snapshot-list button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.025); color: #b8b9a8; text-align: left; }
+.snapshot-list button small { color: #747d74; font-size: 8px; }
+.storage-report { border-color: rgba(96,136,169,.24); background: rgba(75,112,145,.055); }
+.history-era-strip { width: min(1440px, 100%); margin: 0 auto 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.history-era-card { padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.025); }
+.history-era-card.active { border-color: rgba(214,181,109,.35); background: rgba(214,181,109,.055); }
+.history-era-card span, .history-era-card small { display: block; color: #707970; font-size: 8px; }
+.history-era-card strong { display: block; margin: 4px 0; color: #c7c5ae; font-size: 10px; }
+
+@media (max-width: 760px) {
+  .settings-panel-wide { width: 100%; }
+  .settings-section-heading { align-items: flex-start; }
+  .world-slot-card { grid-template-columns: 1fr; }
+  .world-slot-actions { justify-content: flex-end; }
+  .world-slot-main { padding: 5px; }
+  .history-era-strip { display: flex; overflow-x: auto; padding-bottom: 4px; }
+  .history-era-card { min-width: 190px; }
+}
+.history-overview-window { margin-bottom: 14px; padding: 16px; }
+.history-overview-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.history-overview-head strong { display: block; margin-top: 4px; color: var(--gold-pale); font: 500 20px/1.2 Georgia, serif; }
+.history-overview-head small { color: #707970; font-size: 8px; text-align: right; }
+.history-overview-eras { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px,1fr)); gap: 8px; }
+.history-overview-eras > div { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.022); }
+.history-overview-eras span, .history-overview-eras small { display: block; color: #6f786f; font-size: 8px; line-height: 1.4; }
+.history-overview-eras strong { display: block; margin: 4px 0; color: #bfc0aa; font-size: 9px; }
+.landmark-event-grid { margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 7px; }
+.landmark-event-grid button { display: grid; grid-template-columns: 40px minmax(0,1fr); gap: 8px; padding: 9px; border: 1px solid rgba(214,181,109,.12); border-radius: 9px; background: rgba(214,181,109,.025); color: inherit; text-align: left; }
+.landmark-event-grid time { color: #a39167; font-size: 9px; }
+.landmark-event-grid span { min-width: 0; }
+.landmark-event-grid strong, .landmark-event-grid small { display: block; }
+.landmark-event-grid strong { color: #c4c2ac; font-size: 9px; }
+.landmark-event-grid small { margin-top: 3px; color: #6f786f; font-size: 8px; line-height: 1.35; }
+@media (max-width:760px) {
+  .history-overview-head { display: block; }
+  .history-overview-head small { display: block; margin-top: 6px; text-align: left; }
+  .history-overview-eras, .landmark-event-grid { grid-template-columns: 1fr; }
+}

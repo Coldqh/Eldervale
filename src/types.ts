@@ -24,7 +24,78 @@ export interface WorldConfig {
   huntingPressure: number;
 }
 
-export type SimulationOperation = 'загрузка' | 'генерация' | 'симуляция' | 'сохранение';
+export type SimulationOperation = 'загрузка' | 'генерация' | 'история' | 'симуляция' | 'сохранение';
+
+
+export type HistoricalEraKind = 'древняя эпоха' | 'эпоха становления' | 'династическая эпоха' | 'современная эпоха';
+
+export interface FallenRealm {
+  id: number;
+  name: string;
+  species: Species;
+  foundedYear: number;
+  fallenYear: number;
+  capitalName: string;
+  causeOfFall: string;
+  successorKingdomId?: number;
+  ruinDungeonId?: number;
+}
+
+export interface HistoricalEraSummary {
+  id: number;
+  kind: HistoricalEraKind;
+  name: string;
+  startYear: number;
+  endYear: number;
+  stepYears: number;
+  eventIds: number[];
+  summary: string;
+}
+
+export interface HistoricalState {
+  engineVersion: 1;
+  generatedYears: number;
+  eras: HistoricalEraSummary[];
+  landmarkEventIds: number[];
+  fallenRealms: FallenRealm[];
+  compressedEventCount: number;
+  logicWarnings: string[];
+}
+
+export interface WorldSlotMeta {
+  id: string;
+  name: string;
+  seed: string;
+  createdAt: number;
+  updatedAt: number;
+  year: number;
+  month: number;
+  schemaVersion: number;
+  appVersion: string;
+  sizeBytes: number;
+  snapshotCount: number;
+  lastSnapshotYear?: number;
+}
+
+export interface WorldSnapshotMeta {
+  id: string;
+  slotId: string;
+  year: number;
+  month: number;
+  createdAt: number;
+  reason: 'автоматический' | 'ручной' | 'перед импортом' | 'перед миграцией';
+  sizeBytes: number;
+}
+
+export interface StorageProfile {
+  slotId: string;
+  writtenRecords: number;
+  skippedRecords: number;
+  deletedRecords: number;
+  bytesEstimated: number;
+  snapshotCreated: boolean;
+  totalMs: number;
+}
 
 export interface SimulationProgress {
   operation: SimulationOperation;
@@ -463,7 +534,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 5;
+  version: 6;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -489,6 +560,7 @@ export interface WorldState {
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];
   simulation: SimulationRuntimeState;
+  history: HistoricalState;
   nextIds: Record<string, number>;
 }
 
