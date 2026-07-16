@@ -358,11 +358,23 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   }
   world.employments = world.employments.filter(employment => !deadIds.has(employment.characterId));
 
+  const householdById = new Map(world.households.map(item => [item.id, item]));
+  const buildingById = new Map(world.buildings.map(item => [item.id, item]));
   for (const item of world.items) if (item.ownerCharacterId && deadIds.has(item.ownerCharacterId)) {
     const owner = deadById.get(item.ownerCharacterId);
     item.ownerCharacterId = undefined;
-    item.householdId ??= owner?.householdId && !emptyHouseholdIds.has(owner.householdId) ? owner.householdId : undefined;
-    item.buildingId ??= owner?.homeBuildingId;
+    item.equippedByCharacterId = undefined;
+    const inheritedHouseholdId = owner?.householdId && !emptyHouseholdIds.has(owner.householdId) ? owner.householdId : undefined;
+    const inheritedBuildingId = owner?.homeBuildingId;
+    item.householdId ??= inheritedHouseholdId;
+    item.buildingId ??= inheritedBuildingId;
+    if (item.householdId) {
+      const inventory = householdById.get(item.householdId)?.inventoryItemIds;
+      if (inventory && !inventory.includes(item.id)) inventory.push(item.id);
+    } else if (item.buildingId) {
+      const inventory = buildingById.get(item.buildingId)?.inventoryItemIds;
+      if (inventory && !inventory.includes(item.id)) inventory.push(item.id);
+    }
     item.history.push(`Остался после смерти ${owner?.name ?? 'владельца'}.`);
   }
 

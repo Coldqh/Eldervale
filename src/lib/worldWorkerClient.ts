@@ -18,6 +18,7 @@ let fallbackCancelled = false;
 let fallbackProfile: SimulationProfile | undefined;
 let workerHasWorld = false;
 let lastKnownWorld: WorldState | undefined;
+let pendingFocus: { x?: number; y?: number; level?: number; radius?: number } | undefined;
 
 interface PendingRequest {
   resolve: (result: WorldWorkerResult) => void;
@@ -114,12 +115,18 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     return { world: fallbackEngine.world, profile };
   }
   if (command.action === 'snapshot') return { world: fallbackEngine?.world, profile: fallbackProfile };
+  if (command.action === 'setFocus') {
+    pendingFocus = { x: command.x, y: command.y, level: command.level, radius: command.radius };
+    if (fallbackEngine) fallbackEngine.world.simulation.observerFocus = typeof command.x === 'number' && typeof command.y === 'number' ? { x: command.x, y: command.y, level: command.level ?? 0, radius: command.radius ?? 1 } : undefined;
+    return {};
+  }
   return {};
 }
 
 export async function initializeWorldInBackground(world: WorldState, onProgress?: (progress: SimulationProgress) => void): Promise<SimulationProfile | undefined> {
   lastKnownWorld = world;
   const result = await runWorker({ action: 'initialize', world }, onProgress);
+  if (pendingFocus) await runWorker({ action: 'setFocus', ...pendingFocus });
   return result.profile;
 }
 
@@ -134,6 +141,12 @@ export async function advanceWorldInBackground(months: number, onProgress?: (pro
   const result = await runWorker({ action: 'advance', months }, onProgress);
   if (result.world) lastKnownWorld = result.world;
   return result;
+}
+
+export async function setWorldFocusInBackground(focus?: { x: number; y: number; level?: number; radius?: number }): Promise<void> {
+  pendingFocus = focus ? { x: focus.x, y: focus.y, level: focus.level ?? 0, radius: focus.radius ?? 1 } : {};
+  await runWorker({ action: 'setFocus', ...(pendingFocus ?? {}) });
+  if (lastKnownWorld) lastKnownWorld.simulation.observerFocus = focus ? { x: focus.x, y: focus.y, level: focus.level ?? 0, radius: focus.radius ?? 1 } : undefined;
 }
 
 export async function snapshotWorldInBackground(): Promise<WorldState | undefined> {

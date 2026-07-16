@@ -10,6 +10,7 @@ export function TextureIcon({ kind, subtype, className = '' }: { kind: EntityKin
 
 function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', subtype?: string) {
   if (kind === 'character') return <><circle cx="16" cy="11" r="5" /><path d="M7 28c1-8 5-11 9-11s8 3 9 11" /><path className="texture-cut" d="M13 10h1m4 0h1" /></>;
+  if (kind === 'travelingMerchant') return <><circle cx="16" cy="9" r="4"/><path d="M8 27c1-8 4-12 8-12s7 4 8 12"/><path d="M5 18h22v5H5z"/><circle className="texture-cut" cx="10" cy="25" r="2"/><circle className="texture-cut" cx="22" cy="25" r="2"/></>;
   if (kind === 'monster') {
     if (subtype === 'dragon') return <><path d="M4 20 11 8l5 5 5-8 7 15-6-3-6 10-6-10z"/><circle className="texture-cut" cx="20" cy="12" r="1.5" /></>;
     return <><path d="m5 25 3-15 6 4 4-8 4 8 5-4v15l-6-4-5 6-5-6z"/><circle className="texture-cut" cx="12" cy="17" r="1.5"/><circle className="texture-cut" cx="20" cy="17" r="1.5"/></>;

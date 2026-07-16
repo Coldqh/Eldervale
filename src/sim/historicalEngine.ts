@@ -9,6 +9,7 @@ import { personName, placeName } from './names';
 import { RNG } from './rng';
 import { generatePhysicalEconomy } from './materialEconomy';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
+import { initializeLivingEconomy } from './livingEconomy';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 
@@ -78,6 +79,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   });
   onProgress?.('Поля и строительные цепочки', 96, 100, 'размечаем пашни, семенные запасы и реальные стройматериалы');
   initializeAgricultureAndConstruction(world, new RNG(`${config.seed}:земледелие-и-стройка-v1`));
+  onProgress?.('Одежда, инструменты и личные рынки', 97, 100, 'назначаем экипировку, кошельки, продавцов и странствующих торговцев');
+  initializeLivingEconomy(world, new RNG(`${config.seed}:личная-экономика-v1`));
   onProgress?.('Кладбища и архив павших', 98, 100, 'переносим умерших и убитых существ из активной симуляции');
   ensureCemeteries(world, rng);
   compactDeadEntities(world, rng);
@@ -102,7 +105,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 11;
+  world.version = 12;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }
@@ -405,6 +408,7 @@ function createHistoricalFigure(world: WorldState, rng: RNG, place: Settlement, 
     skills: { [title.includes('герой') ? 'hunter' : title.includes('воевода') ? 'soldier' : 'scribe']: rng.int(45, 88) },
     needs: { hunger: 8, thirst: 8, rest: 10, warmth: 10, safety: 15, social: 18, lastUpdatedTick: world.year * 12 + world.month - 1 },
     schedule: { wakeHour: 6, workStartHour: 8, workEndHour: 18, sleepHour: 23, restDay: 1 + world.nextIds.character % 7, currentActivity: title.includes('герой') ? 'путешествует и ищет угрозы' : 'исполняет обязанности' },
+    wallet: rng.int(8, 80), equipment: { material: 'тонкая шерсть и лён', color: title.includes('правитель') ? 'пурпурный' : 'синий', quality: 68, condition: rng.int(55, 92), socialTier: title.includes('правитель') ? 'правитель' : 'знатный', equippedItemIds: {}, compact: true, lastMaintainedTick: world.year * 12 + world.month - 1 },
   };
   world.characters.push(figure);
   return figure;

@@ -10,7 +10,7 @@ const labels: Record<EntityKind, string> = {
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
-  cemetery: 'Кладбище', burial: 'Кладбищенская запись',
+  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
@@ -40,7 +40,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
-    cemetery: world.cemeteries ?? [], burial: world.burials ?? [],
+    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [],
   };
   const direct = map[ref.kind].find(item => item.id === ref.id);
   if (direct) return direct;
@@ -99,6 +99,12 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+  if (ref.kind === 'travelingMerchant') {
+    const character = world.characters.find(item => item.id === entity.characterId);
+    const current = world.settlements.find(item => item.id === entity.currentSettlementId);
+    const next = entity.nextSettlementId ? world.settlements.find(item => item.id === entity.nextSettlementId) : undefined;
+    return <>{row('Торговец', character ? link(character.name, { kind: 'character', id: character.id }, onSelect) : 'неизвестен')}{row('Состояние', entity.status)}{row('Текущая стоянка', current ? link(current.name, { kind: 'settlement', id: current.id }, onSelect) : 'в пути')}{row('Следующая остановка', next ? link(next.name, { kind: 'settlement', id: next.id }, onSelect) : 'не назначена')}{row('Касса', `${Math.round(entity.cash)} крон`)}{row('Товары', links(world, entity.wagonInventoryItemIds.slice(0, 30).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}{row('История', entity.history.join(' '))}</>;
+  }
   if (ref.kind === 'field') {
     const farm = world.buildings.find(item => item.id === entity.farmBuildingId);
     const establishment = entity.establishmentId ? world.establishments.find(item => item.id === entity.establishmentId) : undefined;
@@ -213,6 +219,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Категория', entity.category)}{row('Материал', entity.material)}{row('Количество', `${formatNumber(entity.quantity)} ${entity.unit}`)}
     {row('Вес', `${formatNumber(entity.quantity * entity.weightPerUnit)} ед.`)}{row('Качество', `${entity.quality}%`)}{row('Состояние', `${entity.condition}%`)}{row('Свежесть', `${entity.freshness}%`)}
     {row('Базовая стоимость', `${formatNumber(entity.baseValue * entity.quantity)} крон`)}{row('Создано', `${entity.createdYear} год`)}{row('Источник', entity.source)}
+    {entity.equipmentSlot && row('Слот', entity.equipmentSlot)}{entity.dye && row('Цвет', entity.dye)}{entity.warmth !== undefined && row('Тепло', entity.warmth)}{entity.armor !== undefined && row('Защита', entity.armor)}{entity.damage !== undefined && row('Урон', entity.damage)}{entity.toolType && row('Назначение', entity.toolType)}
     {row('Создатель', entity.craftedByCharacterId ? link(getTitle(world, { kind: 'character', id: entity.craftedByCharacterId }), { kind: 'character', id: entity.craftedByCharacterId }, onSelect) : 'не указан')}
     {row('Владелец', entity.ownerCharacterId ? link(getTitle(world, { kind: 'character', id: entity.ownerCharacterId }), { kind: 'character', id: entity.ownerCharacterId }, onSelect) : entity.householdId ? link(getTitle(world, { kind: 'household', id: entity.householdId }), { kind: 'household', id: entity.householdId }, onSelect) : entity.establishmentId ? link(getTitle(world, { kind: 'establishment', id: entity.establishmentId }), { kind: 'establishment', id: entity.establishmentId }, onSelect) : 'общий запас')}
     {row('Место', entity.buildingId ? link(getTitle(world, { kind: 'building', id: entity.buildingId }), { kind: 'building', id: entity.buildingId }, onSelect) : link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
@@ -270,7 +277,10 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Известность', entity.renown)}{row('Здоровье', `${entity.health}%`)}{row('Богатство', `${Math.round(entity.wealth)} крон`)}{row('Верность', `${entity.loyalty}%`)}
       {row('Цель', entity.ambition)}{row('Титулы', entity.titles.join(', ') || 'нет')}{row('Травмы', entity.injuries.join(', ') || 'нет')}
       {entity.schedule && row('Распорядок', `подъём ${entity.schedule.wakeHour}:00, работа ${entity.schedule.workStartHour}:00–${entity.schedule.workEndHour}:00, сон ${entity.schedule.sleepHour}:00, выходной день ${entity.schedule.restDay}; сейчас ${entity.schedule.currentActivity}`)}
-      {entity.needs && row('Потребности', `голод ${entity.needs.hunger}%, жажда ${entity.needs.thirst}%, усталость ${entity.needs.rest}%, холод ${entity.needs.warmth}%, безопасность ${entity.needs.safety}%, общение ${entity.needs.social}%`)}
+      {entity.needs && row('Потребности', `голод ${Math.round(entity.needs.hunger)}%, жажда ${Math.round(entity.needs.thirst)}%, усталость ${Math.round(entity.needs.rest)}%, холод ${Math.round(entity.needs.warmth)}%, безопасность ${Math.round(entity.needs.safety)}%, общение ${Math.round(entity.needs.social)}%`)}
+      {row('Личный кошелёк', `${Math.round((entity.wallet ?? 0) * 10) / 10} крон`)}
+      {entity.equipment && row('Одежда', `${entity.equipment.socialTier} · ${entity.equipment.material} · ${entity.equipment.color} · состояние ${Math.round(entity.equipment.condition)}%`)}
+      {entity.equipment && row('Экипировка', links(world, Object.values(entity.equipment.equippedItemIds ?? {}).filter((id): id is number => typeof id === 'number').map(id => ({ kind: 'item' as const, id })), onSelect))}
       {entity.skills && row('Навыки', Object.entries(entity.skills).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).slice(0, 10).map(([name, value]) => `${professionLabel(name)} ${value}`).join(', ') || 'нет развитых навыков')}
       {row('Личные вещи', links(world, (entity.inventoryItemIds ?? []).slice(0, 20).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}
       {row('Отношения', relationships.length ? <span className="relationship-stack">{relationships.map(relation => relationshipText(world, entity.id, relation, onSelect))}</span> : 'нет заметных связей')}

@@ -1,18 +1,61 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
 export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 
-export type ItemCategory = 'еда' | 'напиток' | 'семена' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'оружие' | 'мебель' | 'лекарство' | 'предмет быта';
-export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'public';
-export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'кирпичная мастерская' | 'каменоломня' | 'рынок' | 'лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
+export type ItemCategory = 'еда' | 'напиток' | 'семена' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'броня' | 'оружие' | 'краситель' | 'мебель' | 'лекарство' | 'предмет быта';
+export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'tailor' | 'dyehouse' | 'tannery' | 'cobbler' | 'armorer' | 'toolmaker' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'public';
+export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'портная мастерская' | 'красильня' | 'кожевенная мастерская' | 'сапожная мастерская' | 'бронная мастерская' | 'инструментальная мастерская' | 'кирпичная мастерская' | 'каменоломня' | 'рынок' | 'лавка' | 'продовольственная лавка' | 'одежная лавка' | 'оружейная лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
 export type HouseholdStatus = 'нищие' | 'бедные' | 'обычные' | 'зажиточные' | 'богатые' | 'знатные' | 'служебное общежитие';
 export type RecipeCategory = 'добыча' | 'переработка' | 'готовка' | 'ремесло';
+
+
+export type EquipmentSlot = 'head' | 'body' | 'legs' | 'feet' | 'hands' | 'cloak' | 'mainHand' | 'offHand' | 'workTool';
+export type SocialTier = 'нищий' | 'бедный' | 'обычный' | 'зажиточный' | 'богатый' | 'знатный' | 'правитель';
+
+export interface EquipmentProfile {
+  material: string;
+  color: string;
+  quality: number;
+  condition: number;
+  socialTier: SocialTier;
+  equippedItemIds: Partial<Record<EquipmentSlot, number>>;
+  compact: boolean;
+  lastMaintainedTick: number;
+}
+
+export interface TravelingMerchant {
+  id: number;
+  characterId: number;
+  routeSettlementIds: number[];
+  currentSettlementId: number;
+  nextSettlementId?: number;
+  arrivalTick: number;
+  wagonInventoryItemIds: number[];
+  cash: number;
+  status: 'торгует' | 'в пути' | 'отдыхает' | 'ограблен';
+  history: string[];
+}
+
+export interface MarketTransaction {
+  id: number;
+  tick: number;
+  settlementId: number;
+  buyerCharacterId?: number;
+  sellerCharacterId?: number;
+  establishmentId?: number;
+  travelingMerchantId?: number;
+  templateId: string;
+  quantity: number;
+  totalPrice: number;
+  purpose: string;
+}
+
 
 export interface NeedState {
   hunger: number;
@@ -181,6 +224,15 @@ export interface WorldItem {
   createdYear: number;
   source: string;
   history: string[];
+  equipmentSlot?: EquipmentSlot;
+  dye?: string;
+  warmth?: number;
+  armor?: number;
+  damage?: number;
+  toolType?: string;
+  requiredProfession?: string;
+  maxCondition?: number;
+  equippedByCharacterId?: number;
 }
 
 export interface ProductionRecipeInput { templateId: string; quantity: number; }
@@ -382,6 +434,8 @@ export interface ScheduledAction {
 
 export interface SimulationRuntimeState {
   schedulerVersion: 1;
+  observerFocus?: { x: number; y: number; level: number; radius: number };
+  livingEconomyVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -508,6 +562,8 @@ export interface Character {
   skills: Record<string, number>;
   needs: NeedState;
   schedule: CharacterSchedule;
+  wallet: number;
+  equipment: EquipmentProfile;
 }
 
 export interface Relationship {
@@ -842,7 +898,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse';
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse' | 'merchant';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -874,7 +930,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 11;
+  version: 12;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -908,6 +964,8 @@ export interface WorldState {
   productionRecipes: ProductionRecipe[];
   employments: EmploymentContract[];
   shipments: TradeShipment[];
+  travelingMerchants: TravelingMerchant[];
+  marketTransactions: MarketTransaction[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];

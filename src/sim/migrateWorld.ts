@@ -11,16 +11,18 @@ import { rebuildTerritoryHistoryFromCurrent } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { ensureAllBuildingFootprints } from './spatial';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
+import { initializeLivingEconomy } from './livingEconomy';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
+  const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-11`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-12`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 11;
+  localized.version = 12;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -44,9 +46,12 @@ export function migrateWorld(input: unknown): WorldState {
   localized.productionRecipes ??= [];
   localized.employments ??= [];
   localized.shipments ??= [];
+  localized.travelingMerchants ??= [];
+  localized.marketTransactions ??= [];
   localized.territoryHistory ??= [];
   localized.nextIds ??= {};
   localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
+  if (sourceVersion < 12) localized.simulation.livingEconomyVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -109,6 +114,7 @@ export function migrateWorld(input: unknown): WorldState {
     character.skills ??= { [character.profession]: Math.max(1, Math.min(100, rng.int(8, 45) + Math.floor((character.age ?? 0) / 3))) };
     character.needs ??= { hunger: 10, thirst: 8, rest: 10, warmth: 10, safety: 12, social: 16, lastUpdatedTick: (localized.year ?? 1) * 12 + (localized.month ?? 1) - 1 };
     character.schedule ??= { wakeHour: 6, workStartHour: character.age >= 14 ? 8 : 0, workEndHour: character.age >= 14 ? 17 : 0, sleepHour: 22, restDay: 1 + character.id % 7, currentActivity: character.age >= 14 ? 'занят обычной работой' : 'живёт в семье и учится' };
+    character.wallet ??= Math.max(0, Math.round(character.wealth * .18 * 100) / 100);
   }
   for (const army of localized.armies) {
     army.supplies ??= 70;
@@ -159,6 +165,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.productionRecipe = Math.max(0, ...localized.productionRecipes.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.employment = Math.max(0, ...localized.employments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.shipment = Math.max(0, ...localized.shipments.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.travelingMerchant = Math.max(0, ...localized.travelingMerchants.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.marketTransaction = Math.max(0, ...localized.marketTransactions.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
@@ -166,6 +174,7 @@ export function migrateWorld(input: unknown): WorldState {
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
   ensureAllBuildingFootprints(localized as WorldState);
   initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));
+  initializeLivingEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-личная-экономика-v1`));
   ensureCemeteries(localized as WorldState, rng);
   compactDeadEntities(localized as WorldState, rng);
   synchronizeMortalityIds(localized as WorldState);

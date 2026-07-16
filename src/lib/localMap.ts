@@ -504,8 +504,10 @@ function buildSurfaceMarkers(
     markers.push({ id: `cemetery-${cemetery.id}`, x: cemetery.localX, y: cemetery.localY, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: buried, detail: `${buried} записей о погребении · вместимость ${cemetery.capacity}` });
   }
 
+  const presentMerchants = settlement ? (world.travelingMerchants ?? []).filter(merchant => merchant.currentSettlementId === settlement.id && merchant.status !== 'в пути') : [];
+  const merchantCharacterIds = new Set(presentMerchants.map(merchant => merchant.characterId));
   const liveCharacters = settlement ? world.characters.filter(character => {
-    if (!character.alive || character.settlementId !== settlement.id) return false;
+    if (!character.alive || character.settlementId !== settlement.id || merchantCharacterIds.has(character.id)) return false;
     const anchor = characterAnchorBuilding(world, character);
     if (anchor) return anchor.globalX === tile.x && anchor.globalY === tile.y;
     const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения' }];
@@ -532,6 +534,18 @@ function buildSurfaceMarkers(
       id: `people-${key}`, x: group.point.x, y: group.point.y, kind: group.refs.length > 1 ? 'group' : 'person',
       label: group.refs.length > 1 ? `${group.refs.length} жителей` : group.names[0]!, refs: group.refs, count: group.refs.length,
       detail: group.refs.length > 1 ? group.names.slice(0, 4).join(', ') : group.professions[0],
+    });
+  }
+
+  for (const merchant of presentMerchants) {
+    const character = world.characters.find(item => item.id === merchant.characterId);
+    if (!character?.alive) continue;
+    const point = characterPosition(character.id, walkable, `${world.config.seed}:странствующий-торговец`, tile.x, tile.y);
+    const stock = merchant.wagonInventoryItemIds.reduce((sum, id) => sum + (world.items.find(item => item.id === id)?.quantity ?? 0), 0);
+    markers.push({
+      id: `merchant-${merchant.id}`, x: point.x, y: point.y, kind: 'merchant', label: character.name,
+      refs: [{ kind: 'character', id: character.id }, { kind: 'travelingMerchant', id: merchant.id }],
+      detail: `странствующий продавец · товаров ${Math.round(stock)} · касса ${Math.round(merchant.cash)} крон`,
     });
   }
 

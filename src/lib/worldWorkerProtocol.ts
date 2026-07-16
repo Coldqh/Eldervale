@@ -5,6 +5,7 @@ export type WorldWorkerCommand =
   | { id: number; action: 'generate'; config: WorldConfig }
   | { id: number; action: 'advance'; months: number }
   | { id: number; action: 'snapshot' }
+  | { id: number; action: 'setFocus'; x?: number; y?: number; level?: number; radius?: number }
   | { id: number; action: 'cancel'; targetId: number };
 
 export type WorldWorkerMessage =

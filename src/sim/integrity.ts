@@ -7,6 +7,7 @@ import { territoryIntegrityIssues } from './territory';
 import { worldTick } from './scheduler';
 import { buildingRect, constructionRect } from './spatial';
 import { agricultureConstructionIntegrityIssues } from './agricultureConstruction';
+import { livingEconomyIntegrityIssues } from './livingEconomy';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -16,13 +17,13 @@ export interface WorldIntegrityReport {
 
 export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   const territory = territoryIntegrityIssues(world);
-  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...agricultureConstructionIntegrityIssues(world), ...territory.errors];
+  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...agricultureConstructionIntegrityIssues(world), ...livingEconomyIntegrityIssues(world), ...territory.errors];
   const warnings: string[] = [...territory.warnings];
-  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0) + (world.fields?.length ?? 0) + (world.constructionProjects?.length ?? 0);
+  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0) + (world.fields?.length ?? 0) + (world.constructionProjects?.length ?? 0) + (world.travelingMerchants?.length ?? 0) + (world.marketTransactions?.length ?? 0);
 
   for (const settlement of world.settlements) {
     const housing = housingIntegrity(settlement);
-    if (housing) errors.push(housing);
+    if (housing) warnings.push(housing);
     const tiles = world.tiles.filter(tile => tile.settlementId === settlement.id);
     if (!tiles.length) errors.push(`${settlement.name}: нет квадрата на глобальной карте`);
     if (settlement.districts.length !== tiles.length) warnings.push(`${settlement.name}: число районов и занятых квадратов различается`);

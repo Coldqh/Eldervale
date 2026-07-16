@@ -29,16 +29,29 @@ const CROPS: Record<CropKind, CropDefinition> = {
   овощи: { crop: 'овощи', seedTemplateId: 'vegetable_seed', outputTemplateId: 'vegetables', sowMonths: [3, 4, 5], harvestMonths: [7, 8, 9], baseYieldPerCell: .55, moistureTarget: 68, laborPerCell: 1.55 },
 };
 
+function equippedToolFactor(world: WorldState, workers: Array<WorldState['characters'][number] | undefined>, acceptedToolTypes: readonly string[]): number {
+  const validWorkers = workers.filter((worker): worker is WorldState['characters'][number] => Boolean(worker?.alive));
+  if (!validWorkers.length) return .18;
+  const factors = validWorkers.map(worker => {
+    const itemId = worker.equipment?.equippedItemIds?.workTool;
+    const item = itemId ? world.items.find(candidate => candidate.id === itemId) : undefined;
+    if (item && item.condition > 0 && item.toolType && acceptedToolTypes.includes(item.toolType)) return Math.max(.35, Math.min(1.2, .5 + item.condition / 150 + item.quality / 600));
+    if (worker.equipment?.compact && worker.equipment.condition > 15) return Math.max(.45, Math.min(.9, .45 + worker.equipment.condition / 180));
+    return .16;
+  });
+  return factors.reduce((sum, value) => sum + value, 0) / factors.length;
+}
+
 const ESTABLISHMENT_FOR_BUILDING: Partial<Record<BuildingType, EstablishmentType>> = {
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
-  blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня',
+  blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня',
   market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', warehouse: 'склад', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
 const PROFESSION_FOR_ESTABLISHMENT: Record<EstablishmentType, string[]> = {
   'таверна': ['brewer', 'merchant'], 'постоялый двор': ['merchant', 'brewer'], 'пекарня': ['miller', 'brewer'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
-  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'],
-  'рынок': ['merchant'], 'лавка': ['merchant'], 'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'],
+  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'портная мастерская': ['tailor', 'weaver'], 'красильня': ['dyer', 'weaver'], 'кожевенная мастерская': ['tanner'], 'сапожная мастерская': ['cobbler', 'tanner'], 'бронная мастерская': ['armorer', 'blacksmith'], 'инструментальная мастерская': ['toolmaker', 'blacksmith'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'],
+  'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'], 'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'],
   'склад': ['merchant'], 'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
 };
 
@@ -110,7 +123,8 @@ export function advanceAgriculture(world: WorldState, rng: RNG, indexes: WorldIn
     const establishment = field.establishmentId ? indexes.establishmentById.get(field.establishmentId) : undefined;
     const workers = establishment?.workerIds.map(id => indexes.characterById.get(id)).filter(character => character?.alive) ?? [];
     const farmerSkill = workers.length ? workers.reduce((sum, character) => sum + (character?.skills.farmer ?? 8), 0) / workers.length : 5;
-    const availableLabor = Math.max(2, workers.length * (9 + farmerSkill / 8));
+    const toolFactor = equippedToolFactor(world, workers, ['земледелие']);
+    const availableLabor = Math.max(.5, workers.length * (9 + farmerSkill / 8) * toolFactor);
     const weatherMoisture = (tile?.moisture ?? 50) + rng.int(-14, 14);
     field.moisture = clamp(field.moisture * .65 + weatherMoisture * .35, 0, 100);
 
@@ -248,7 +262,8 @@ export function advanceConstruction(world: WorldState, rng: RNG, indexes: WorldI
     const materialRatio = projectMaterialRatio(project);
     const workers = project.builderIds.map(id => indexes.characterById.get(id)).filter(character => character?.alive);
     const skill = workers.length ? workers.reduce((sum, worker) => sum + Math.max(worker?.skills.carpenter ?? 0, worker?.skills.miner ?? 0, 8), 0) / workers.length : 4;
-    const laborThisMonth = materialRatio < .12 ? 0 : Math.max(1, workers.length * (5 + skill / 9));
+    const toolFactor = equippedToolFactor(world, workers, ['плотницкое дело', 'добыча', 'кузнечное дело']);
+    const laborThisMonth = materialRatio < .12 ? 0 : Math.max(.25, workers.length * (5 + skill / 9) * toolFactor);
     project.laborDone = Math.min(project.laborRequired, project.laborDone + laborThisMonth);
     if (materialRatio >= .995 && project.laborDone >= project.laborRequired) completeConstruction(world, project, settlement, rng, indexes);
     else if (world.year - project.startedYear >= 12 && materialRatio < .35) {

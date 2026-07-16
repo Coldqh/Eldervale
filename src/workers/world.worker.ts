@@ -132,6 +132,10 @@ scope.onmessage = event => {
       if (message.action === 'initialize') await initialize(message);
       else if (message.action === 'generate') await generate(message);
       else if (message.action === 'advance') await advance(message);
+      else if (message.action === 'setFocus') {
+        if (engine) engine.world.simulation.observerFocus = typeof message.x === 'number' && typeof message.y === 'number' ? { x: message.x, y: message.y, level: message.level ?? 0, radius: message.radius ?? 1 } : undefined;
+        post({ id: message.id, type: 'complete' });
+      }
       else if (message.action === 'snapshot') {
         if (!engine) throw new Error('Мир не загружен');
         post({ id: message.id, type: 'complete', world: engine.world, profile: lastProfile });

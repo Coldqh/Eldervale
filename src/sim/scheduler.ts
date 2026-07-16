@@ -27,6 +27,7 @@ export function createSimulationRuntime(world: Pick<WorldState, 'year' | 'month'
     activeRegionKeys: [],
     sleepingRegionCount: 0,
     queuedActions: [],
+    observerFocus: undefined,
   };
 }
 
@@ -37,6 +38,7 @@ export function ensureSimulationRuntime(world: WorldState): void {
   world.simulation.activeRegionKeys ??= [];
   world.simulation.sleepingRegionCount ??= 0;
   world.simulation.queuedActions ??= [];
+  world.simulation.observerFocus ??= undefined;
 }
 
 function actionInterval(world: WorldState, action: ScheduledAction): number {
@@ -93,6 +95,9 @@ function collectActiveRegions(world: WorldState, indexes: WorldIndexes): { regio
     settlements.add(settlement.id);
     for (const district of settlement.districts) activate(district.x, district.y, 1);
   };
+
+  const focus = world.simulation.observerFocus;
+  if (focus) activate(focus.x, focus.y, Math.max(1, focus.radius));
 
   for (const settlement of world.settlements) {
     if (settlement.shortages.length || settlement.damaged >= 20 || settlement.unrest >= 35 || settlement.population > settlement.residentialCapacity * .96) activateSettlement(settlement);

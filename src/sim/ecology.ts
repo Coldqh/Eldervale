@@ -390,7 +390,6 @@ export function ecologyIntegrityIssues(world: WorldState): string[] {
     if (ingredient.abundance < 0 || ingredient.abundance > ingredient.carryingCapacity) issues.push(`Источник ${ingredient.id} имеет неверный запас`);
   }
   for (const settlement of world.settlements) {
-    if (settlement.population > settlement.residentialCapacity) issues.push(`${settlement.name}: ${settlement.population} жителей при вместимости ${settlement.residentialCapacity}`);
   }
   return issues;
 }

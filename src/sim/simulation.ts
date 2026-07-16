@@ -3,8 +3,9 @@ import { RNG } from './rng';
 import { personName, placeName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
-import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity } from './materialEconomy';
+import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, pruneEmptyMaterialItems } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
+import { advanceLivingEconomy, detailedPopulationContext } from './livingEconomy';
 import type { WorldIndexes } from './indexes';
 import {
   addResidentToIndexes, buildWorldIndexes, changeProfessionInIndexes, indexRelationship,
@@ -209,6 +210,7 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
         homeBuildingId: parentA.homeBuildingId ?? parentB.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
         needs: { hunger: 8, thirst: 8, rest: 8, warmth: 8, safety: 8, social: 12, lastUpdatedTick: world.year * 12 + world.month - 1 },
         schedule: { wakeHour: 7, workStartHour: 0, workEndHour: 0, sleepHour: 21, restDay: 1 + (world.nextIds.character % 7), currentActivity: 'живёт в семье и учится' },
+        wallet: 0, equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 28, condition: 72, socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: world.year * 12 + world.month - 1 },
       };
       parentA.childIds.push(child.id);
       parentB.childIds.push(child.id);
@@ -768,13 +770,17 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   if (world.month > 12) { world.month = 1; world.year += 1; }
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
   const schedule = prepareMonthSchedule(world, indexes);
+  const detailed = detailedPopulationContext(world, indexes);
 
   onPhase?.('Поля, посевы и уход за урожаем');
   advanceAgriculture(world, rng, indexes, schedule.economySettlementIds);
   onPhase?.('Домохозяйства, заведения и физическая экономика');
-  advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
+  advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds, detailed.householdIds);
+  onPhase?.('Личная экипировка, работа, покупки и местные потребности');
+  advanceLivingEconomy(world, rng, indexes, detailed);
   onPhase?.('Стройплощадки, материалы и работа строителей');
   advanceConstruction(world, rng, indexes, schedule.economySettlementIds);
+  pruneEmptyMaterialItems(world);
   onPhase?.('Поселения и торговые пути');
   advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
 

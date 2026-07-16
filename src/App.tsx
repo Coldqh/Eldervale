@@ -11,7 +11,7 @@ import {
   createWorldSlot, createWorldSnapshot, deleteWorldSlot, duplicateWorldSlot, getActiveWorldSlotId, listWorldSlots,
   listWorldSnapshots, loadWorld, loadWorldSlot, renameWorldSlot, restoreWorldSnapshot, saveWorld,
 } from './lib/worldStorage';
-import { advanceWorldInBackground, cancelWorldOperation, generateWorldInBackground, initializeWorldInBackground } from './lib/worldWorkerClient';
+import { advanceWorldInBackground, cancelWorldOperation, generateWorldInBackground, initializeWorldInBackground, setWorldFocusInBackground } from './lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from './lib/appUpdate';
 import { migrateWorld } from './sim/migrateWorld';
 import { APP_VERSION } from './version';
@@ -29,6 +29,10 @@ export default function App() {
   const [layer, setLayer] = useState<MapLayer>('terrain');
   const [view, setView] = useState<View>('map');
   const [localPosition, setLocalPosition] = useState<{ x: number; y: number; level: number }>();
+
+  useEffect(() => {
+    void setWorldFocusInBackground(view === 'local' && localPosition ? { x: localPosition.x, y: localPosition.y, level: localPosition.level, radius: 1 } : undefined);
+  }, [view, localPosition?.x, localPosition?.y, localPosition?.level]);
   const [simulating, setSimulating] = useState(false);
   const [loadingText, setLoadingText] = useState('Открываем сохранённый мир');
   const [progress, setProgress] = useState<SimulationProgress>();

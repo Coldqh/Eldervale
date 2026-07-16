@@ -1,6 +1,6 @@
 import type {
   Building, BuildingType, Character, EmploymentContract, Establishment, EstablishmentType, Household, HouseholdStatus,
-  ItemCategory, NeedState, ProductionRecipe, Settlement, SettlementEconomy, TradeShipment,
+  EquipmentSlot, ItemCategory, NeedState, ProductionRecipe, Settlement, SettlementEconomy, TradeShipment,
   WorldItem, WorldState,
 } from '../types';
 import type { WorldIndexes } from './indexes';
@@ -18,6 +18,14 @@ interface ItemTemplate {
   weight: number;
   perishability: number;
   value: number;
+  equipmentSlot?: EquipmentSlot;
+  dye?: string;
+  warmth?: number;
+  armor?: number;
+  damage?: number;
+  toolType?: string;
+  requiredProfession?: string;
+  maxCondition?: number;
 }
 
 const ITEM_TEMPLATES: ItemTemplate[] = [
@@ -66,9 +74,64 @@ const ITEM_TEMPLATES: ItemTemplate[] = [
   { id: 'bricks', name: 'обожжённый кирпич', category: 'сырьё', material: 'керамика', unit: 'партия', weight: 35, perishability: 0, value: 16 },
   { id: 'lime', name: 'строительная известь', category: 'сырьё', material: 'известь', unit: 'мешок', weight: 20, perishability: 0, value: 12 },
   { id: 'nails', name: 'железные гвозди', category: 'сырьё', material: 'железо', unit: 'короб', weight: 4, perishability: 0, value: 15 },
-  { id: 'rope', name: 'льняная верёвка', category: 'инструмент', material: 'лён', unit: 'моток', weight: 3, perishability: 0, value: 14 },
+  { id: 'rope', name: 'льняная верёвка', category: 'инструмент', material: 'лён', unit: 'моток', weight: 3, perishability: 0, value: 14, toolType: 'верёвка', maxCondition: 90 },
+  { id: 'flax_fiber', name: 'льняное волокно', category: 'сырьё', material: 'лён', unit: 'тюк', weight: 5, perishability: 0, value: 11 },
+  { id: 'linen_thread', name: 'льняная нить', category: 'сырьё', material: 'лён', unit: 'моток', weight: 1.5, perishability: 0, value: 15 },
+  { id: 'linen_cloth', name: 'льняная ткань', category: 'сырьё', material: 'лён', unit: 'рулон', weight: 3, perishability: 0, value: 23 },
+  { id: 'wool_yarn', name: 'шерстяная пряжа', category: 'сырьё', material: 'шерсть', unit: 'моток', weight: 2, perishability: 0, value: 14 },
+  { id: 'wool_cloth', name: 'шерстяная ткань', category: 'сырьё', material: 'шерсть', unit: 'рулон', weight: 4, perishability: 0, value: 28 },
+  { id: 'raw_hide', name: 'сырая шкура', category: 'сырьё', material: 'шкура', unit: 'шкура', weight: 6, perishability: 2, value: 10 },
+  { id: 'leather', name: 'дублёная кожа', category: 'сырьё', material: 'кожа', unit: 'лист', weight: 4, perishability: 0, value: 22 },
+  { id: 'dye_blue', name: 'синий краситель', category: 'краситель', material: 'вайда', unit: 'мешочек', weight: .3, perishability: 24, value: 18, dye: 'синий' },
+  { id: 'dye_red', name: 'красный краситель', category: 'краситель', material: 'марена', unit: 'мешочек', weight: .3, perishability: 24, value: 21, dye: 'красный' },
+  { id: 'dye_yellow', name: 'жёлтый краситель', category: 'краситель', material: 'резеда', unit: 'мешочек', weight: .3, perishability: 24, value: 14, dye: 'жёлтый' },
+  { id: 'dye_brown', name: 'коричневый краситель', category: 'краситель', material: 'кора и орех', unit: 'мешочек', weight: .4, perishability: 30, value: 9, dye: 'коричневый' },
+  { id: 'dye_purple', name: 'пурпурный краситель', category: 'краситель', material: 'редкий пигмент', unit: 'склянка', weight: .2, perishability: 36, value: 90, dye: 'пурпурный' },
+  { id: 'linen_hood', name: 'льняной капюшон', category: 'одежда', material: 'лён', unit: 'штука', weight: .3, perishability: 0, value: 11, equipmentSlot: 'head', warmth: 5, armor: 0, maxCondition: 70 },
+  { id: 'linen_shirt', name: 'льняная рубаха', category: 'одежда', material: 'лён', unit: 'штука', weight: .7, perishability: 0, value: 18, equipmentSlot: 'body', warmth: 7, armor: 0, maxCondition: 75 },
+  { id: 'wool_tunic', name: 'шерстяная туника', category: 'одежда', material: 'шерсть', unit: 'штука', weight: 1.1, perishability: 0, value: 30, equipmentSlot: 'body', warmth: 18, armor: 1, maxCondition: 85 },
+  { id: 'wool_trousers', name: 'шерстяные штаны', category: 'одежда', material: 'шерсть', unit: 'штука', weight: .8, perishability: 0, value: 22, equipmentSlot: 'legs', warmth: 12, armor: 0, maxCondition: 80 },
+  { id: 'leather_shoes', name: 'кожаные башмаки', category: 'одежда', material: 'кожа', unit: 'пара', weight: .9, perishability: 0, value: 27, equipmentSlot: 'feet', warmth: 7, armor: 1, maxCondition: 90 },
+  { id: 'leather_gloves', name: 'кожаные перчатки', category: 'одежда', material: 'кожа', unit: 'пара', weight: .4, perishability: 0, value: 19, equipmentSlot: 'hands', warmth: 6, armor: 1, maxCondition: 85 },
+  { id: 'wool_cloak', name: 'шерстяной плащ', category: 'одежда', material: 'шерсть', unit: 'штука', weight: 1.5, perishability: 0, value: 38, equipmentSlot: 'cloak', warmth: 22, armor: 1, maxCondition: 90 },
+  { id: 'royal_cloak', name: 'пурпурный придворный плащ', category: 'одежда', material: 'тонкая шерсть', unit: 'штука', weight: 1.2, perishability: 0, value: 180, equipmentSlot: 'cloak', dye: 'пурпурный', warmth: 20, armor: 1, maxCondition: 100 },
+  { id: 'padded_cap', name: 'стёганая шапка', category: 'броня', material: 'лён и шерсть', unit: 'штука', weight: .8, perishability: 0, value: 24, equipmentSlot: 'head', warmth: 10, armor: 3, maxCondition: 90 },
+  { id: 'gambeson', name: 'гамбезон', category: 'броня', material: 'стёганый лён', unit: 'штука', weight: 5, perishability: 0, value: 70, equipmentSlot: 'body', warmth: 18, armor: 7, maxCondition: 100 },
+  { id: 'leather_armor', name: 'кожаный доспех', category: 'броня', material: 'кожа', unit: 'штука', weight: 6, perishability: 0, value: 95, equipmentSlot: 'body', warmth: 12, armor: 10, maxCondition: 110 },
+  { id: 'chainmail', name: 'кольчуга', category: 'броня', material: 'железо', unit: 'штука', weight: 11, perishability: 0, value: 230, equipmentSlot: 'body', warmth: 4, armor: 18, maxCondition: 125 },
+  { id: 'iron_helmet', name: 'железный шлем', category: 'броня', material: 'железо', unit: 'штука', weight: 2.5, perishability: 0, value: 85, equipmentSlot: 'head', warmth: 2, armor: 14, maxCondition: 120 },
+  { id: 'wooden_shield', name: 'деревянный щит', category: 'броня', material: 'дерево и кожа', unit: 'штука', weight: 4, perishability: 0, value: 38, equipmentSlot: 'offHand', armor: 8, maxCondition: 95 },
+  { id: 'knife', name: 'рабочий нож', category: 'оружие', material: 'железо', unit: 'штука', weight: .5, perishability: 0, value: 18, equipmentSlot: 'mainHand', damage: 4, maxCondition: 85 },
+  { id: 'club', name: 'дубина', category: 'оружие', material: 'дерево', unit: 'штука', weight: 2, perishability: 0, value: 5, equipmentSlot: 'mainHand', damage: 5, maxCondition: 70 },
+  { id: 'spear', name: 'копьё', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 2.5, perishability: 0, value: 34, equipmentSlot: 'mainHand', damage: 8, maxCondition: 95 },
+  { id: 'sword', name: 'железный меч', category: 'оружие', material: 'железо', unit: 'штука', weight: 1.5, perishability: 0, value: 110, equipmentSlot: 'mainHand', damage: 11, maxCondition: 115 },
+  { id: 'longbow', name: 'длинный лук', category: 'оружие', material: 'дерево и сухожилия', unit: 'штука', weight: 1.2, perishability: 0, value: 65, equipmentSlot: 'mainHand', damage: 9, maxCondition: 90 },
+  { id: 'sickle', name: 'серп', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 1, perishability: 0, value: 22, equipmentSlot: 'workTool', toolType: 'земледелие', requiredProfession: 'farmer', maxCondition: 90 },
+  { id: 'hoe', name: 'мотыга', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2.5, perishability: 0, value: 28, equipmentSlot: 'workTool', toolType: 'земледелие', requiredProfession: 'farmer', maxCondition: 95 },
+  { id: 'pickaxe', name: 'кирка', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 4, perishability: 0, value: 46, equipmentSlot: 'workTool', toolType: 'добыча', requiredProfession: 'miner', maxCondition: 105 },
+  { id: 'wood_axe', name: 'лесной топор', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2.8, perishability: 0, value: 42, equipmentSlot: 'workTool', toolType: 'лесозаготовка', requiredProfession: 'carpenter', maxCondition: 100 },
+  { id: 'smith_hammer', name: 'кузнечный молот', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 3.5, perishability: 0, value: 55, equipmentSlot: 'workTool', toolType: 'кузнечное дело', requiredProfession: 'blacksmith', maxCondition: 115 },
+  { id: 'carpenter_saw', name: 'плотницкая пила', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2, perishability: 0, value: 48, equipmentSlot: 'workTool', toolType: 'плотницкое дело', requiredProfession: 'carpenter', maxCondition: 95 },
+  { id: 'fishing_net', name: 'рыболовная сеть', category: 'инструмент', material: 'лён', unit: 'штука', weight: 4, perishability: 0, value: 36, equipmentSlot: 'workTool', toolType: 'рыболовство', requiredProfession: 'fisher', maxCondition: 80 },
+  { id: 'herb_knife', name: 'нож травника', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: .4, perishability: 0, value: 19, equipmentSlot: 'workTool', toolType: 'собирательство', requiredProfession: 'herbalist', maxCondition: 80 },
+  { id: 'mortar', name: 'ступка и пестик', category: 'инструмент', material: 'камень', unit: 'набор', weight: 3, perishability: 0, value: 31, equipmentSlot: 'workTool', toolType: 'алхимия', requiredProfession: 'healer', maxCondition: 110 },
+  { id: 'tailoring_kit', name: 'набор портного', category: 'инструмент', material: 'железо, дерево и нить', unit: 'набор', weight: 1.2, perishability: 0, value: 39, equipmentSlot: 'workTool', toolType: 'портняжное дело', requiredProfession: 'tailor', maxCondition: 90 },
+  { id: 'spindle', name: 'веретено и челнок', category: 'инструмент', material: 'дерево', unit: 'набор', weight: .8, perishability: 0, value: 18, equipmentSlot: 'workTool', toolType: 'ткачество', requiredProfession: 'weaver', maxCondition: 80 },
+  { id: 'tanner_knife', name: 'нож кожевника', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: .8, perishability: 0, value: 27, equipmentSlot: 'workTool', toolType: 'кожевенное дело', requiredProfession: 'tanner', maxCondition: 90 },
+  { id: 'cobbler_tools', name: 'инструменты сапожника', category: 'инструмент', material: 'железо и дерево', unit: 'набор', weight: 1.4, perishability: 0, value: 36, equipmentSlot: 'workTool', toolType: 'сапожное дело', requiredProfession: 'cobbler', maxCondition: 95 },
 ];
 const ITEM_BY_ID = new Map(ITEM_TEMPLATES.map(item => [item.id, item]));
+
+const PRODUCTION_TOOL_IDS: Partial<Record<string, string[]>> = {
+  farmer: ['sickle', 'hoe', 'tools'], miner: ['pickaxe', 'tools'], carpenter: ['wood_axe', 'carpenter_saw', 'tools'], blacksmith: ['smith_hammer', 'tools'],
+  toolmaker: ['smith_hammer', 'tools'], armorer: ['smith_hammer', 'tools'], fisher: ['fishing_net', 'tools'], herbalist: ['herb_knife', 'knife'],
+  healer: ['mortar', 'tools'], tailor: ['tailoring_kit', 'tools'], weaver: ['spindle', 'tools'], dyer: ['tools'], tanner: ['tanner_knife', 'knife', 'tools'],
+  cobbler: ['cobbler_tools', 'tools'], hunter: ['longbow', 'knife'], cook: ['knife', 'tools'], miller: ['tools'], brewer: ['tools'],
+};
+
+function equipmentMetadata(template: ItemTemplate): Partial<WorldItem> {
+  return { equipmentSlot: template.equipmentSlot, dye: template.dye, warmth: template.warmth, armor: template.armor, damage: template.damage, toolType: template.toolType, requiredProfession: template.requiredProfession, maxCondition: template.maxCondition };
+}
 
 interface MaterialRuntime {
   itemById: Map<number, WorldItem>;
@@ -93,8 +156,8 @@ function itemOwnerKey(item: Pick<WorldItem, 'householdId' | 'establishmentId' | 
   return `${item.householdId ?? 0}:${item.establishmentId ?? 0}:${item.buildingId ?? 0}:${item.ownerCharacterId ?? 0}`;
 }
 
-function itemStackKey(item: Pick<WorldItem, 'templateId' | 'householdId' | 'establishmentId' | 'buildingId' | 'ownerCharacterId' | 'quality' | 'freshness'>): string {
-  return `${item.templateId}:${itemOwnerKey(item)}:${Math.round(item.quality / 10)}`;
+function itemStackKey(item: Pick<WorldItem, 'templateId' | 'householdId' | 'establishmentId' | 'buildingId' | 'ownerCharacterId' | 'quality' | 'freshness' | 'dye'>): string {
+  return `${item.templateId}:${itemOwnerKey(item)}:${Math.round(item.quality / 10)}:${item.dye ?? 'без-красителя'}`;
 }
 
 function offerKey(settlementId: number, templateId: string): string { return `${settlementId}:${templateId}`; }
@@ -208,18 +271,42 @@ const recipeSeeds: Omit<ProductionRecipe, 'id'>[] = [
   { name: 'Ковка гвоздей', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'charcoal', quantity: 1 }], outputs: [{ templateId: 'nails', quantity: 4 }], laborHours: 12, minimumSkill: 18, description: 'Кузнец делает крепёж для стройки и кораблей.' },
   { name: 'Витьё верёвки', category: 'ремесло', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax', quantity: 2 }], outputs: [{ templateId: 'rope', quantity: 2 }], laborHours: 12, minimumSkill: 14, description: 'Льняное волокно превращается в прочную верёвку.' },
   { name: 'Добыча глины и камня', category: 'добыча', profession: 'miner', establishmentTypes: ['каменоломня'], inputs: [], outputs: [{ templateId: 'clay', quantity: 5 }, { templateId: 'stone', quantity: 4 }], laborHours: 24, minimumSkill: 10, description: 'Рабочие снимают глину и добывают строительный камень.' },
+  { name: 'Трепание льна', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax', quantity: 2 }], outputs: [{ templateId: 'flax_fiber', quantity: 2 }], laborHours: 12, minimumSkill: 10, description: 'Лён вымачивают, сушат и превращают в волокно.' },
+  { name: 'Прядение льняной нити', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax_fiber', quantity: 2 }], outputs: [{ templateId: 'linen_thread', quantity: 2 }], laborHours: 12, minimumSkill: 12, description: 'Волокно прядут в ровную льняную нить.' },
+  { name: 'Ткачество льняной ткани', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'linen_thread', quantity: 3 }], outputs: [{ templateId: 'linen_cloth', quantity: 2 }], laborHours: 18, minimumSkill: 16, description: 'Нить превращается в прочную льняную ткань.' },
+  { name: 'Прядение шерсти', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'wool_yarn', quantity: 2 }], laborHours: 12, minimumSkill: 12, description: 'Очищенную шерсть превращают в пряжу.' },
+  { name: 'Ткачество шерстяной ткани', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool_yarn', quantity: 3 }], outputs: [{ templateId: 'wool_cloth', quantity: 2 }], laborHours: 18, minimumSkill: 16, description: 'Шерстяную пряжу ткут в тёплую ткань.' },
+  { name: 'Дубление кожи', category: 'переработка', profession: 'tanner', establishmentTypes: ['кожевенная мастерская'], inputs: [{ templateId: 'raw_hide', quantity: 2 }, { templateId: 'salt', quantity: 1 }], outputs: [{ templateId: 'leather', quantity: 2 }], laborHours: 24, minimumSkill: 14, description: 'Шкуры очищают и дубят для обуви, ремней и брони.' },
+  { name: 'Синий краситель из вайды', category: 'переработка', profession: 'dyer', establishmentTypes: ['красильня'], inputs: [{ templateId: 'flax', quantity: 1 }], outputs: [{ templateId: 'dye_blue', quantity: 2 }], laborHours: 14, minimumSkill: 14, description: 'Красильщики получают стойкий синий пигмент.' },
+  { name: 'Красный краситель из марены', category: 'переработка', profession: 'dyer', establishmentTypes: ['красильня'], inputs: [{ templateId: 'vegetables', quantity: 1 }], outputs: [{ templateId: 'dye_red', quantity: 2 }], laborHours: 14, minimumSkill: 14, description: 'Корни марены дают красный пигмент.' },
+  { name: 'Льняная одежда', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская'], inputs: [{ templateId: 'linen_cloth', quantity: 3 }], outputs: [{ templateId: 'linen_hood', quantity: 1 }, { templateId: 'linen_shirt', quantity: 1 }], laborHours: 20, minimumSkill: 16, description: 'Портной шьёт повседневную льняную одежду.' },
+  { name: 'Шерстяная одежда', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская'], inputs: [{ templateId: 'wool_cloth', quantity: 4 }], outputs: [{ templateId: 'wool_tunic', quantity: 1 }, { templateId: 'wool_trousers', quantity: 1 }, { templateId: 'wool_cloak', quantity: 1 }], laborHours: 30, minimumSkill: 20, description: 'Портной шьёт тёплый комплект одежды.' },
+  { name: 'Кожаная обувь и перчатки', category: 'ремесло', profession: 'cobbler', establishmentTypes: ['сапожная мастерская'], inputs: [{ templateId: 'leather', quantity: 3 }], outputs: [{ templateId: 'leather_shoes', quantity: 1 }, { templateId: 'leather_gloves', quantity: 1 }], laborHours: 22, minimumSkill: 18, description: 'Сапожник делает обувь и рабочие перчатки.' },
+  { name: 'Стёганый доспех', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'linen_cloth', quantity: 4 }, { templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'padded_cap', quantity: 1 }, { templateId: 'gambeson', quantity: 1 }], laborHours: 34, minimumSkill: 24, description: 'Бронник шьёт защитный стёганый комплект.' },
+  { name: 'Кожаный доспех', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'leather', quantity: 5 }, { templateId: 'iron', quantity: 1 }], outputs: [{ templateId: 'leather_armor', quantity: 1 }], laborHours: 36, minimumSkill: 28, description: 'Кожа усиливается металлическими пластинами.' },
+  { name: 'Кольчуга', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'iron', quantity: 8 }, { templateId: 'charcoal', quantity: 3 }], outputs: [{ templateId: 'chainmail', quantity: 1 }], laborHours: 80, minimumSkill: 42, description: 'Тысячи колец соединяются в тяжёлую кольчугу.' },
+  { name: 'Шлем и щит', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'iron', quantity: 3 }, { templateId: 'planks', quantity: 2 }, { templateId: 'leather', quantity: 1 }], outputs: [{ templateId: 'iron_helmet', quantity: 1 }, { templateId: 'wooden_shield', quantity: 1 }], laborHours: 36, minimumSkill: 30, description: 'Бронник делает шлем и щит.' },
+  { name: 'Ковка копья', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'spear', quantity: 1 }], laborHours: 18, minimumSkill: 20, description: 'Кузнец куёт наконечник и сажает его на древко.' },
+  { name: 'Ковка меча', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: 3 }, { templateId: 'charcoal', quantity: 2 }], outputs: [{ templateId: 'sword', quantity: 1, qualityBonus: 8 }], laborHours: 42, minimumSkill: 35, description: 'Клинок требует хорошего железа и долгой работы.' },
+  { name: 'Земледельческие инструменты', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'sickle', quantity: 1 }, { templateId: 'hoe', quantity: 1 }], laborHours: 24, minimumSkill: 20, description: 'Мастер делает серпы и мотыги.' },
+  { name: 'Инструменты шахтёра', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'pickaxe', quantity: 1 }], laborHours: 22, minimumSkill: 24, description: 'Мастер делает прочную кирку.' },
+  { name: 'Инструменты текстильщиков', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tailoring_kit', quantity: 1 }, { templateId: 'spindle', quantity: 1 }], laborHours: 18, minimumSkill: 18, description: 'Мастер делает ножницы, иглы, веретено и челнок.' },
+  { name: 'Инструменты кожевников', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tanner_knife', quantity: 1 }, { templateId: 'cobbler_tools', quantity: 1 }], laborHours: 20, minimumSkill: 20, description: 'Мастер делает ножи, шилья и колодки для кожи и обуви.' },
+  { name: 'Инструменты плотника', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'wood_axe', quantity: 1 }, { templateId: 'carpenter_saw', quantity: 1 }], laborHours: 30, minimumSkill: 26, description: 'Мастер делает топор и пилу.' },
 ];
 
 const professionForEstablishment: Record<EstablishmentType, string[]> = {
-  'таверна': ['brewer', 'merchant'], 'постоялый двор': ['merchant', 'brewer'], 'пекарня': ['miller', 'brewer'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
-  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'], 'рынок': ['merchant'], 'лавка': ['merchant'],
+  'таверна': ['cook', 'brewer', 'merchant'], 'постоялый двор': ['merchant', 'cook', 'brewer'], 'пекарня': ['baker', 'miller'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
+  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'портная мастерская': ['tailor', 'weaver'], 'красильня': ['dyer', 'weaver'],
+  'кожевенная мастерская': ['tanner'], 'сапожная мастерская': ['cobbler', 'tanner'], 'бронная мастерская': ['armorer', 'blacksmith'], 'инструментальная мастерская': ['toolmaker', 'blacksmith'],
+  'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'], 'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'],
   'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'], 'склад': ['merchant'],
   'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
 };
 
 const establishmentForBuilding: Partial<Record<BuildingType, EstablishmentType>> = {
   tavern: 'таверна', inn: 'постоялый двор', bakery: 'пекарня', brewery: 'пивоварня', winery: 'винодельня', blacksmith: 'кузница', carpenter: 'плотницкая мастерская',
-  weaver: 'ткацкая мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
+  weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
   warehouse: 'склад', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
@@ -227,7 +314,7 @@ const buildingMapping: Record<string, BuildingType> = {
   'жилой дом': 'house', 'доходный дом': 'tenement', 'большой семейный дом': 'manor', 'казарма': 'barracks', 'казармы': 'barracks', 'монастырь': 'monastery',
   'зерновой сарай': 'warehouse', 'амбар': 'warehouse', 'склад': 'warehouse', 'поля и пастбища': 'farm', 'ферма': 'farm', 'мельница': 'mill',
   'пекарня': 'bakery', 'трактир': 'tavern', 'таверна': 'tavern', 'постоялый двор': 'inn', 'пивоварня': 'brewery', 'винодельня': 'winery',
-  'кузница': 'blacksmith', 'плотницкая мастерская': 'carpenter', 'ткацкая мастерская': 'weaver', 'кирпичная мастерская': 'kiln', 'обжиговая печь': 'kiln', 'каменоломня': 'quarry', 'карьер': 'quarry', 'торговая площадь': 'market', 'большой рынок': 'market',
+  'кузница': 'blacksmith', 'плотницкая мастерская': 'carpenter', 'ткацкая мастерская': 'weaver', 'портная мастерская': 'tailor', 'красильня': 'dyehouse', 'кожевенная мастерская': 'tannery', 'сапожная мастерская': 'cobbler', 'бронная мастерская': 'armorer', 'инструментальная мастерская': 'toolmaker', 'кирпичная мастерская': 'kiln', 'обжиговая печь': 'kiln', 'каменоломня': 'quarry', 'карьер': 'quarry', 'торговая площадь': 'market', 'большой рынок': 'market',
   'рыбный рынок': 'market', 'дом гильдии': 'guildhall', 'лечебница': 'healer', 'храм': 'temple', 'собор': 'temple', 'часовня': 'temple',
   'конюшня': 'stable', 'доки': 'fishery', 'шахта': 'mine', 'рудник': 'mine', 'баня': 'bathhouse', 'лавка': 'shop',
 };
@@ -296,15 +383,15 @@ function statusFor(members: Character[], wealth: number): HouseholdStatus {
   return 'богатые';
 }
 
-function addItem(world: WorldState, data: Omit<WorldItem, 'id' | 'history'> & { history?: string[] }): WorldItem {
+function addItem(world: WorldState, data: Omit<WorldItem, 'id' | 'history'> & { history?: string[] }, itemIndex?: Map<number, WorldItem>, forceUnique = false, directOwnerCharacter?: Character): WorldItem {
   const template = ITEM_BY_ID.get(data.templateId);
   if (!template) throw new Error(`Неизвестный шаблон предмета: ${data.templateId}`);
   const key = itemStackKey(data);
-  const indexed = activeRuntime?.stackByKey.get(key);
-  const existing = indexed && indexed.settlementId === data.settlementId && Math.abs(indexed.quality - data.quality) <= 10
+  const indexed = forceUnique ? undefined : activeRuntime?.stackByKey.get(key);
+  const existing = forceUnique ? undefined : indexed && indexed.settlementId === data.settlementId && Math.abs(indexed.quality - data.quality) <= 10
     ? indexed
     : activeRuntime ? undefined : world.items.find(item => item.templateId === data.templateId && item.settlementId === data.settlementId
-      && itemOwnerKey(item) === itemOwnerKey(data) && Math.abs(item.quality - data.quality) <= 10 && item.condition > 0);
+      && itemOwnerKey(item) === itemOwnerKey(data) && Math.abs(item.quality - data.quality) <= 10 && item.condition > 0 && item.dye === data.dye);
   if (existing) {
     const previousQuantity = existing.quantity;
     const totalQuantity = previousQuantity + data.quantity;
@@ -318,13 +405,14 @@ function addItem(world: WorldState, data: Omit<WorldItem, 'id' | 'history'> & { 
   }
   const item: WorldItem = { id: world.nextIds.item++, history: data.history ?? [], ...data };
   world.items.push(item);
+  itemIndex?.set(item.id, item);
   activeRuntime?.itemById.set(item.id, item);
   activeRuntime?.stackByKey.set(key, item);
   registerRuntimeOffer(item);
   if (item.householdId) (activeRuntime?.householdById.get(item.householdId) ?? world.households.find(household => household.id === item.householdId))?.inventoryItemIds.push(item.id);
   if (item.establishmentId) (activeRuntime?.establishmentById.get(item.establishmentId) ?? world.establishments.find(establishment => establishment.id === item.establishmentId))?.inventoryItemIds.push(item.id);
   if (item.buildingId) (activeRuntime?.buildingById.get(item.buildingId) ?? world.buildings.find(building => building.id === item.buildingId))?.inventoryItemIds.push(item.id);
-  if (item.ownerCharacterId) (activeRuntime?.characterById.get(item.ownerCharacterId) ?? world.characters.find(character => character.id === item.ownerCharacterId))?.inventoryItemIds.push(item.id);
+  if (item.ownerCharacterId) (directOwnerCharacter?.id === item.ownerCharacterId ? directOwnerCharacter : activeRuntime?.characterById.get(item.ownerCharacterId) ?? world.characters.find(character => character.id === item.ownerCharacterId))?.inventoryItemIds.push(item.id);
   return item;
 }
 
@@ -334,16 +422,16 @@ function seedItem(world: WorldState, templateId: string, quantity: number, settl
   addItem(world, {
     templateId, name: template.name, category: template.category, material: template.material, quantity, unit: template.unit, weightPerUnit: template.weight,
     quality: rng.int(38, 76), condition: rng.int(70, 100), freshness: 100, perishabilityMonths: template.perishability, baseValue: template.value,
-    settlementId, ...owner, createdYear: world.year, source,
+    settlementId, ...owner, createdYear: world.year, source, ...equipmentMetadata(template),
   });
 }
 
-export function addMaterialItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number }, source: string, quality = 55): WorldItem | undefined {
+export function addMaterialItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number }, source: string, quality = 55, itemIndex?: Map<number, WorldItem>, forceUnique = false, directOwnerCharacter?: Character): WorldItem | undefined {
   if (quantity <= .0001) return undefined;
   const template = ITEM_BY_ID.get(templateId);
   if (!template) return undefined;
   return addItem(world, { templateId, name: template.name, category: template.category, material: template.material, quantity, unit: template.unit, weightPerUnit: template.weight,
-    quality, condition: 100, freshness: 100, perishabilityMonths: template.perishability, baseValue: template.value, settlementId, ...owner, createdYear: world.year, source });
+    quality, condition: template.maxCondition ?? 100, freshness: 100, perishabilityMonths: template.perishability, baseValue: template.value, settlementId, ...owner, createdYear: world.year, source, ...equipmentMetadata(template) }, itemIndex, forceUnique, directOwnerCharacter);
 }
 
 export function consumeSettlementMaterial(world: WorldState, settlementId: number, templateId: string, quantity: number): number {
@@ -498,9 +586,17 @@ function ensureRequiredBuildings(world: WorldState, settlement: Settlement, rng:
   if (population >= 420) {
     required.set('brewery', Math.max(1, Math.ceil(population / 1400)));
     required.set('weaver', Math.max(1, Math.ceil(population / 900)));
+    required.set('tailor', Math.max(1, Math.ceil(population / 850)));
+    required.set('tannery', Math.max(1, Math.ceil(population / 1300)));
+    required.set('cobbler', Math.max(1, Math.ceil(population / 1300)));
+    required.set('toolmaker', Math.max(1, Math.ceil(population / 1500)));
     required.set('guildhall', Math.max(1, Math.ceil(population / 1800)));
     required.set('kiln', Math.max(1, Math.ceil(population / 1800)));
     required.set('bathhouse', Math.max(1, Math.ceil(population / 1600)));
+  }
+  if (population >= 900) {
+    required.set('dyehouse', Math.max(1, Math.ceil(population / 2400)));
+    required.set('armorer', Math.max(1, Math.ceil(population / 2200)));
   }
   if (settlement.type === 'port' || settlement.resource === 'рыба') required.set('fishery', Math.max(1, Math.ceil(population / 260)));
   if (settlement.resource === 'железо' || settlement.resource === 'серебро') required.set('mine', Math.max(1, Math.ceil(population / 420)));
@@ -508,7 +604,7 @@ function ensureRequiredBuildings(world: WorldState, settlement: Settlement, rng:
   for (const [type, target] of required) {
     let existing = existingCounts.get(type) ?? 0;
     while (existing < target) {
-      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'kiln' ? 'кирпичная мастерская' : type === 'quarry' ? 'каменоломня' : type === 'public' ? 'колодец и водоразбор' : type;
+      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'kiln' ? 'кирпичная мастерская' : type === 'quarry' ? 'каменоломня' : type === 'tailor' ? 'портная мастерская' : type === 'dyehouse' ? 'красильня' : type === 'tannery' ? 'кожевенная мастерская' : type === 'cobbler' ? 'сапожная мастерская' : type === 'armorer' ? 'бронная мастерская' : type === 'toolmaker' ? 'инструментальная мастерская' : type === 'public' ? 'колодец и водоразбор' : type;
       const building = ensureBuilding(world, settlement, type, label, settlement.buildingIds.length, rng);
       if (type === 'public') building.hasWater = true;
       existing += 1;
@@ -522,7 +618,7 @@ function employmentCapacity(type: EstablishmentType, building: Building): number
   if (type === 'рынок' || type === 'склад' || type === 'гильдейский дом') return Math.max(6, Math.min(18, Math.ceil(building.capacity / 10)));
   if (type === 'таверна' || type === 'постоялый двор') return Math.max(5, Math.min(14, Math.ceil(building.capacity / 7)));
   if (type === 'мельница' || type === 'пекарня' || type === 'пивоварня' || type === 'винодельня') return Math.max(4, Math.min(12, Math.ceil(building.capacity / 5)));
-  if (type === 'кузница' || type === 'плотницкая мастерская' || type === 'ткацкая мастерская') return Math.max(4, Math.min(10, Math.ceil(building.capacity / 5)));
+  if (type === 'кузница' || type === 'плотницкая мастерская' || type === 'ткацкая мастерская' || type === 'портная мастерская' || type === 'красильня' || type === 'кожевенная мастерская' || type === 'сапожная мастерская' || type === 'бронная мастерская' || type === 'инструментальная мастерская') return Math.max(4, Math.min(10, Math.ceil(building.capacity / 5)));
   return Math.max(3, Math.min(10, Math.ceil(building.capacity / 6)));
 }
 
@@ -572,7 +668,7 @@ function createEstablishments(world: WorldState, rng: RNG): void {
   for (const settlement of world.settlements) {
     ensureRequiredBuildings(world, settlement, rng);
     const adults = adultsBySettlement.get(settlement.id) ?? [];
-    const priority: Partial<Record<BuildingType, number>> = { farm: 1, fishery: 1, mine: 1, carpenter: 2, warehouse: 2, mill: 3, bakery: 4, brewery: 4, winery: 4, weaver: 4, blacksmith: 4, market: 5, shop: 5, tavern: 6, inn: 6, healer: 6, bathhouse: 7, temple: 7, guildhall: 7, stable: 7 };
+    const priority: Partial<Record<BuildingType, number>> = { farm: 1, fishery: 1, mine: 1, carpenter: 2, warehouse: 2, mill: 3, bakery: 4, brewery: 4, winery: 4, weaver: 4, tailor: 4, dyehouse: 4, tannery: 4, cobbler: 4, armorer: 4, toolmaker: 4, blacksmith: 4, market: 5, shop: 5, tavern: 6, inn: 6, healer: 6, bathhouse: 7, temple: 7, guildhall: 7, stable: 7 };
     const candidates = world.buildings
       .filter(building => building.settlementId === settlement.id && establishmentForBuilding[building.type])
       .sort((a, b) => (priority[a.type] ?? 10) - (priority[b.type] ?? 10) || a.id - b.id);
@@ -640,11 +736,20 @@ function seedEstablishmentInventory(world: WorldState, establishment: Establishm
   if (establishment.type === 'винодельня') { add('fruit', rng.int(12, 36)); add('wine', rng.int(12, 45)); }
   if (establishment.type === 'кузница') { add('iron_ore', rng.int(4, 16)); add('iron', rng.int(3, 12)); add('charcoal', rng.int(8, 25)); add('tools', rng.int(1, 6)); add('weapon', rng.int(0, 4)); }
   if (establishment.type === 'плотницкая мастерская') { add('timber', rng.int(10, 35)); add('tools', rng.int(1, 4)); add('furniture', rng.int(1, 7)); }
-  if (establishment.type === 'ткацкая мастерская') { add('wool', rng.int(8, 24)); add('cloth', rng.int(5, 16)); add('clothes', rng.int(1, 8)); }
+  if (establishment.type === 'ткацкая мастерская') { add('spindle', rng.int(1, 4)); add('wool', rng.int(8, 24)); add('cloth', rng.int(5, 16)); add('clothes', rng.int(1, 8)); }
   if (establishment.type === 'кирпичная мастерская') { add('clay', rng.int(12, 35)); add('firewood', rng.int(8, 24)); add('bricks', rng.int(4, 16)); add('lime', rng.int(2, 10)); }
   if (establishment.type === 'каменоломня') { add('clay', rng.int(10, 40)); add('stone', rng.int(12, 45)); add('tools', rng.int(1, 4)); }
+  if (establishment.type === 'портная мастерская') { add('tailoring_kit', rng.int(1, 3)); add('linen_cloth', rng.int(4, 14)); add('wool_cloth', rng.int(4, 12)); add('linen_shirt', rng.int(1, 6)); add('wool_tunic', rng.int(1, 5)); add('wool_trousers', rng.int(1, 5)); add('wool_cloak', rng.int(0, 4)); }
+  if (establishment.type === 'красильня') { add('dye_blue', rng.int(2, 8)); add('dye_red', rng.int(2, 8)); add('dye_yellow', rng.int(2, 8)); add('dye_brown', rng.int(4, 12)); }
+  if (establishment.type === 'кожевенная мастерская') { add('tanner_knife', rng.int(1, 3)); add('raw_hide', rng.int(5, 18)); add('leather', rng.int(3, 12)); }
+  if (establishment.type === 'сапожная мастерская') { add('cobbler_tools', rng.int(1, 3)); add('leather', rng.int(4, 12)); add('leather_shoes', rng.int(2, 8)); add('leather_gloves', rng.int(1, 6)); }
+  if (establishment.type === 'бронная мастерская') { add('gambeson', rng.int(1, 5)); add('leather_armor', rng.int(0, 4)); add('iron_helmet', rng.int(0, 3)); add('wooden_shield', rng.int(1, 5)); }
+  if (establishment.type === 'инструментальная мастерская') { add('smith_hammer', rng.int(1, 3)); add('sickle', rng.int(1, 6)); add('hoe', rng.int(1, 5)); add('pickaxe', rng.int(0, 4)); add('wood_axe', rng.int(1, 5)); add('carpenter_saw', rng.int(0, 4)); add('tailoring_kit', rng.int(0, 4)); add('spindle', rng.int(1, 5)); add('tanner_knife', rng.int(0, 4)); add('cobbler_tools', rng.int(0, 4)); }
+  if (establishment.type === 'одежная лавка') { add('linen_hood', rng.int(2, 8)); add('linen_shirt', rng.int(2, 10)); add('wool_tunic', rng.int(1, 7)); add('wool_trousers', rng.int(1, 7)); add('leather_shoes', rng.int(2, 8)); add('wool_cloak', rng.int(1, 5)); }
+  if (establishment.type === 'оружейная лавка') { add('spear', rng.int(2, 8)); add('sword', rng.int(0, 4)); add('longbow', rng.int(0, 4)); add('gambeson', rng.int(1, 5)); add('wooden_shield', rng.int(1, 5)); }
+  if (establishment.type === 'продовольственная лавка') { add('bread', rng.int(15, 60)); add('vegetables', rng.int(8, 30)); add('salted_fish', rng.int(3, 15)); add('water', rng.int(15, 60)); }
   if (establishment.type === 'рынок' || establishment.type === 'лавка' || establishment.type === 'склад') {
-    for (const [id, min, max] of [['grain', 8, 35], ['bread', 10, 45], ['vegetables', 5, 24], ['water', 12, 50], ['firewood', 6, 30], ['cloth', 2, 12], ['tools', 1, 6]] as const) add(id, rng.int(min, max));
+    for (const [id, min, max] of [['grain', 8, 35], ['bread', 10, 45], ['vegetables', 5, 24], ['water', 12, 50], ['firewood', 6, 30], ['linen_cloth', 2, 12], ['wool_cloth', 2, 10], ['linen_shirt', 1, 5], ['leather_shoes', 1, 5], ['tools', 1, 6], ['sickle', 0, 3]] as const) add(id, rng.int(min, max));
   }
   if (establishment.type === 'лечебница') add('herbal_medicine', rng.int(4, 15));
 }
@@ -754,13 +859,22 @@ function cleanEmptyItems(world: WorldState): void {
   for (const id of householdIds) { const entity = activeRuntime?.householdById.get(id) ?? world.households.find(item => item.id === id); if (entity) entity.inventoryItemIds = clean(entity.inventoryItemIds); }
   for (const id of establishmentIds) { const entity = activeRuntime?.establishmentById.get(id) ?? world.establishments.find(item => item.id === id); if (entity) entity.inventoryItemIds = clean(entity.inventoryItemIds); }
   for (const id of buildingIds) { const entity = activeRuntime?.buildingById.get(id) ?? world.buildings.find(item => item.id === id); if (entity) entity.inventoryItemIds = clean(entity.inventoryItemIds); }
-  for (const id of characterIds) { const entity = activeRuntime?.characterById.get(id) ?? world.characters.find(item => item.id === id); if (entity) entity.inventoryItemIds = clean(entity.inventoryItemIds); }
+  for (const id of characterIds) {
+    const entity = activeRuntime?.characterById.get(id) ?? world.characters.find(item => item.id === id);
+    if (entity) {
+      entity.inventoryItemIds = clean(entity.inventoryItemIds);
+      for (const [slot, itemId] of Object.entries(entity.equipment?.equippedItemIds ?? {})) if (removed.has(itemId)) delete entity.equipment.equippedItemIds[slot as EquipmentSlot];
+    }
+  }
+  for (const merchant of world.travelingMerchants ?? []) merchant.wagonInventoryItemIds = clean(merchant.wagonInventoryItemIds);
   if (activeRuntime) for (const key of offerKeys) {
     const offers = activeRuntime.offersBySettlementTemplate.get(key);
     if (offers) activeRuntime.offersBySettlementTemplate.set(key, offers.filter(entry => !removed.has(entry.item.id)));
   }
   world.items = world.items.filter(item => !removed.has(item.id));
 }
+
+export function pruneEmptyMaterialItems(world: WorldState): void { cleanEmptyItems(world); }
 
 function spoilItems(world: WorldState, settlementIds: ReadonlySet<number>, elapsedMonths: number): void {
   for (const item of world.items) {
@@ -841,13 +955,44 @@ function productionRuns(world: WorldState, establishment: Establishment, recipe:
   return Math.max(0, Math.min(36, possible));
 }
 
+function productionTool(world: WorldState, establishment: Establishment, profession: string): WorldItem | undefined {
+  const allowed = PRODUCTION_TOOL_IDS[profession];
+  if (!allowed?.length) return undefined;
+  const allowedSet = new Set(allowed);
+  const establishmentTool = establishment.inventoryItemIds
+    .map(id => activeRuntime?.itemById.get(id) ?? world.items.find(item => item.id === id))
+    .filter((item): item is WorldItem => Boolean(item && item.quantity > .0001 && item.condition > 0 && allowedSet.has(item.templateId)))
+    .sort((a, b) => b.condition - a.condition || b.quality - a.quality)[0];
+  if (establishmentTool) return establishmentTool;
+  for (const workerId of establishment.workerIds) {
+    const worker = activeRuntime?.characterById.get(workerId) ?? world.characters.find(character => character.id === workerId);
+    const toolId = worker?.equipment?.equippedItemIds?.workTool;
+    const tool = toolId ? activeRuntime?.itemById.get(toolId) ?? world.items.find(item => item.id === toolId) : undefined;
+    if (tool && tool.condition > 0 && allowedSet.has(tool.templateId)) return tool;
+  }
+  return undefined;
+}
+
+function availableDye(world: WorldState, establishment: Establishment, quantity: number): { item: WorldItem; color: string } | undefined {
+  const dyes = establishment.inventoryItemIds
+    .map(id => activeRuntime?.itemById.get(id) ?? world.items.find(item => item.id === id))
+    .filter((item): item is WorldItem => Boolean(item && item.category === 'краситель' && item.dye && item.condition > 0 && item.quantity >= quantity))
+    .sort((a, b) => a.baseValue - b.baseValue || b.quantity - a.quantity);
+  const item = dyes[0];
+  return item?.dye ? { item, color: item.dye } : undefined;
+}
+
 function runProduction(world: WorldState, establishment: Establishment, rng: RNG, elapsedMonths: number): void {
   const recipes = establishment.recipeIds.map(id => activeRuntime?.recipeById.get(id) ?? world.productionRecipes.find(recipe => recipe.id === id)).filter((recipe): recipe is ProductionRecipe => Boolean(recipe));
   for (const recipe of recipes) {
     restockRecipeInputs(world, establishment, recipe, elapsedMonths);
     const skill = workerSkill(world, establishment, recipe.profession);
     if (skill.average < recipe.minimumSkill * .45 || !canRunRecipe(world, establishment, recipe)) continue;
+    const requiredTools = PRODUCTION_TOOL_IDS[recipe.profession];
+    const tool = productionTool(world, establishment, recipe.profession);
+    if (requiredTools?.length && !tool) continue;
     let runs = productionRuns(world, establishment, recipe, skill.average, elapsedMonths);
+    if (tool) runs = Math.floor(runs * Math.max(.35, Math.min(1.2, .45 + tool.condition / 130 + tool.quality / 500)));
     if (recipe.category === 'добыча') {
       const crop = recipe.name.includes('урожая') || recipe.name.includes('овощ');
       const seasonFactor = crop ? (elapsedMonths >= 6 ? (world.month === 7 ? .5 : 0) : elapsedMonths > 1 ? (world.month === 7 ? 1 : 0) : ([7, 8, 9].includes(world.month) ? 1 : 0)) : 1;
@@ -855,14 +1000,22 @@ function runProduction(world: WorldState, establishment: Establishment, rng: RNG
     }
     if (runs <= 0) continue;
     for (const input of recipe.inputs) consume(world, establishment.inventoryItemIds, input.templateId, input.quantity * runs);
+    if (tool) {
+      const wear = Math.max(.15, runs * (recipe.category === 'добыча' ? .75 : .35));
+      tool.condition = Math.max(0, tool.condition - wear);
+      if (tool.condition <= 0) tool.history.push(`Сломалось во время работы в ${world.year}.${String(world.month).padStart(2, '0')}.`);
+    }
     for (const output of recipe.outputs) {
       const template = ITEM_BY_ID.get(output.templateId)!;
       const quality = Math.max(10, Math.min(100, Math.round(36 + skill.average * .65 + (output.qualityBonus ?? 0) + rng.int(-7, 7))));
+      const dyeNeed = template.category === 'одежда' ? Math.max(.08, output.quantity * runs * .08) : 0;
+      const dye = dyeNeed > 0 && !template.dye ? availableDye(world, establishment, dyeNeed) : undefined;
+      if (dye) dye.item.quantity -= dyeNeed;
       addItem(world, {
         templateId: template.id, name: template.name, category: template.category, material: template.material, quantity: output.quantity * runs,
-        unit: template.unit, weightPerUnit: template.weight, quality, condition: 100, freshness: 100, perishabilityMonths: template.perishability,
+        unit: template.unit, weightPerUnit: template.weight, quality, condition: template.maxCondition ?? 100, freshness: 100, perishabilityMonths: template.perishability,
         baseValue: template.value, settlementId: establishment.settlementId, buildingId: establishment.buildingId, establishmentId: establishment.id,
-        craftedByCharacterId: skill.masterId, createdYear: world.year, source: `${recipe.name} в заведении ${establishment.name}`,
+        craftedByCharacterId: skill.masterId, createdYear: world.year, source: `${recipe.name} в заведении ${establishment.name}`, ...equipmentMetadata(template), dye: template.dye ?? dye?.color,
       });
     }
     const master = skill.masterId ? activeRuntime?.characterById.get(skill.masterId) ?? world.characters.find(character => character.id === skill.masterId) : undefined;
@@ -913,7 +1066,7 @@ function transferItemToHousehold(world: WorldState, seller: Establishment, item:
     templateId: item.templateId, name: item.name, category: item.category, material: item.material, quantity: moved, unit: item.unit, weightPerUnit: item.weightPerUnit,
     quality: item.quality, condition: item.condition, freshness: item.freshness, perishabilityMonths: item.perishabilityMonths, baseValue: item.baseValue,
     settlementId: household.settlementId, householdId: household.id, buildingId: household.homeBuildingId, createdYear: world.year,
-    source: `куплено у ${seller.name}`, history: [`Куплено домохозяйством в ${world.year}.${String(world.month).padStart(2, '0')}.`],
+    source: `куплено у ${seller.name}`, history: [`Куплено домохозяйством в ${world.year}.${String(world.month).padStart(2, '0')}.`], equipmentSlot: item.equipmentSlot, dye: item.dye, warmth: item.warmth, armor: item.armor, damage: item.damage, toolType: item.toolType, requiredProfession: item.requiredProfession, maxCondition: item.maxCondition,
   });
   return moved;
 }
@@ -1043,9 +1196,12 @@ function payWagesAndTaxes(world: WorldState, settlement: Settlement, establishme
     const paid = Math.min(establishment.cash, dueWage);
     establishment.cash -= paid;
     establishment.monthlyExpenses += paid;
-    household.wealth += paid;
+    const personalShare = paid * .25;
+    const familyShare = paid - personalShare;
+    character.wallet = Math.max(0, (character.wallet ?? 0) + personalShare);
+    household.wealth += familyShare;
     household.monthlyIncome += paid;
-    character.wealth = Math.round(household.wealth / Math.max(1, household.memberIds.length));
+    character.wealth = Math.round(household.wealth / Math.max(1, household.memberIds.length) + character.wallet);
     if (paid < dueWage) {
       const missing = dueWage - paid;
       establishment.debt += missing;
@@ -1207,7 +1363,7 @@ export function ensureEstablishmentOwners(world: WorldState, indexes: WorldIndex
   }
 }
 
-export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>): void {
+export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>, detailedHouseholdIds: ReadonlySet<number> = new Set()): void {
   if (!world.buildings?.length || !world.households?.length || !world.establishments?.length) generatePhysicalEconomy(world, rng);
   activeRuntime = createMaterialRuntime(world, indexes);
   ensureEstablishmentOwners(world, indexes);
@@ -1237,8 +1393,10 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         if (!household) continue;
         household.monthlyIncome = 0;
         produceHouseholdSubsistence(world, settlement, household, elapsedMonths);
-        buyHouseholdNeeds(world, settlement, household, elapsedMonths);
-        feedHousehold(world, household, elapsedMonths);
+        if (!detailedHouseholdIds.has(household.id)) {
+          buyHouseholdNeeds(world, settlement, household, elapsedMonths);
+          feedHousehold(world, household, elapsedMonths);
+        }
       }
       for (const establishment of localEstablishments) payWagesAndTaxes(world, settlement, establishment, elapsedMonths);
       for (const householdId of settlement.householdIds) {
@@ -1358,4 +1516,41 @@ export function materializeNewHousing(world: WorldState, settlement: Settlement,
     }
   }
   return created;
+}
+
+export function materialTemplateDetails(templateId: string): Readonly<ItemTemplate> | undefined {
+  return ITEM_BY_ID.get(templateId);
+}
+
+export function consumeOwnedMaterial(world: WorldState, inventoryIds: number[], templateIds: readonly string[], quantity: number, itemIndex?: ReadonlyMap<number, WorldItem>): number {
+  let remaining = Math.max(0, quantity);
+  const allowed = new Set(templateIds);
+  const items = inventoryIds
+    .map(id => itemIndex?.get(id) ?? activeRuntime?.itemById.get(id) ?? world.items.find(item => item.id === id))
+    .filter((item): item is WorldItem => Boolean(item && item.quantity > .0001 && item.condition > 0 && allowed.has(item.templateId)))
+    .sort((a, b) => a.freshness - b.freshness || a.id - b.id);
+  for (const item of items) {
+    if (remaining <= .0001) break;
+    const used = Math.min(item.quantity, remaining);
+    item.quantity -= used;
+    remaining -= used;
+  }
+  return quantity - remaining;
+}
+
+export function retailOffer(world: WorldState, settlementId: number, templateIds: readonly string[], itemIndex?: ReadonlyMap<number, WorldItem>, establishments?: readonly Establishment[]): { establishment: Establishment; item: WorldItem } | undefined {
+  if (!itemIndex || !establishments) return findSeller(world, settlementId, [...templateIds]);
+  const allowed = new Set(templateIds);
+  let best: { establishment: Establishment; item: WorldItem } | undefined;
+  let bestQuantity = 0;
+  for (const establishment of establishments) {
+    if (!establishment.active || establishment.settlementId !== settlementId) continue;
+    for (const itemId of establishment.inventoryItemIds) {
+      const item = itemIndex.get(itemId);
+      if (!item || item.condition <= 0 || item.quantity <= bestQuantity || !allowed.has(item.templateId)) continue;
+      best = { establishment, item };
+      bestQuantity = item.quantity;
+    }
+  }
+  return best;
 }
