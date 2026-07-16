@@ -4,6 +4,7 @@ import type {
 import { professionLabel, settlementTypeLabel } from '../i18n';
 import { hashSeed, RNG } from '../sim/rng';
 import { buildingInteriorPoint, buildingRect } from '../sim/spatial';
+import { LocalOccupancyGrid, type LocalPoint } from './localOccupancy';
 
 export const DEFAULT_LOCAL_MAP_SIZE = 128;
 
@@ -301,9 +302,6 @@ function buildSettlement(
   if (district.role === 'крепость' || (district.role === 'центр' && (settlement.type === 'city' || settlement.type === 'fortress'))) {
     drawSettlementWall(cells, width, height, exits);
   }
-  const fieldCount = district.role === 'поля' ? Math.max(18, Math.round(width / 5)) : settlement.type === 'city' || settlement.type === 'fortress' ? 4 : Math.max(8, Math.round(width / 12));
-  placeFields(cells, width, height, rng, fieldCount);
-
   const physicalBuildings = (world.buildings ?? []).filter(building => building.globalX === tile.x && building.globalY === tile.y);
   if (physicalBuildings.length) {
     for (const building of physicalBuildings) {
@@ -357,18 +355,6 @@ function drawSettlementWall(cells: LocalCell[], width: number, height: number, e
   }
 }
 
-function placeFields(cells: LocalCell[], width: number, height: number, rng: RNG, count: number): void {
-  for (let i = 0; i < count; i += 1) {
-    const x0 = rng.int(1, width - 10);
-    const y0 = rng.int(1, height - 8);
-    const w = rng.int(5, 10);
-    const h = rng.int(4, 7);
-    for (let y = y0; y < Math.min(height, y0 + h); y += 1) for (let x = x0; x < Math.min(width, x0 + w); x += 1) {
-      const cell = cells[y * width + x]!;
-      if (!cell.blocked && cell.ground !== 'road') { cell.feature = 'field'; cell.ground = 'dirt'; }
-    }
-  }
-}
 
 function canBuild(cells: LocalCell[], width: number, height: number, x0: number, y0: number, w: number, h: number): boolean {
   if (!inside(x0, y0, width, height) || !inside(x0 + w, y0 + h, width, height)) return false;
@@ -516,6 +502,8 @@ function buildSurfaceMarkers(
   settlement?: WorldState['settlements'][number], dungeon?: WorldState['dungeons'][number],
 ): LocalMarker[] {
   const markers: LocalMarker[] = [];
+  const occupancy = new LocalOccupancyGrid(cells, width, height);
+
   if (settlement) {
     const district = settlement.districts?.find(item => item.x === tile.x && item.y === tile.y);
     markers.push({ id: `settlement-${settlement.id}-${tile.x}-${tile.y}`, x: Math.floor(width / 2), y: Math.floor(height / 2), kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }], detail: `${district?.name ?? 'поселение'} · ${settlement.population} жителей` });
@@ -529,59 +517,97 @@ function buildSurfaceMarkers(
     markers.push({ id: `cemetery-${cemetery.id}`, x: cemetery.localX, y: cemetery.localY, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: buried, detail: `${buried} записей о погребении · вместимость ${cemetery.capacity}` });
   }
 
+  markers.push(...placeNaturalResources(world, tile, cells, width, height));
+
+  // Сначала резервируются сущности с уже существующими физическими координатами.
+  for (const position of (world.armyLocalPositions ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y).sort((a, b) => a.formationIndex - b.formationIndex || a.characterId - b.characterId)) {
+    const character = world.characters.find(item => item.id === position.characterId && item.alive);
+    const army = world.armies.find(item => item.id === position.armyId);
+    if (!character || !army) continue;
+    const point = occupancy.claim({ x: position.localX, y: position.localY }, humanCellAvailable)
+      ?? occupancy.claimNearest({ x: position.localX, y: position.localY }, `${world.config.seed}:перенос-солдата:${army.id}:${character.id}`, humanCellAvailable);
+    if (!point) continue;
+    const unit = character.militaryUnitId ? world.militaryUnits.find(item => item.id === character.militaryUnitId) : undefined;
+    markers.push({
+      id: `army-soldier-${army.id}-${character.id}`, x: point.x, y: point.y, kind: 'person', label: character.name,
+      refs: [{ kind: 'character', id: character.id }, { kind: 'army', id: army.id }, ...(unit ? [{ kind: 'militaryUnit' as const, id: unit.id }] : [])],
+      detail: `${character.militaryRole ?? 'солдат'} · ${position.activity}${unit ? ` · ${unit.name}` : ''}`,
+      visualRole: character.visualRole ?? 'soldier',
+    });
+  }
+
+  for (const monster of world.monsters.filter(item => item.alive && item.x === tile.x && item.y === tile.y).sort((a, b) => a.id - b.id)) {
+    const preferred = deterministicPoint(cells, `${world.config.seed}:чудовище:${monster.id}:${tile.x}:${tile.y}`, monsterCellAvailable);
+    const footprintWidth = Math.max(1, monster.footprintWidth ?? 1);
+    const footprintHeight = Math.max(1, monster.footprintHeight ?? 1);
+    const topLeft = occupancy.claimFootprintNear(preferred, footprintWidth, footprintHeight, `${world.config.seed}:след-чудовища:${monster.id}`, monsterCellAvailable);
+    if (!topLeft) continue;
+    occupyFootprint(cells, width, topLeft, footprintWidth, footprintHeight);
+    markers.push({ id: `monster-${monster.id}`, x: topLeft.x, y: topLeft.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `${monster.species}, сила ${monster.power} · занимает ${footprintWidth}×${footprintHeight} клеток`, footprintWidth, footprintHeight });
+  }
+
+  for (const population of world.animalPopulations.filter(item => item.count > 0 && item.x === tile.x && item.y === tile.y).sort((a, b) => a.id - b.id)) {
+    markers.push(...placeAnimalPopulation(world, cells, width, occupancy, population, settlement));
+  }
+
   const presentMerchants = settlement ? (world.travelingMerchants ?? []).filter(merchant => merchant.currentSettlementId === settlement.id && merchant.status !== 'в пути') : [];
   const merchantCharacterIds = new Set(presentMerchants.map(merchant => merchant.characterId));
   const armyCharacterIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
+  const activePatrols = settlement
+    ? (world.civicPatrols ?? []).filter(item => item.settlementId === settlement.id && item.status === 'патрулирует' && item.guardIds.length)
+    : [];
+  const patrolCharacterIds = new Set(activePatrols.flatMap(patrol => patrol.guardIds));
   const liveCharacters = settlement ? world.characters.filter(character => {
-    if (!character.alive || character.settlementId !== settlement.id || merchantCharacterIds.has(character.id) || armyCharacterIds.has(character.id)) return false;
+    if (!character.alive || character.settlementId !== settlement.id || merchantCharacterIds.has(character.id) || armyCharacterIds.has(character.id) || patrolCharacterIds.has(character.id)) return false;
     const anchor = characterAnchorBuilding(world, character);
     if (anchor) return anchor.globalX === tile.x && anchor.globalY === tile.y;
     const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения' }];
     const assigned = districts[hashSeed(`${world.config.seed}:район-жителя:${character.id}`) % districts.length]!;
     return assigned.x === tile.x && assigned.y === tile.y;
-  }) : [];
-  const walkable = cells.filter(cell => !cell.blocked && cell.ground !== 'water');
-  const groups = new Map<string, { point: Point; refs: EntityRef[]; names: string[]; professions: string[]; visualRoles: string[] }>();
+  }).sort((a, b) => a.id - b.id) : [];
+
   for (const character of liveCharacters) {
     const anchor = characterAnchorBuilding(world, character);
-    const point = anchor && anchor.globalX === tile.x && anchor.globalY === tile.y
+    const preferred = anchor && anchor.globalX === tile.x && anchor.globalY === tile.y
       ? buildingInteriorPoint(anchor, `${world.config.seed}:житель-в-здании:${character.id}:${world.month}`)
-      : characterPosition(character.id, walkable, world.config.seed, tile.x, tile.y);
-    const key = `${point.x}:${point.y}`;
-    const group = groups.get(key) ?? { point, refs: [], names: [], professions: [], visualRoles: [] };
-    group.refs.push({ kind: 'character', id: character.id });
-    group.names.push(character.name);
-    group.professions.push(professionLabel(character.profession));
+      : deterministicPoint(cells, `${world.config.seed}:житель:${character.id}:${tile.x}:${tile.y}`, humanCellAvailable);
+    const point = occupancy.claimNearest(preferred, `${world.config.seed}:уникальный-житель:${character.id}:${world.month}`, humanCellAvailable);
+    if (!point) continue;
     const isRuler = world.kingdoms.some(kingdom => kingdom.rulerId === character.id);
-    group.visualRoles.push(isRuler ? 'king' : character.visualRole ?? character.profession);
-    groups.set(key, group);
-  }
-
-  for (const [key, group] of groups) {
     markers.push({
-      id: `people-${key}`, x: group.point.x, y: group.point.y, kind: group.refs.length > 1 ? 'group' : 'person',
-      label: group.refs.length > 1 ? `${group.refs.length} жителей` : group.names[0]!, refs: group.refs, count: group.refs.length,
-      detail: group.refs.length > 1 ? group.names.slice(0, 4).join(', ') : group.professions[0],
-      visualRole: group.refs.length > 1 ? (group.visualRoles.some(role => ['king', 'commander', 'officer', 'knight'].includes(role)) ? 'military-group' : 'group') : group.visualRoles[0],
+      id: `person-${character.id}`, x: point.x, y: point.y, kind: 'person', label: character.name,
+      refs: [{ kind: 'character', id: character.id }], detail: professionLabel(character.profession),
+      visualRole: isRuler ? 'king' : character.visualRole ?? character.profession,
     });
   }
 
-
-  if (settlement) {
-    const district = settlement.districts.find(item => item.x === tile.x && item.y === tile.y);
-    if (district) {
-      for (const patrol of (world.civicPatrols ?? []).filter(item => item.settlementId === settlement.id && item.districtName === district.name && item.status === 'патрулирует' && item.guardIds.length)) {
-        const refs: EntityRef[] = [{ kind: 'patrol', id: patrol.id }, ...patrol.guardIds.slice(0, 8).map(id => ({ kind: 'character' as const, id }))];
-        const point = characterPosition(patrol.id + 800000, walkable, `${world.config.seed}:патруль:${patrol.id}:${world.month}`, tile.x, tile.y);
-        markers.push({ id: `patrol-${patrol.id}`, x: point.x, y: point.y, kind: 'patrol', label: `${patrol.shift} патруль`, refs, count: patrol.guardIds.length, detail: `${patrol.guardIds.length} стражников · район ${patrol.districtName}`, visualRole: 'guard' });
-      }
+  for (const patrol of activePatrols.sort((a, b) => a.id - b.id)) {
+    const district = settlement?.districts.find(item => item.name === patrol.districtName);
+    const roadCells = cells.filter(cell => humanCellAvailable(cell) && cell.ground === 'road');
+    const fallback = deterministicPoint(cells, `${world.config.seed}:патруль:${patrol.id}:${world.month}`, humanCellAvailable);
+    for (let index = 0; index < patrol.guardIds.length; index += 1) {
+      const guardId = patrol.guardIds[index]!;
+      const guard = world.characters.find(item => item.id === guardId && item.alive);
+      if (!guard) continue;
+      const preferred = roadCells.length
+        ? { x: roadCells[hashSeed(`${world.config.seed}:путь-патруля:${patrol.id}:${guard.id}:${world.month}`) % roadCells.length]!.x, y: roadCells[hashSeed(`${world.config.seed}:путь-патруля:${patrol.id}:${guard.id}:${world.month}`) % roadCells.length]!.y }
+        : fallback;
+      const point = occupancy.claimNearest(preferred, `${world.config.seed}:стражник-патруля:${patrol.id}:${guard.id}`, humanCellAvailable);
+      if (!point) continue;
+      markers.push({
+        id: `patrol-guard-${patrol.id}-${guard.id}`, x: point.x, y: point.y, kind: 'person', label: guard.name,
+        refs: [{ kind: 'character', id: guard.id }, { kind: 'patrol', id: patrol.id }],
+        detail: `${patrol.shift} патруль${district ? ` · ${district.name}` : ''}`, visualRole: 'guard',
+      });
     }
   }
 
-  for (const merchant of presentMerchants) {
+  for (const merchant of presentMerchants.sort((a, b) => a.id - b.id)) {
     const character = world.characters.find(item => item.id === merchant.characterId);
     if (!character?.alive) continue;
-    const point = characterPosition(character.id, walkable, `${world.config.seed}:странствующий-торговец`, tile.x, tile.y);
+    const preferred = deterministicPoint(cells, `${world.config.seed}:странствующий-торговец:${merchant.id}:${world.month}`, marketCellAvailable);
+    const point = occupancy.claimNearest(preferred, `${world.config.seed}:место-торговца:${merchant.id}`, humanCellAvailable);
+    if (!point) continue;
     const stock = merchant.wagonInventoryItemIds.reduce((sum, id) => sum + (world.items.find(item => item.id === id)?.quantity ?? 0), 0);
     markers.push({
       id: `merchant-${merchant.id}`, x: point.x, y: point.y, kind: 'merchant', label: character.name,
@@ -590,9 +616,14 @@ function buildSurfaceMarkers(
     });
   }
 
+  // Поле отображается самими клетками. Невидимый маркер нужен только для инспектора и перехода к сущности.
   for (const field of (world.fields ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
     const center = field.cells[Math.floor(field.cells.length / 2)] ?? { x: 0, y: 0 };
-    markers.push({ id: `field-${field.id}`, x: center.x, y: center.y, kind: 'field', label: `Поле: ${field.crop}`, refs: [{ kind: 'field', id: field.id }], count: field.cells.length, detail: `${field.state} · ${field.cells.length} клеток · плодородие ${Math.round(field.fertility)}%` });
+    markers.push({
+      id: `field-${field.id}`, x: center.x, y: center.y, kind: 'field', label: `Поле: ${field.crop}`,
+      refs: [{ kind: 'field', id: field.id }], count: field.cells.length,
+      detail: `${field.state} · ${field.cells.length} клеток · плодородие ${Math.round(field.fertility)}%`, visualRole: 'map-reference',
+    });
   }
   for (const project of (world.constructionProjects ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y && item.stage !== 'завершено' && item.stage !== 'заброшено')) {
     markers.push({ id: `construction-${project.id}`, x: project.localX, y: project.localY, kind: 'construction', label: project.name, refs: [{ kind: 'constructionProject', id: project.id }], detail: `${project.stage} · труд ${Math.round(project.laborDone)}/${project.laborRequired}`, footprintWidth: project.localWidth, footprintHeight: project.localHeight });
@@ -636,49 +667,23 @@ function buildSurfaceMarkers(
     }
   }
 
-  for (const position of (world.armyLocalPositions ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
-    const character = world.characters.find(item => item.id === position.characterId && item.alive);
-    const army = world.armies.find(item => item.id === position.armyId);
-    if (!character || !army) continue;
-    const unit = character.militaryUnitId ? world.militaryUnits.find(item => item.id === character.militaryUnitId) : undefined;
-    markers.push({
-      id: `army-soldier-${army.id}-${character.id}`, x: position.localX, y: position.localY, kind: 'person', label: character.name,
-      refs: [{ kind: 'character', id: character.id }, { kind: 'army', id: army.id }, ...(unit ? [{ kind: 'militaryUnit' as const, id: unit.id }] : [])],
-      detail: `${character.militaryRole ?? 'солдат'} · ${position.activity}${unit ? ` · ${unit.name}` : ''}`,
-      visualRole: character.visualRole ?? 'soldier',
-    });
-  }
-
-  for (const wagon of (world.supplyWagons ?? []).filter(item => item.x === tile.x && item.y === tile.y && item.status !== 'уничтожен')) {
+  for (const wagon of (world.supplyWagons ?? []).filter(item => item.x === tile.x && item.y === tile.y && item.status !== 'уничтожен').sort((a, b) => a.id - b.id)) {
     const army = world.armies.find(item => item.id === wagon.armyId);
     const camp = world.armyCamps.find(item => item.armyId === wagon.armyId);
     const park = camp?.structureIds.map(id => world.armyCampStructures.find(item => item.id === id)).find(item => item?.kind === 'wagonPark');
-    const ordinal = Math.max(0, army?.supplyWagonIds.indexOf(wagon.id) ?? 0);
-    const point = park ? { x: park.localX + ordinal % Math.max(1, park.width), y: park.localY + park.height + Math.floor(ordinal / Math.max(1, park.width)) }
-      : { x: (camp?.centerX ?? Math.floor(width / 2)) + 4 + ordinal, y: (camp?.centerY ?? Math.floor(height / 2)) + 5 };
-    markers.push({
-      id: `supply-wagon-${wagon.id}`, x: point.x, y: point.y, kind: 'army', label: `Повозка обоза ${army?.name ?? `№${wagon.id}`}`,
-      refs: [{ kind: 'supplyWagon', id: wagon.id }, ...(army ? [{ kind: 'army' as const, id: army.id }] : [])],
-      detail: `${wagon.horseCount} лошадей · состояние ${Math.round(wagon.condition)}% · ${wagon.status}`, visualRole: 'wagon',
-    });
+    for (let unitIndex = 0; unitIndex < Math.max(1, wagon.wagonCount); unitIndex += 1) {
+      const preferred = park
+        ? { x: park.localX + unitIndex % Math.max(1, park.width), y: park.localY + park.height + Math.floor(unitIndex / Math.max(1, park.width)) }
+        : { x: (camp?.centerX ?? Math.floor(width / 2)) + 4 + unitIndex, y: (camp?.centerY ?? Math.floor(height / 2)) + 5 };
+      const point = occupancy.claimNearest(preferred, `${world.config.seed}:повозка:${wagon.id}:${unitIndex}`, wagonCellAvailable);
+      if (!point) continue;
+      markers.push({
+        id: `supply-wagon-${wagon.id}-${unitIndex}`, x: point.x, y: point.y, kind: 'army', label: `Повозка ${unitIndex + 1}/${Math.max(1, wagon.wagonCount)} · ${army?.name ?? `обоз №${wagon.id}`}`,
+        refs: [{ kind: 'supplyWagon', id: wagon.id }, ...(army ? [{ kind: 'army' as const, id: army.id }] : [])],
+        detail: `${wagon.horseCount} лошадей в обозе · состояние ${Math.round(wagon.condition)}% · ${wagon.status}`, visualRole: 'wagon',
+      });
+    }
   }
-
-  for (const monster of world.monsters.filter(item => item.alive && item.x === tile.x && item.y === tile.y)) {
-    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:чудовище:${monster.id}:${tile.x}:${tile.y}`), 6);
-    const footprintWidth = Math.max(1, monster.footprintWidth ?? 1);
-    const footprintHeight = Math.max(1, monster.footprintHeight ?? 1);
-    const topLeft = fitFootprint(cells, width, height, point, footprintWidth, footprintHeight);
-    occupyFootprint(cells, width, topLeft, footprintWidth, footprintHeight);
-    markers.push({ id: `monster-${monster.id}`, x: topLeft.x, y: topLeft.y, kind: 'monster', label: monster.name, refs: [{ kind: 'monster', id: monster.id }], detail: `${monster.species}, сила ${monster.power} · занимает ${footprintWidth}×${footprintHeight} клеток`, footprintWidth, footprintHeight });
-  }
-
-  for (const population of world.animalPopulations.filter(item => item.count > 0 && item.x === tile.x && item.y === tile.y)) {
-    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:популяция:${population.id}:${tile.x}:${tile.y}`), 5);
-    markers.push({ id: `fauna-${population.id}`, x: point.x, y: point.y, kind: 'fauna', label: population.species, refs: [{ kind: 'animalPopulation', id: population.id }], count: population.count, detail: `${population.count} особей · ${population.diet}` });
-    const trail = cells[point.y * width + point.x];
-    if (trail && !trail.feature) trail.feature = 'animal-trail';
-  }
-  markers.push(...placeNaturalResources(world, tile, cells, width, height));
 
   for (const item of world.items.filter(entry => entry.settlementId === settlement?.id && !entry.ownerCharacterId && !entry.householdId && !entry.establishmentId).slice(0, 24)) {
     const building = item.buildingId ? world.buildings.find(entry => entry.id === item.buildingId) : undefined;
@@ -700,6 +705,153 @@ function buildSurfaceMarkers(
   return markers;
 }
 
+function placeAnimalPopulation(
+  world: WorldState,
+  cells: LocalCell[],
+  width: number,
+  occupancy: LocalOccupancyGrid,
+  population: WorldState['animalPopulations'][number],
+  settlement?: WorldState['settlements'][number],
+): LocalMarker[] {
+  const markers: LocalMarker[] = [];
+  const count = Math.max(0, Math.round(population.count));
+  if (!count) return markers;
+  const predicate = (cell: LocalCell) => animalCellAvailable(cell, population.species, settlement, width);
+  const candidates = cells.filter(predicate);
+  if (!candidates.length) return markers;
+  const groupSize = animalGroupSize(population.species, population.diet);
+  const clusterCount = Math.max(1, Math.min(count, Math.ceil(count / groupSize)));
+  const centers = selectSeparatedCenters(candidates, clusterCount, `${world.config.seed}:стада:${population.id}:${world.year}:${seasonIndex(world.month)}`);
+  const pools: LocalCell[][] = centers.map(() => []);
+  for (const cell of candidates) {
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < centers.length; index += 1) {
+      const center = centers[index]!;
+      const distance = Math.hypot(cell.x - center.x, cell.y - center.y);
+      if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = index; }
+    }
+    pools[nearestIndex]!.push(cell);
+  }
+  pools.forEach((pool, poolIndex) => pool.sort((a, b) => {
+    const center = centers[poolIndex]!;
+    const distanceA = Math.hypot(a.x - center.x, a.y - center.y);
+    const distanceB = Math.hypot(b.x - center.x, b.y - center.y);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+    return hashSeed(`${world.config.seed}:стая:${population.id}:${a.x}:${a.y}`)
+      - hashSeed(`${world.config.seed}:стая:${population.id}:${b.x}:${b.y}`);
+  }));
+  const pointers = pools.map(() => 0);
+  for (let unitIndex = 0; unitIndex < count; unitIndex += 1) {
+    const targetPool = Math.floor(unitIndex / groupSize) % pools.length;
+    let point: LocalPoint | undefined;
+    for (let offset = 0; offset < pools.length && !point; offset += 1) {
+      const poolIndex = (targetPool + offset) % pools.length;
+      const pool = pools[poolIndex]!;
+      while (pointers[poolIndex]! < pool.length) {
+        const cell = pool[pointers[poolIndex]!]!;
+        pointers[poolIndex] = pointers[poolIndex]! + 1;
+        point = occupancy.claim({ x: cell.x, y: cell.y }, predicate);
+        if (point) break;
+      }
+    }
+    if (!point) {
+      const fallback = deterministicPoint(cells, `${world.config.seed}:особь-резерв:${population.id}:${unitIndex}`, broadAnimalCellAvailable);
+      point = occupancy.claimNearest(fallback, `${world.config.seed}:особь-резерв:${population.id}:${unitIndex}`, broadAnimalCellAvailable);
+    }
+    if (!point) break;
+    markers.push({
+      id: `fauna-${population.id}-${unitIndex}`, x: point.x, y: point.y, kind: 'fauna', label: `${population.species} ${unitIndex + 1}`,
+      refs: [{ kind: 'animalPopulation', id: population.id }],
+      detail: `${population.diet} · особь ${unitIndex + 1}/${count} · здоровье популяции ${Math.round(population.health)}%`,
+      visualRole: population.species,
+    });
+    if (unitIndex % groupSize === 0) {
+      const trail = cells[point.y * width + point.x];
+      if (trail && !trail.feature) trail.feature = 'animal-trail';
+    }
+  }
+  return markers;
+}
+
+function animalGroupSize(species: string, diet: WorldState['animalPopulations'][number]['diet']): number {
+  if (/заяц|кролик|крыс|мыш|суслик/i.test(species)) return 4;
+  if (/олень|лось|антилоп|коз|овц/i.test(species)) return 8;
+  if (/волк|гиен|шакал/i.test(species)) return 6;
+  if (/кабан|свин/i.test(species)) return 5;
+  if (/птиц|ворон|гусь|утк/i.test(species)) return 10;
+  return diet === 'хищник' ? 3 : 5;
+}
+
+function seasonIndex(month: number): number { return Math.floor((Math.max(1, month) - 1) / 3); }
+
+function animalCellAvailable(cell: LocalCell, species: string, settlement: WorldState['settlements'][number] | undefined, mapSize: number): boolean {
+  const aquatic = /рыб|карп|щук|лосос|угор/i.test(species);
+  if (aquatic) return cell.ground === 'water' && !cell.blocked;
+  if (!broadAnimalCellAvailable(cell)) return false;
+  if (cell.buildingId || cell.armyCampStructureId || cell.constructionProjectId || cell.ground === 'floor' || cell.ground === 'road') return false;
+  if (settlement) {
+    const edge = Math.max(8, Math.round(mapSize * .18));
+    const outskirts = cell.x < edge || cell.y < edge || cell.x >= mapSize - edge || cell.y >= mapSize - edge;
+    if (!outskirts && !cell.fieldId) return false;
+  }
+  return true;
+}
+
+function broadAnimalCellAvailable(cell: LocalCell): boolean {
+  return !cell.blocked && cell.ground !== 'water' && cell.ground !== 'floor' && !cell.buildingId && !cell.armyCampStructureId && !cell.constructionProjectId;
+}
+
+function humanCellAvailable(cell: LocalCell): boolean {
+  return !cell.blocked && cell.ground !== 'water';
+}
+
+function marketCellAvailable(cell: LocalCell): boolean {
+  return humanCellAvailable(cell) && (cell.ground === 'road' || cell.ground === 'floor' || Boolean(cell.establishmentId));
+}
+
+function monsterCellAvailable(cell: LocalCell): boolean {
+  return !cell.blocked && cell.ground !== 'water' && cell.ground !== 'floor' && !cell.buildingId && !cell.armyCampStructureId;
+}
+
+function wagonCellAvailable(cell: LocalCell): boolean {
+  return !cell.blocked && cell.ground !== 'water' && cell.ground !== 'floor' && !cell.buildingId;
+}
+
+function deterministicPoint(cells: LocalCell[], seed: string, predicate: (cell: LocalCell) => boolean): LocalPoint {
+  const candidates = cells.filter(predicate);
+  if (!candidates.length) return { x: 0, y: 0 };
+  const cell = candidates[hashSeed(seed) % candidates.length]!;
+  return { x: cell.x, y: cell.y };
+}
+
+function selectSeparatedCenters(candidates: LocalCell[], desired: number, seed: string): LocalPoint[] {
+  if (!candidates.length || desired <= 0) return [];
+  const target = Math.min(desired, candidates.length);
+  const first = candidates.reduce((best, cell) => hashSeed(`${seed}:первый:${cell.x}:${cell.y}`) < hashSeed(`${seed}:первый:${best.x}:${best.y}`) ? cell : best, candidates[0]!);
+  const centers: LocalPoint[] = [{ x: first.x, y: first.y }];
+  const selectedKeys = new Set([`${first.x}:${first.y}`]);
+  const minDistance = candidates.map(cell => Math.hypot(cell.x - first.x, cell.y - first.y));
+  while (centers.length < target) {
+    let bestIndex = -1;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const cell = candidates[index]!;
+      if (selectedKeys.has(`${cell.x}:${cell.y}`)) continue;
+      const score = minDistance[index]! * 10_000 + (hashSeed(`${seed}:${centers.length}:${cell.x}:${cell.y}`) % 10_000);
+      if (score > bestScore) { bestScore = score; bestIndex = index; }
+    }
+    if (bestIndex < 0) break;
+    const best = candidates[bestIndex]!;
+    centers.push({ x: best.x, y: best.y });
+    selectedKeys.add(`${best.x}:${best.y}`);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const cell = candidates[index]!;
+      minDistance[index] = Math.min(minDistance[index]!, Math.hypot(cell.x - best.x, cell.y - best.y));
+    }
+  }
+  return centers;
+}
 
 function campStructureLabel(kind: WorldState['armyCampStructures'][number]['kind']): string {
   return ({
@@ -719,35 +871,72 @@ function placeNaturalResources(world: WorldState, tile: Tile, cells: LocalCell[]
   const markers: LocalMarker[] = [];
   const occupied = new Set<string>();
   const ingredients = world.ingredients
-    .filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y)
+    .filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y && item.kind !== 'животный компонент')
     .sort((a, b) => a.id - b.id);
 
   for (const ingredient of ingredients) {
     const desired = Math.max(1, Math.round(ingredient.abundance));
     const candidates = cells.filter(cell => resourceCellAvailable(cell) && !occupied.has(`${cell.x}:${cell.y}`));
     if (!candidates.length) continue;
-    const center = candidates[hashSeed(`${world.config.seed}:центр-ресурса:${ingredient.id}`) % candidates.length]!;
-    candidates.sort((a, b) => {
-      const distanceA = Math.hypot(a.x - center.x, a.y - center.y);
-      const distanceB = Math.hypot(b.x - center.x, b.y - center.y);
-      if (distanceA !== distanceB) return distanceA - distanceB;
-      return hashSeed(`${ingredient.id}:${a.x}:${a.y}`) - hashSeed(`${ingredient.id}:${b.x}:${b.y}`);
-    });
-    const selected = candidates.slice(0, Math.min(desired, candidates.length));
+    const patchCount = Math.max(1, Math.min(desired, Math.ceil(desired / 7), 24));
+    const centers = selectSeparatedCenters(candidates, patchCount, `${world.config.seed}:участки-ресурса:${ingredient.id}:${world.year}:${seasonIndex(world.month)}`);
+    const pools: LocalCell[][] = centers.map(() => []);
+    for (const cell of candidates) {
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < centers.length; index += 1) {
+        const center = centers[index]!;
+        const distance = Math.hypot(cell.x - center.x, cell.y - center.y);
+        if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = index; }
+      }
+      pools[nearestIndex]!.push(cell);
+    }
+    pools.forEach((pool, poolIndex) => pool.sort((a, b) => {
+      const center = centers[poolIndex]!;
+      const scoreA = Math.hypot(a.x - center.x, a.y - center.y) + resourceHabitatPenalty(a, ingredient.kind, ingredient.name, tile.terrain);
+      const scoreB = Math.hypot(b.x - center.x, b.y - center.y) + resourceHabitatPenalty(b, ingredient.kind, ingredient.name, tile.terrain);
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return hashSeed(`${world.config.seed}:ресурс:${ingredient.id}:${a.x}:${a.y}`)
+        - hashSeed(`${world.config.seed}:ресурс:${ingredient.id}:${b.x}:${b.y}`);
+    }));
+    const pointers = pools.map(() => 0);
+    const selected: LocalCell[] = [];
+    for (let unitIndex = 0; unitIndex < Math.min(desired, candidates.length); unitIndex += 1) {
+      let cell: LocalCell | undefined;
+      for (let offset = 0; offset < pools.length && !cell; offset += 1) {
+        const poolIndex = (unitIndex + offset) % pools.length;
+        const pool = pools[poolIndex]!;
+        while (pointers[poolIndex]! < pool.length) {
+          const candidate = pool[pointers[poolIndex]!]!;
+          pointers[poolIndex] = pointers[poolIndex]! + 1;
+          if (!occupied.has(`${candidate.x}:${candidate.y}`)) { cell = candidate; break; }
+        }
+      }
+      if (!cell) break;
+      occupied.add(`${cell.x}:${cell.y}`);
+      selected.push(cell);
+    }
+
     selected.forEach((cell, unitIndex) => {
-      const key = `${cell.x}:${cell.y}`;
-      occupied.add(key);
       cell.feature = resourceFeature(ingredient.kind, ingredient.name);
       cell.resourceIngredientId = ingredient.id;
       cell.resourceUnitIndex = unitIndex;
       markers.push({
         id: `resource-${ingredient.id}-${unitIndex}`, x: cell.x, y: cell.y, kind: 'resource', label: ingredient.name,
         refs: [{ kind: 'ingredient', id: ingredient.id }], count: 1,
-        detail: `${ingredient.kind} · единица ${unitIndex + 1}/${desired}`,
+        detail: `${ingredient.kind} · единица ${unitIndex + 1}/${desired}`, visualRole: 'map-reference',
       });
     });
   }
   return markers;
+}
+
+function resourceHabitatPenalty(cell: LocalCell, kind: WorldState['ingredients'][number]['kind'], name: string, terrain: Terrain): number {
+  if (kind === 'минерал') return cell.ground === 'stone' || cell.feature === 'rock' ? -8 : terrain === 'mountains' || terrain === 'hills' ? -3 : 8;
+  if (kind === 'гриб') return cell.ground === 'mud' || cell.feature === 'bush' || terrain === 'forest' ? -5 : 4;
+  if (/тростник|камыш/i.test(name)) return cell.ground === 'mud' || cell.feature === 'reeds' ? -7 : 10;
+  if (/ягод|плод|виноград/i.test(name)) return cell.feature === 'bush' || terrain === 'forest' ? -4 : 2;
+  return cell.ground === 'grass' || cell.ground === 'mud' ? -2 : 3;
 }
 
 function resourceCellAvailable(cell: LocalCell): boolean {
@@ -847,6 +1036,10 @@ export function localCellSummary(map: LocalMapData, x: number, y: number): { tit
   const cell = map.cells[y * map.width + x];
   const markers = map.markers.filter(marker => x >= marker.x && y >= marker.y && x < marker.x + (marker.footprintWidth ?? 1) && y < marker.y + (marker.footprintHeight ?? 1));
   if (!cell) return { title: 'За пределами карты', lines: [], markers: [] };
+  if (cell.fieldId) {
+    const fieldMarker = map.markers.find(marker => marker.kind === 'field' && marker.refs.some(ref => ref.kind === 'field' && ref.id === cell.fieldId));
+    if (fieldMarker && !markers.includes(fieldMarker)) markers.push(fieldMarker);
+  }
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
     tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', 'tilled-soil': 'вспаханная земля', seedlings: 'всходы', crop: 'растущая культура', 'ripe-crop': 'созревший урожай', 'construction-foundation': 'фундамент стройки', 'construction-frame': 'каркас стройки', 'construction-wall': 'незавершённые стены', scaffold: 'строительные леса', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', bones: 'кости', grave: 'могила', cemetery: 'ограда кладбища', chest: 'сундук или предметы',

@@ -99,7 +99,7 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
         </div>}
         <div className="local-legend">
           <h3>Обозначения</h3>
-          <div>{Object.entries(markerColors).map(([kind, color]) => <span key={kind}><i style={{ background: color }} />{markerLabel(kind as LocalMarker['kind'])}</span>)}</div>
+          <div>{Object.entries(markerColors).filter(([kind]) => kind !== 'group' && kind !== 'patrol').map(([kind, color]) => <span key={kind}><i style={{ background: color }} />{markerLabel(kind as LocalMarker['kind'])}</span>)}</div>
         </div>
       </aside>
     </div>
@@ -306,10 +306,10 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
   }
 
   for (const marker of map.markers) {
+    if (marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'field' || marker.kind === 'resource') continue;
     const footprintWidth = marker.footprintWidth ?? 1;
     const footprintHeight = marker.footprintHeight ?? 1;
     if (marker.x + footprintWidth < startX || marker.x > endX || marker.y + footprintHeight < startY || marker.y > endY) continue;
-    if (marker.kind === 'building' || marker.kind === 'establishment') continue;
     const visualSize = markerVisualSize(marker, cellSize);
     const x = ox + marker.x * cellSize + (footprintWidth * cellSize - footprintWidth * visualSize) / 2;
     const y = oy + marker.y * cellSize + (footprintHeight * cellSize - footprintHeight * visualSize) / 2;
@@ -387,5 +387,5 @@ function entityName(world: WorldState, ref: EntityRef): string {
 }
 
 function markerLabel(kind: LocalMarker['kind']): string {
-  return ({ person: 'житель', patrol: 'патруль стражи', group: 'группа жителей', army: 'армия', camp: 'полевое сооружение', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'артефакт', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение', field: 'поле', construction: 'стройплощадка', cemetery: 'кладбище', grave: 'могила', item: 'предмет', corpse: 'тело', merchant: 'странствующий торговец' } as const)[kind];
+  return ({ person: 'житель', patrol: 'патруль стражи', group: 'группа жителей', army: 'армия', camp: 'полевое сооружение', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'артефакт', effect: 'след события', fauna: 'животное', resource: 'природный ресурс', building: 'здание', establishment: 'заведение', field: 'поле', construction: 'стройплощадка', cemetery: 'кладбище', grave: 'могила', item: 'предмет', corpse: 'тело', merchant: 'странствующий торговец' } as const)[kind];
 }

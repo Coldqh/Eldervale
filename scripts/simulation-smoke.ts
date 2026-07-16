@@ -4,7 +4,7 @@ import { generateHistoricalWorld } from '../src/sim/historicalEngine';
 import { inspectWorldIntegrity } from '../src/sim/integrity';
 import { migrateWorld } from '../src/sim/migrateWorld';
 import { advanceWorld } from '../src/sim/simulation';
-import { generateLocalMap } from '../src/lib/localMap';
+import { generateLocalMap, localCellSummary } from '../src/lib/localMap';
 
 const config = {
   ...defaultConfig,
@@ -35,6 +35,24 @@ function signature(world: ReturnType<typeof generateHistoricalWorld>) {
   };
 }
 
+function assertUniqueLivingCells(map: ReturnType<typeof generateLocalMap>, label: string) {
+  const occupied = new Set<string>();
+  const living = map.markers.filter(marker => ['person', 'merchant', 'fauna', 'monster'].includes(marker.kind) || (marker.kind === 'army' && marker.visualRole === 'wagon'));
+  for (const marker of living) {
+    const width = marker.kind === 'monster' ? marker.footprintWidth ?? 1 : 1;
+    const height = marker.kind === 'monster' ? marker.footprintHeight ?? 1 : 1;
+    for (let y = marker.y; y < marker.y + height; y += 1) for (let x = marker.x; x < marker.x + width; x += 1) {
+      const key = `${x}:${y}`;
+      assert.ok(!occupied.has(key), `${label}: живые существа пересеклись в клетке ${key}`);
+      occupied.add(key);
+    }
+  }
+}
+
+function localMarkerSignature(map: ReturnType<typeof generateLocalMap>) {
+  return map.markers.map(marker => [marker.id, marker.x, marker.y, marker.kind, marker.visualRole]);
+}
+
 const first = generateHistoricalWorld(config);
 const second = generateHistoricalWorld(config);
 assert.deepEqual(signature(first), signature(second), 'один seed должен давать одинаковую прожитую историю');
@@ -59,7 +77,39 @@ for (const settlement of first.settlements) {
     const map = generateLocalMap(first, district.x, district.y);
     assert.equal(map.markers.filter(marker => marker.id.startsWith('army-soldier-')).length, 0, `${settlement.name}: армейские солдаты не должны дублироваться в городе`);
     assert.equal(map.markers.filter(marker => marker.kind === 'camp').length, 0, `${settlement.name}: полевой лагерь не должен появляться в городе`);
+    assert.equal(map.markers.filter(marker => marker.kind === 'group').length, 0, `${settlement.name}: жители не должны схлопываться в групповой маркер`);
+    assert.ok(map.cells.every(cell => cell.feature !== 'field'), `${settlement.name}: декоративные поля должны быть удалены`);
+    assert.ok(map.cells.filter(cell => cell.fieldId).every(cell => first.fields.some(field => field.id === cell.fieldId && field.globalX === district.x && field.globalY === district.y)), `${settlement.name}: каждая клетка поля должна ссылаться на реальный FieldPlot`);
+    const fieldCell = map.cells.find(cell => cell.fieldId);
+    if (fieldCell) assert.ok(localCellSummary(map, fieldCell.x, fieldCell.y).markers.some(marker => marker.kind === 'field'), `${settlement.name}: поле должно открываться из любой своей клетки`);
+    assertUniqueLivingCells(map, `${settlement.name}/${district.name}`);
   }
+}
+
+const animalTiles = [...new Set(first.animalPopulations.filter(population => population.count > 0).map(population => `${population.x}:${population.y}`))].slice(0, 8);
+assert.ok(animalTiles.length > 0, 'в тестовом мире должны существовать популяции животных');
+for (const tileKey of animalTiles) {
+  const [x, y] = tileKey.split(':').map(Number);
+  const map = generateLocalMap(first, x!, y!);
+  const repeated = generateLocalMap(first, x!, y!);
+  assert.deepEqual(localMarkerSignature(map), localMarkerSignature(repeated), `${tileKey}: локальное распределение должно быть детерминированным`);
+  for (const population of first.animalPopulations.filter(item => item.x === x && item.y === y && item.count > 0)) {
+    const animals = map.markers.filter(marker => marker.kind === 'fauna' && marker.refs.some(ref => ref.kind === 'animalPopulation' && ref.id === population.id));
+    assert.equal(animals.length, Math.round(population.count), `${population.species}: глобальная численность должна совпадать с числом локальных особей`);
+    assert.equal(new Set(animals.map(marker => `${marker.x}:${marker.y}`)).size, animals.length, `${population.species}: каждая особь должна занимать отдельную клетку`);
+  }
+  assertUniqueLivingCells(map, `дикая местность ${tileKey}`);
+}
+
+const abundantIngredient = [...first.ingredients].filter(item => item.kind !== 'животный компонент' && item.abundance >= 20).sort((a, b) => b.abundance - a.abundance)[0];
+assert.ok(abundantIngredient, 'в тестовом мире должен существовать обильный природный ресурс');
+if (abundantIngredient) {
+  const map = generateLocalMap(first, abundantIngredient.x, abundantIngredient.y);
+  const units = map.markers.filter(marker => marker.kind === 'resource' && marker.refs.some(ref => ref.kind === 'ingredient' && ref.id === abundantIngredient.id));
+  assert.equal(units.length, Math.round(abundantIngredient.abundance), `${abundantIngredient.name}: все единицы ресурса должны присутствовать локально`);
+  const spanX = Math.max(...units.map(marker => marker.x)) - Math.min(...units.map(marker => marker.x));
+  const spanY = Math.max(...units.map(marker => marker.y)) - Math.min(...units.map(marker => marker.y));
+  assert.ok(Math.max(spanX, spanY) >= map.width * .25, `${abundantIngredient.name}: ресурс не должен собираться в одном круге`);
 }
 
 const focused = structuredClone(first);

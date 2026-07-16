@@ -129,6 +129,25 @@ export function paintMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, 
   else if (marker.kind === 'cemetery' || marker.kind === 'grave') { ctx.fillStyle = '#050505'; ctx.fillRect(cx - r * .18, cy - r, r * .36, r * 2); ctx.fillRect(cx - r * .65, cy - r * .35, r * 1.3, r * .32); }
   else if (marker.kind === 'corpse' || marker.kind === 'effect') { ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(2, r * .35); ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.moveTo(cx - r * .45, cy - r); ctx.lineTo(cx + r * .45, cy + r); ctx.stroke(); }
   else if (marker.kind === 'monster') { ctx.fillStyle = '#e06f50'; ctx.beginPath(); ctx.moveTo(cx, y0 + size * .08); ctx.lineTo(x0 + w - size * .08, y0 + h - size * .08); ctx.lineTo(x0 + size * .08, y0 + h - size * .08); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+  else if (marker.kind === 'fauna') {
+    const species = marker.visualRole ?? marker.label;
+    const rabbit = /заяц|кролик/i.test(species);
+    const deer = /олень|лось|косул/i.test(species);
+    const canine = /волк|лис|шакал|собак/i.test(species);
+    ctx.fillStyle = rabbit ? '#b6aa8b' : deer ? '#9d7950' : canine ? '#777b72' : '#8a845f';
+    ctx.beginPath(); ctx.ellipse(cx - r * .15, cy + r * .2, r * .85, r * .48, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + r * .65, cy - r * .18, r * .38, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.lineWidth = Math.max(1, r * .16);
+    if (rabbit) {
+      ctx.beginPath(); ctx.moveTo(cx + r * .52, cy - r * .48); ctx.lineTo(cx + r * .42, cy - r * 1.15); ctx.moveTo(cx + r * .78, cy - r * .48); ctx.lineTo(cx + r * .92, cy - r * 1.12); ctx.stroke();
+    } else if (deer) {
+      ctx.beginPath(); ctx.moveTo(cx + r * .55, cy - r * .5); ctx.lineTo(cx + r * .35, cy - r * 1.05); ctx.moveTo(cx + r * .72, cy - r * .5); ctx.lineTo(cx + r * .95, cy - r * 1.05); ctx.moveTo(cx + r * .35, cy - r * .86); ctx.lineTo(cx + r * .12, cy - r * 1.02); ctx.moveTo(cx + r * .95, cy - r * .86); ctx.lineTo(cx + r * 1.18, cy - r * 1.02); ctx.stroke();
+    } else if (canine) {
+      ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx - r * 1.45, cy - r * .45); ctx.lineTo(cx - r * 1.22, cy + r * .25); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + r * .5, cy - r * .45); ctx.lineTo(cx + r * .48, cy - r * .9); ctx.lineTo(cx + r * .78, cy - r * .58); ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.moveTo(cx - r * .55, cy + r * .55); ctx.lineTo(cx - r * .55, cy + r); ctx.moveTo(cx + r * .25, cy + r * .55); ctx.lineTo(cx + r * .25, cy + r); ctx.stroke();
+  }
   else if (marker.kind === 'army') {
     ctx.strokeStyle = '#f0e2b7'; ctx.fillStyle = marker.visualRole === 'wagon' ? '#8b6845' : '#777b72'; ctx.lineWidth = Math.max(1.5, size * .12);
     if (marker.visualRole === 'wagon') {
@@ -139,7 +158,7 @@ export function paintMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, 
       ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy - r * 1.7); ctx.lineTo(cx + r * .8, cy - r * 1.35); ctx.lineTo(cx, cy - r * 1.05); ctx.stroke();
     }
   }
-  else { ctx.fillStyle = marker.kind === 'resource' ? '#80b89a' : marker.kind === 'fauna' ? '#86a76a' : '#d8c7a0'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillStyle = marker.kind === 'resource' ? '#80b89a' : '#d8c7a0'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   if ((marker.count ?? 0) > 1 && size >= 9) { ctx.fillStyle = '#121712'; ctx.font = `bold ${Math.max(7, r * 1.15)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(marker.count! > 99 ? '99+' : String(marker.count), cx, cy + .5); }
   ctx.restore();
 }
