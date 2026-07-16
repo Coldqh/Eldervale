@@ -2,6 +2,7 @@ import type { BurialRecord, BurialState, Cemetery, Character, Monster, WorldStat
 import type { WorldIndexes } from './indexes';
 import { RNG } from './rng';
 import { worldTick } from './scheduler';
+import { inheritanceHeir } from './socialSystem';
 
 export interface DeathContext {
   cause: string;
@@ -352,6 +353,46 @@ function detachDeadKnowledge(world: WorldState, deadIds: Set<number>): void {
 function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById: Map<number, Character>): void {
   const liveById = new Map(world.characters.map(item => [item.id, item]));
   const emptyHouseholdIds = new Set<number>();
+  for (const deceased of deadById.values()) {
+    const heir = inheritanceHeir(world, deceased);
+    if (heir && deceased.wallet > 0) {
+      heir.wallet += deceased.wallet;
+      heir.biography.push(`В ${world.year} году получил личное наследство после смерти ${deceased.name}.`);
+      const household = heir.householdId ? world.households.find(item => item.id === heir.householdId) : undefined;
+      if (household) household.history.push(`Личные деньги ${deceased.name} перешли наследнику ${heir.name}.`);
+    }
+  }
+  for (const survivor of world.characters) {
+    if (survivor.spouseId && deadIds.has(survivor.spouseId)) {
+      const former = deadById.get(survivor.spouseId);
+      survivor.spouseId = undefined;
+      survivor.biography.push(`В ${world.year} году овдовел после смерти ${former?.name ?? 'супруга'}.`);
+    }
+  }
+  for (const obligation of world.socialObligations ?? []) {
+    if (obligation.status !== 'active') continue;
+    if (deadIds.has(obligation.creditorCharacterId)) {
+      const deceased = deadById.get(obligation.creditorCharacterId);
+      const heir = deceased ? inheritanceHeir(world, deceased) : undefined;
+      if (heir && heir.id !== obligation.debtorCharacterId) {
+        obligation.creditorCharacterId = heir.id;
+        obligation.history.push(`После смерти кредитора обязательство унаследовал ${heir.name}.`);
+      } else {
+        obligation.status = 'forgiven'; obligation.resolvedTick = worldTick(world); obligation.history.push('Обязательство прекратилось после смерти кредитора без наследника.');
+      }
+    }
+    if (deadIds.has(obligation.debtorCharacterId)) {
+      const deceased = deadById.get(obligation.debtorCharacterId);
+      const heir = deceased ? inheritanceHeir(world, deceased) : undefined;
+      if (heir && heir.id !== obligation.creditorCharacterId && obligation.kind === 'loan') {
+        obligation.debtorCharacterId = heir.id;
+        obligation.amount *= .6;
+        obligation.history.push(`Часть долга перешла наследнику ${heir.name}.`);
+      } else {
+        obligation.status = 'broken'; obligation.resolvedTick = worldTick(world); obligation.history.push('Обязательство прекратилось после смерти должника.');
+      }
+    }
+  }
   for (const household of world.households) {
     household.memberIds = household.memberIds.filter(id => !deadIds.has(id));
     if (deadIds.has(household.headCharacterId)) household.headCharacterId = household.memberIds.find(id => liveById.has(id)) ?? 0;
@@ -361,7 +402,11 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   for (const building of world.buildings) {
     building.residentIds = building.residentIds.filter(id => !deadIds.has(id));
     building.workerIds = building.workerIds.filter(id => !deadIds.has(id));
-    if (building.ownerCharacterId && deadIds.has(building.ownerCharacterId)) building.ownerCharacterId = undefined;
+    if (building.ownerCharacterId && deadIds.has(building.ownerCharacterId)) {
+      const deceased = deadById.get(building.ownerCharacterId);
+      building.ownerCharacterId = deceased ? inheritanceHeir(world, deceased)?.id : undefined;
+      if (building.ownerCharacterId) building.history.push(`После смерти ${deceased?.name ?? 'владельца'} здание унаследовал ${liveById.get(building.ownerCharacterId)?.name ?? building.ownerCharacterId}.`);
+    }
     if (building.householdId && emptyHouseholdIds.has(building.householdId)) building.householdId = undefined;
   }
 
@@ -369,7 +414,8 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
     establishment.workerIds = establishment.workerIds.filter(id => !deadIds.has(id));
     if (deadIds.has(establishment.ownerCharacterId)) {
       const deadOwner = deadById.get(establishment.ownerCharacterId);
-      const successor = establishment.workerIds.find(id => liveById.has(id));
+      const familyHeir = deadOwner ? inheritanceHeir(world, deadOwner) : undefined;
+      const successor = familyHeir && familyHeir.age >= 16 && familyHeir.settlementId === establishment.settlementId ? familyHeir.id : establishment.workerIds.find(id => liveById.has(id));
       if (successor) {
         establishment.ownerCharacterId = successor;
         establishment.history.push(`После смерти ${deadOwner?.name ?? 'владельца'} заведение перешло работнику ${liveById.get(successor)?.name ?? successor}.`);
@@ -451,10 +497,12 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
 
   for (const artifact of world.artifacts) if (artifact.ownerId && deadIds.has(artifact.ownerId)) {
     const owner = deadById.get(artifact.ownerId);
+    const heir = owner ? inheritanceHeir(world, owner) : undefined;
     artifact.ownerHistory.push({ year: world.year, characterId: artifact.ownerId, settlementId: owner?.settlementId, reason: `владелец ${owner?.name ?? artifact.ownerId} умер` });
-    artifact.ownerId = undefined;
-    artifact.settlementId ??= owner?.settlementId;
-    artifact.history.push(`В ${world.year} году остался без владельца после смерти ${owner?.name ?? 'прежнего владельца'}.`);
+    artifact.ownerId = heir?.id;
+    artifact.settlementId = heir?.settlementId ?? artifact.settlementId ?? owner?.settlementId;
+    artifact.history.push(heir ? `В ${world.year} году перешёл по наследству к ${heir.name}.` : `В ${world.year} году остался без владельца после смерти ${owner?.name ?? 'прежнего владельца'}.`);
+    if (heir && !heir.artifactIds.includes(artifact.id)) heir.artifactIds.push(artifact.id);
   }
 
   for (const army of world.armies) army.soldierIds = (army.soldierIds ?? []).filter(id => !deadIds.has(id));

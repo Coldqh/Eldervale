@@ -7,11 +7,13 @@ import type { WorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
 import { registerWorldEventKnowledge } from './knowledgeSystem';
 import { requestConstructionProject } from './agricultureConstruction';
+import { transferKingdomTerritory } from './territory';
 import { controlledCapital, normalizeKingdomCapitals } from './kingdomState';
 import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
 import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
+import { recruitFactionThroughRelationships } from './socialSystem';
 
 const OFFICE_DEFINITIONS: Record<CourtOfficeKind, { professions: string[]; salary: number; influence: number }> = {
   'канцлер': { professions: ['scribe', 'merchant', 'priest'], salary: 12, influence: 18 },
@@ -75,8 +77,9 @@ export function initializeStateMachine(world: WorldState, rng = new RNG(`${world
 }
 
 export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
-  if (world.simulation.stateMachineVersion !== 1 || world.kingdomGovernments.length !== world.kingdoms.length) initializeStateMachine(world, rng, indexes);
   const tick = worldTick(world);
+  collapseExtinctRealms(world, rng, tick);
+  if (world.simulation.stateMachineVersion !== 1 || world.kingdomGovernments.length !== world.kingdoms.length) initializeStateMachine(world, rng, indexes);
   normalizeKingdomCapitals(world);
   synchronizeRealmOwnership(world, rng, tick);
 
@@ -97,6 +100,148 @@ export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldI
 
   advanceDiplomacy(world, rng, tick);
   trimStateCollections(world);
+}
+
+
+function collapseExtinctRealms(world: WorldState, rng: RNG, tick: number): void {
+  const livingByKingdom = new Map<number, number>();
+  for (const character of world.characters) {
+    if (!character.alive) continue;
+    livingByKingdom.set(character.kingdomId, (livingByKingdom.get(character.kingdomId) ?? 0) + 1);
+  }
+  const extinct = world.kingdoms.filter(kingdom => (livingByKingdom.get(kingdom.id) ?? 0) === 0);
+  if (!extinct.length || extinct.length === world.kingdoms.length) return;
+
+  for (const fallen of extinct) {
+    const fallenSettlements = world.settlements.filter(settlement => settlement.kingdomId === fallen.id);
+    const origin = fallenSettlements.find(settlement => settlement.id === fallen.capitalId) ?? fallenSettlements[0];
+    const candidates = world.kingdoms.filter(kingdom => kingdom.id !== fallen.id && (livingByKingdom.get(kingdom.id) ?? 0) > 0);
+    if (!candidates.length) continue;
+    const successor = [...candidates].sort((a, b) => {
+      const aCapital = controlledCapital(world, a.id);
+      const bCapital = controlledCapital(world, b.id);
+      const aDistance = origin && aCapital ? Math.hypot(origin.x - aCapital.x, origin.y - aCapital.y) : Number.POSITIVE_INFINITY;
+      const bDistance = origin && bCapital ? Math.hypot(origin.x - bCapital.x, origin.y - bCapital.y) : Number.POSITIVE_INFINITY;
+      return aDistance - bDistance || b.armyStrength - a.armyStrength || a.id - b.id;
+    })[0]!;
+
+    const capturedTreasury = Math.max(0, fallen.treasury) * .35;
+    successor.treasury += capturedTreasury;
+    successor.stability = clamp(successor.stability - Math.min(8, 2 + fallenSettlements.length), 0, 100);
+    if (!world.history.fallenRealms.some(realm => realm.formerKingdomId === fallen.id)) {
+      world.history.fallenRealms.push({
+        id: Math.max(0, ...world.history.fallenRealms.map(realm => realm.id)) + 1,
+        name: fallen.name,
+        species: fallen.species,
+        foundedYear: fallen.foundedYear,
+        fallenYear: world.year,
+        capitalName: origin?.name ?? fallen.name,
+        causeOfFall: 'исчезновение населения и прекращение государственной власти',
+        successorKingdomId: successor.id,
+        formerKingdomId: fallen.id,
+        color: fallen.color,
+      });
+    }
+    for (const settlement of fallenSettlements) {
+      settlement.kingdomId = successor.id;
+      settlement.unrest = clamp(settlement.unrest + 12, 0, 100);
+      settlement.history.push(`В ${world.year} году государство ${fallen.name} прекратило существование, и власть перешла к ${successor.name}.`);
+    }
+    const transferredCells = transferKingdomTerritory(world, fallen.id, successor.id, world.year, world.month, origin?.id);
+    for (const route of world.tradeRoutes) {
+      route.controlledByKingdomIds = [...new Set(route.controlledByKingdomIds.map(id => id === fallen.id ? successor.id : id))];
+    }
+    for (const dynasty of world.dynasties) if (dynasty.kingdomId === fallen.id) dynasty.kingdomId = successor.id;
+    for (const message of world.messages) if (message.recipientKingdomId === fallen.id) message.recipientKingdomId = successor.id;
+
+    const removedArmies = world.armies.filter(army => army.kingdomId === fallen.id);
+    const removedArmyIds = new Set(removedArmies.map(army => army.id));
+    const removedUnits = world.militaryUnits.filter(unit => unit.kingdomId === fallen.id || removedArmyIds.has(unit.armyId));
+    const removedUnitIds = new Set(removedUnits.map(unit => unit.id));
+    const removedWagons = world.supplyWagons.filter(wagon => wagon.kingdomId === fallen.id || removedArmyIds.has(wagon.armyId));
+    const removedWagonIds = new Set(removedWagons.map(wagon => wagon.id));
+    const militaryItemIds = new Set([...removedArmies.flatMap(army => army.inventoryItemIds), ...removedWagons.flatMap(wagon => wagon.inventoryItemIds)]);
+    const salvageSettlement = origin ?? fallenSettlements[0] ?? controlledCapital(world, successor.id);
+    const salvageBuilding = salvageSettlement ? world.buildings.find(building => building.settlementId === salvageSettlement.id && ['warehouse', 'arsenal', 'castle', 'barracks'].includes(building.type))
+      ?? world.buildings.find(building => building.settlementId === salvageSettlement.id) : undefined;
+    const successorRuler = livingCharacter(world, successor.rulerId) ?? strongestRealmCandidate(world, successor.id);
+    for (const itemId of militaryItemIds) {
+      const item = world.items.find(candidate => candidate.id === itemId);
+      if (!item) continue;
+      item.supplyWagonId = undefined;
+      item.householdId = undefined;
+      item.establishmentId = undefined;
+      item.equippedByCharacterId = undefined;
+      if (salvageSettlement) item.settlementId = salvageSettlement.id;
+      if (salvageBuilding) {
+        item.ownerCharacterId = undefined;
+        item.buildingId = salvageBuilding.id;
+        if (!salvageBuilding.inventoryItemIds.includes(item.id)) salvageBuilding.inventoryItemIds.push(item.id);
+      } else if (successorRuler) {
+        item.ownerCharacterId = successorRuler.id;
+        item.buildingId = undefined;
+        item.settlementId = successorRuler.settlementId;
+        if (!successorRuler.inventoryItemIds.includes(item.id)) successorRuler.inventoryItemIds.push(item.id);
+      }
+      item.history.push(`Перешло победителям после распада государства ${fallen.name}.`);
+    }
+    world.armies = world.armies.filter(army => !removedArmyIds.has(army.id));
+    world.militaryUnits = world.militaryUnits.filter(unit => !removedUnitIds.has(unit.id));
+    world.supplyWagons = world.supplyWagons.filter(wagon => !removedWagonIds.has(wagon.id));
+    world.simulation.queuedActions = world.simulation.queuedActions.filter(action => !(action.kind === 'army' && action.entityId && removedArmyIds.has(action.entityId)));
+
+    for (const war of world.wars.filter(war => war.active && (war.attackerId === fallen.id || war.defenderId === fallen.id))) {
+      war.active = false;
+      war.endYear = world.year;
+      war.victorId = war.attackerId === fallen.id ? war.defenderId : war.attackerId;
+      war.peaceTerms = `${fallen.name} прекратило существование; спорные земли перешли под власть ${successor.name}.`;
+      war.history.push(war.peaceTerms);
+    }
+
+    const stateIds = new Set(world.kingdomGovernments.filter(state => state.kingdomId === fallen.id).map(state => state.id));
+    const crownTitleIds = new Set(world.nobleTitles.filter(title => title.kingdomId === fallen.id && title.rank === 'корона').map(title => title.id));
+    const contractIds = new Set(world.vassalContracts.filter(contract => contract.kingdomId === fallen.id).map(contract => contract.id));
+    const officeIds = new Set(world.courtOffices.filter(office => office.kingdomId === fallen.id).map(office => office.id));
+    const factionIds = new Set(world.courtFactions.filter(faction => faction.kingdomId === fallen.id).map(faction => faction.id));
+    const orderIds = new Set(world.royalOrders.filter(order => order.kingdomId === fallen.id).map(order => order.id));
+    const crisisIds = new Set(world.stateCrises.filter(crisis => crisis.kingdomId === fallen.id).map(crisis => crisis.id));
+    const agreementIds = new Set(world.diplomaticAgreements.filter(agreement => agreement.kingdomIds.includes(fallen.id)).map(agreement => agreement.id));
+
+    world.kingdomGovernments = world.kingdomGovernments.filter(state => !stateIds.has(state.id));
+    world.nobleTitles = world.nobleTitles.filter(title => !crownTitleIds.has(title.id));
+    world.vassalContracts = world.vassalContracts.filter(contract => !contractIds.has(contract.id));
+    world.courtOffices = world.courtOffices.filter(office => !officeIds.has(office.id));
+    world.courtFactions = world.courtFactions.filter(faction => !factionIds.has(faction.id));
+    world.royalOrders = world.royalOrders.filter(order => !orderIds.has(order.id));
+    world.stateCrises = world.stateCrises.filter(crisis => !crisisIds.has(crisis.id));
+    world.diplomaticAgreements = world.diplomaticAgreements.filter(agreement => !agreementIds.has(agreement.id));
+    for (const character of world.characters) {
+      character.nobleTitleIds = (character.nobleTitleIds ?? []).filter(id => !crownTitleIds.has(id));
+      character.courtOfficeIds = (character.courtOfficeIds ?? []).filter(id => !officeIds.has(id));
+      if (character.courtFactionId && factionIds.has(character.courtFactionId)) character.courtFactionId = undefined;
+    }
+    for (const kingdom of world.kingdoms) {
+      kingdom.enemies = kingdom.enemies.filter(id => id !== fallen.id);
+      kingdom.claims = kingdom.claims.filter(id => id !== fallen.id);
+      kingdom.diplomacy = kingdom.diplomacy.filter(record => record.kingdomId !== fallen.id);
+    }
+    world.kingdoms = world.kingdoms.filter(kingdom => kingdom.id !== fallen.id);
+
+    recordStateEvent(world, {
+      kind: 'state',
+      title: `Распалось государство ${fallen.name}`,
+      description: `После исчезновения последней действующей власти земли перешли к государству ${successor.name}.`,
+      cause: 'государство лишилось живых жителей, правителя и способности поддерживать институты',
+      conditions: ['не осталось живых подданных', 'двор и вассальная система перестали действовать'],
+      decision: `${successor.name} заняло оставшиеся без власти земли`,
+      outcome: `${fallen.name} исчезло с политической карты`,
+      consequences: [`${fallenSettlements.length} владений и ${transferredCells} клеток сменили власть`, `захвачено ${capturedTreasury.toFixed(1)} крон казны`, 'старые должности и договоры прекращены'],
+      entityRefs: [{ kind: 'kingdom', id: successor.id }, ...fallenSettlements.slice(0, 3).map(settlement => ({ kind: 'settlement' as const, id: settlement.id }))],
+      importance: 5,
+    });
+    void rng;
+    void tick;
+  }
 }
 
 function ensureKingdomGovernment(world: WorldState, kingdom: Kingdom, rng: RNG, tick: number): KingdomGovernment {
@@ -143,7 +288,8 @@ function ensureRealmTitles(world: WorldState, kingdom: Kingdom, state: KingdomGo
   }
   state.sovereignTitleId = sovereign.id;
   addUnique(state.titleIds, sovereign.id);
-  addUnique(ruler.nobleTitleIds!, sovereign.id);
+  ruler.nobleTitleIds ??= [];
+  addUnique(ruler.nobleTitleIds, sovereign.id);
 
   const settlements = world.settlements.filter(item => item.kingdomId === kingdom.id).sort((a, b) => Number(b.id === state.capitalSettlementId) - Number(a.id === state.capitalSettlementId) || b.population - a.population);
   for (const settlement of settlements) {
@@ -159,7 +305,8 @@ function ensureRealmTitles(world: WorldState, kingdom: Kingdom, state: KingdomGo
         status: 'действует', claimantIds: [], history: [`Владение закреплено за ${holder.name}.`],
       };
       world.nobleTitles.push(title);
-      addUnique(holder.nobleTitleIds!, title.id);
+      holder.nobleTitleIds ??= [];
+      addUnique(holder.nobleTitleIds, title.id);
       holder.politicalInfluence = Math.max(holder.politicalInfluence ?? 0, 45);
     }
     title.kingdomId = kingdom.id;
@@ -208,7 +355,7 @@ function ensureCourt(world: WorldState, kingdom: Kingdom, state: KingdomGovernme
         appointedTick: tick, vacantSinceTick: holder ? undefined : tick, history: holder ? [`${holder.name} назначен на должность.`] : ['Должность остаётся вакантной.'],
       };
       world.courtOffices.push(office);
-      if (holder) { addUnique(holder.courtOfficeIds!, office.id); holder.visualRole ??= 'official'; }
+      if (holder) { holder.courtOfficeIds ??= []; addUnique(holder.courtOfficeIds, office.id); holder.visualRole ??= 'official'; }
     }
     addUnique(state.courtOfficeIds, office.id);
   }
@@ -256,7 +403,8 @@ function synchronizeRealmOwnership(world: WorldState, rng: RNG, tick: number): v
       const ruler = livingCharacter(world, newState.sovereignCharacterId);
       const candidate = chooseTitleHolder(world, newKingdom, settlement, ruler ?? strongestRealmCandidate(world, newKingdom.id)!, rng);
       title.holderCharacterId = candidate.id;
-      addUnique(candidate.nobleTitleIds!, title.id);
+      candidate.nobleTitleIds ??= [];
+      addUnique(candidate.nobleTitleIds, title.id);
     }
     addUnique(newState.titleIds, title.id);
     ensureVassalContracts(world, newKingdom, newState, rng, tick);
@@ -275,7 +423,7 @@ function synchronizeSuccession(world: WorldState, kingdom: Kingdom, state: Kingd
     if (!successor) return;
     state.sovereignCharacterId = successor.id; kingdom.rulerId = successor.id; crown && (crown.holderCharacterId = successor.id);
     state.legitimacy = clamp(state.legitimacy - (preferred ? 8 : 26) + successor.renown * .12, 8, 100);
-    successor.visualRole = 'king'; successor.politicalInfluence = Math.max(successor.politicalInfluence ?? 0, 80); addUnique(successor.nobleTitleIds!, state.sovereignTitleId);
+    successor.visualRole = 'king'; successor.politicalInfluence = Math.max(successor.politicalInfluence ?? 0, 80); successor.nobleTitleIds ??= []; addUnique(successor.nobleTitleIds, state.sovereignTitleId);
     state.heirCharacterId = chooseHeir(world, kingdom, successor)?.id;
     state.regentCharacterId = successor.age < 16 ? chooseRegent(world, kingdom, successor)?.id : undefined;
     state.history.push(`${successor.name} занял престол после смерти или исчезновения ${oldName}.`);
@@ -303,7 +451,7 @@ function synchronizeSuccession(world: WorldState, kingdom: Kingdom, state: Kingd
     const settlement = title.settlementId ? world.settlements.find(item => item.id === title.settlementId) : undefined;
     const replacement = title.rank === 'корона' ? sovereign : settlement ? chooseTitleHolder(world, kingdom, settlement, sovereign, rng) : sovereign;
     title.holderCharacterId = replacement.id; title.status = title.claimantIds.length ? 'оспаривается' : 'действует'; title.legitimacy = clamp(title.legitimacy - 12 + replacement.renown * .12, 12, 95);
-    title.history.push(`${replacement.name} унаследовал или получил владение.`); addUnique(replacement.nobleTitleIds!, title.id);
+    title.history.push(`${replacement.name} унаследовал или получил владение.`); replacement.nobleTitleIds ??= []; addUnique(replacement.nobleTitleIds, title.id);
   }
 }
 
@@ -319,7 +467,7 @@ function synchronizeCourt(world: WorldState, kingdom: Kingdom, state: KingdomGov
     office.holderCharacterId = replacement?.id; office.appointedTick = tick; office.vacantSinceTick = replacement ? undefined : office.vacantSinceTick ?? tick;
     office.competence = replacement ? competenceFor(replacement, office.kind) : 0; office.loyalty = replacement?.loyalty ?? 0;
     office.history.push(replacement ? `${replacement.name} назначен на освободившуюся должность.` : 'После выбытия прежнего чиновника должность осталась вакантной.');
-    if (replacement) { used.add(replacement.id); addUnique(replacement.courtOfficeIds!, office.id); replacement.visualRole ??= 'official'; }
+    if (replacement) { used.add(replacement.id); replacement.courtOfficeIds ??= []; addUnique(replacement.courtOfficeIds, office.id); replacement.visualRole ??= 'official'; }
   }
   const filled = state.courtOfficeIds.map(id => world.courtOffices.find(item => item.id === id)).filter((item): item is CourtOffice => Boolean(item?.holderCharacterId));
   state.administration = clamp(15 + average(filled.map(item => item.competence)) * .65 - state.corruption * .25, 5, 100);
@@ -413,6 +561,10 @@ function updateFactions(world: WorldState, kingdom: Kingdom, state: KingdomGover
       leader = candidates.sort((a, b) => factionLeadershipScore(b, faction.kind) - factionLeadershipScore(a, faction.kind))[0] ?? strongestRealmCandidate(world, kingdom.id) ?? livingCharacter(world, state.sovereignCharacterId);
       if (!leader) continue;
       faction.leaderCharacterId = leader.id; addUnique(faction.memberIds, leader.id); faction.history.push(`${leader.name} возглавил группировку.`);
+    }
+    if (tick % 3 === faction.id % 3) {
+      const candidates = factionMembers(world, world.characters.filter(character => character.alive && character.kingdomId === kingdom.id), state, faction.kind);
+      recruitFactionThroughRelationships(world, faction, leader, candidates);
     }
     faction.influence = clamp(faction.influence + faction.memberIds.length / 80 + (leader.courtOfficeIds?.length ?? 0) * .2 - .2, 4, 95);
     let drift = (state.legitimacy - 50) / 180 + (leader.loyalty - 50) / 200 - realmUnrest / 500;

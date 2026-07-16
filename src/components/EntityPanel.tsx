@@ -104,7 +104,10 @@ function row(label: string, value: React.ReactNode) { return <div className="sta
 
 function relationshipText(world: WorldState, characterId: number, relationship: Relationship, onSelect: (ref: EntityRef) => void) {
   const otherId = relationship.characterAId === characterId ? relationship.characterBId : relationship.characterAId;
-  return <span className="relationship-line" key={relationship.id}>{link(getTitle(world, { kind: 'character', id: otherId }), { kind: 'character', id: otherId }, onSelect)}<small>{relationship.kind}, сила {relationship.strength}: {relationship.reason}</small></span>;
+  const details = relationship.trust === undefined
+    ? `${relationship.kind}, сила ${relationship.strength}`
+    : `${relationship.kind} · ${relationship.status ?? 'stable'} · доверие ${Math.round(relationship.trust ?? 0)}, привязанность ${Math.round(relationship.affection ?? 0)}, уважение ${Math.round(relationship.respect ?? 0)}, страх ${Math.round(relationship.fear ?? 0)}, напряжение ${Math.round(relationship.tension ?? 0)}`;
+  return <span className="relationship-line" key={relationship.id}>{link(getTitle(world, { kind: 'character', id: otherId }), { kind: 'character', id: otherId }, onSelect)}<small>{details}: {relationship.reason}{relationship.contexts?.length ? ` · ${relationship.contexts.map(mindLabel).join(', ')}` : ''}</small></span>;
 }
 
 
@@ -118,6 +121,8 @@ function mindLabel(value: string): string {
     survive: 'выжить', feed_family: 'накормить семью', earn_wealth: 'заработать', gain_power: 'получить власть', protect_home: 'защитить дом', serve_faith: 'служить вере', revenge: 'отомстить', escape_justice: 'избежать закона', master_craft: 'стать мастером', explore: 'исследовать мир',
     debt: 'долг', employment: 'работа', oath: 'присяга', office: 'должность', vassalage: 'вассальная обязанность', promise: 'обещание',
     neighbors: 'соседи', workers: 'работники', merchants: 'купцы', guards: 'стража', clergy: 'духовенство', nobility: 'знать', army: 'армия', court: 'двор',
+    household: 'общий дом', work: 'работа', market: 'рынок', travel: 'дорога', crime: 'преступление',
+    loan: 'заём', service: 'услуга', protection: 'защита', patronage: 'покровительство', family_support: 'поддержка семьи', work_referral: 'рекомендация', silence: 'обет молчания',
   };
   return labels[value] ?? value;
 }
@@ -366,6 +371,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {entity.mind && row('Эмоции', `страх ${Math.round(entity.mind.emotions.fear)}, злость ${Math.round(entity.mind.emotions.anger)}, горе ${Math.round(entity.mind.emotions.grief)}, надежда ${Math.round(entity.mind.emotions.hope)}, стресс ${Math.round(entity.mind.emotions.stress)}, удовлетворённость ${Math.round(entity.mind.emotions.contentment)}`)}
       {entity.mind && row('Активные цели', entity.mind.goals.filter((goal: any) => goal.status === 'active').map((goal: any) => `${mindLabel(goal.kind)} ${Math.round(goal.priority)}: ${goal.reason}`).join('; ') || 'нет')}
       {entity.mind && row('Обязательства', entity.mind.obligations.map((item: any) => `${mindLabel(item.kind)} ${Math.round(item.strength)}: ${item.reason}`).join('; ') || 'нет')}
+      {row('Личные долги и обещания', world.socialObligations.filter(item => item.status === 'active' && (item.debtorCharacterId === entity.id || item.creditorCharacterId === entity.id)).slice(-10).map(item => `${item.debtorCharacterId === entity.id ? 'должен' : 'ожидает от'} ${getTitle(world, { kind: 'character', id: item.debtorCharacterId === entity.id ? item.creditorCharacterId : item.debtorCharacterId })}: ${mindLabel(item.kind)}${item.amount > 0 ? ` ${item.amount.toFixed(1)} крон` : ''} — ${item.reason}`).join('; ') || 'нет')}
       {entity.mind && row('Репутация', entity.mind.reputations.map((item: any) => `${mindLabel(item.group)} ${item.score}`).join(', ') || 'не сложилась')}
       {entity.mind && row('Тайны', entity.mind.secrets.filter((item: any) => !item.exposed).map((item: any) => `${item.summary} [${item.severity}]`).join('; ') || 'неизвестны')}
       {row('Последние решения', world.decisions.filter(item => item.actorRef.kind === 'character' && item.actorRef.id === entity.id).slice(-6).reverse().map(item => `${Math.floor(item.tick / 12) + 1}.${String(item.tick % 12 + 1).padStart(2, '0')} — ${item.goal}: ${item.reason}`).join('; ') || 'нет зафиксированных решений')}

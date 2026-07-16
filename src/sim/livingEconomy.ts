@@ -8,6 +8,7 @@ import { appendCausalEvent } from './causality';
 import { addMaterialItem, consumeOwnedMaterial, materialTemplateDetails, pruneEmptyMaterialItems, retailOffer } from './materialEconomy';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
+import { workplaceConnectionScore } from './socialSystem';
 
 const CLOTHING_SLOTS: EquipmentSlot[] = ['head', 'body', 'legs', 'feet', 'hands', 'cloak'];
 const FOOD_IDS = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'grain'] as const;
@@ -417,7 +418,9 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
         if (current >= capacity) continue;
         const preference = preferred.includes(establishment.type) ? 100 : 0;
         const vacancy = (capacity - current) / Math.max(1, capacity) * 20;
-        const score = preference + vacancy + establishment.reputation / 20 - establishment.id / 1_000_000;
+        const socialConnection = workplaceConnectionScore(world, character, establishment);
+        const familyPressure = character.householdId && establishment.workerIds.some(id => world.characters.find(item => item.id === id)?.householdId === character.householdId) ? 12 : 0;
+        const score = preference + vacancy + establishment.reputation / 20 + socialConnection + familyPressure - establishment.id / 1_000_000;
         if (score > bestScore) { bestScore = score; target = establishment; }
       }
       if (!target) continue;

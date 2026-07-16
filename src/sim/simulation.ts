@@ -21,6 +21,7 @@ import { advanceSettlementLife } from './settlementLife';
 import { advanceStateMachine } from './stateMachine';
 import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
+import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -778,17 +779,19 @@ function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): voi
 
     if (shortage <= Math.max(3, Math.ceil(settlement.population * .02))) continue;
     let destination: Settlement | undefined;
-    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestScore = Number.NEGATIVE_INFINITY;
     for (const candidate of world.settlements) {
       if (candidate.id === settlement.id || candidate.kingdomId !== settlement.kingdomId || candidate.residentialCapacity - candidate.population < 3) continue;
       const candidateDistance = Math.hypot(candidate.x - settlement.x, candidate.y - settlement.y);
-      if (candidateDistance < bestDistance) { bestDistance = candidateDistance; destination = candidate; }
+      const connection = localResidents.slice(0, 24).reduce((sum, resident) => sum + settlementConnectionScore(world, resident, candidate.id), 0);
+      const score = (candidate.residentialCapacity - candidate.population) * .8 + candidate.prosperity * .25 + connection - candidateDistance * 4;
+      if (score > bestScore) { bestScore = score; destination = candidate; }
     }
     if (!destination) {
       settlement.unrest = Math.min(100, settlement.unrest + 5);
       continue;
     }
-    const migrants = localResidents.filter(character => character.age >= 14 && !character.titles.length).slice(0, Math.min(shortage, rng.int(1, 6)));
+    const migrants = localResidents.filter(character => character.age >= 14 && !character.titles.length).sort((a, b) => settlementConnectionScore(world, b, destination!.id) - settlementConnectionScore(world, a, destination!.id) || a.id - b.id).slice(0, Math.min(shortage, rng.int(1, 6)));
     if (!migrants.length) continue;
     for (const migrant of migrants) {
       moveResidentInIndexes(indexes, migrant, destination.id);
@@ -868,6 +871,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
 
   onPhase?.('Цели, эмоции, обязательства и мотивы жителей');
   advanceMindSystem(world, rng);
+  onPhase?.('Связи, семьи, обещания и личные последствия');
+  advanceSocialSystem(world, rng, indexes);
   onPhase?.('Казармы, гарнизоны, жалование и снабжение армий');
   advanceMilitaryInfrastructure(world, rng, indexes);
   pruneEmptyMaterialItems(world);

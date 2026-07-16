@@ -12,6 +12,7 @@ import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
 import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { addCharacterSecret, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
+import { applyJudicialInfluence, witnessWillReport } from './socialSystem';
 
 const CIVIC_BUILDINGS: Partial<Record<BuildingType, { minPopulation: number; label: string; rooms: string[] }>> = {
   townHall: { minPopulation: 90, label: 'городская управа', rooms: ['зал совета', 'канцелярия', 'казначейская', 'приёмная'] },
@@ -302,11 +303,12 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
     const bHouse = b.householdId ? world.households.find(item => item.id === b.householdId)?.wealth ?? b.wealth : b.wealth;
     return (type === 'кража' || type === 'грабёж' || type === 'мошенничество' || type === 'взлом') ? bHouse - aHouse : Math.abs(a.id - perpetrator.id) - Math.abs(b.id - perpetrator.id);
   })[0] ?? rng.pick(victims);
-  const witnesses = residents
+  const severity = crimeSeverity(type);
+  const potentialWitnesses = residents
     .filter(character => character.id !== perpetrator.id && character.id !== victim.id && character.homeDistrict === district.districtName)
     .filter(character => rng.chance(Math.max(.08, district.safety / 140)))
-    .slice(0, rng.int(0, 4));
-  const severity = crimeSeverity(type);
+    .slice(0, Math.max(2, rng.int(1, 6)));
+  const witnesses = potentialWitnesses.filter(character => witnessWillReport(world, character, perpetrator, victim, severity, rng).reports).slice(0, 4);
   const evidence = clamp(rng.int(6, 36) + witnesses.length * 16 + government.guardIds.length / Math.max(1, settlement.population) * 760, 0, 100);
   const decision = recordDecision(world, {
     actorRef: { kind: 'character', id: perpetrator.id }, goal: selected.chosen.id === 'нападение' ? 'выплеснуть злость или запугать жертву' : 'получить ресурсы незаконным путём',
@@ -374,7 +376,11 @@ function processCourtCases(world: WorldState, settlement: Settlement, government
     const defendant = courtCase.defendantId ? world.characters.find(item => item.id === courtCase.defendantId) : undefined;
     if (!crime || !defendant) { courtCase.status = 'прекращено'; continue; }
     courtCase.status = 'слушается';
-    const guiltyScore = crime.evidence + crime.witnessIds.length * 12 - government.corruption * rng.int(0, 1) + rng.int(-15, 15);
+    const judge = courtCase.judgeId ? world.characters.find(item => item.id === courtCase.judgeId) : undefined;
+    const victim = crime.victimCharacterId ? world.characters.find(item => item.id === crime.victimCharacterId) : undefined;
+    const influence = applyJudicialInfluence(world, judge, defendant, victim, crime.severity, rng);
+    const guiltyScore = crime.evidence + crime.witnessIds.length * 12 - government.corruption * rng.int(0, 1) + influence.bias + rng.int(-15, 15);
+    courtCase.history.push(`${influence.reason}; влияние на оценку дела ${influence.bias >= 0 ? '+' : ''}${influence.bias.toFixed(1)}${influence.bribe > 0 ? `, передано ${influence.bribe.toFixed(1)} крон` : ''}.`);
     const verdict = sentenceFor(crime, guiltyScore, rng);
     courtCase.verdict = verdict.kind; courtCase.sentenceMonths = verdict.months; courtCase.fine = verdict.fine; courtCase.closedTick = worldTick(world); courtCase.status = 'завершено';
     crime.status = verdict.kind === 'оправдание' ? 'не раскрыто' : 'раскрыто';

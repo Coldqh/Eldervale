@@ -1,8 +1,8 @@
 import type { DecisionOptionScore, DecisionRecord, EntityRef, StateDelta, WorldEvent, WorldState } from '../types';
 import { worldTick } from './scheduler';
 
-const MAX_DECISIONS = 4_000;
-const MAX_STATE_DELTAS = 12_000;
+const MAX_DECISIONS = 12_000;
+const MAX_STATE_DELTAS = 40_000;
 
 export interface DecisionInput {
   actorRef: EntityRef;
@@ -170,7 +170,12 @@ function trimDecisionCore(world: WorldState): void {
     const remove = world.decisions.length - MAX_DECISIONS;
     const removedIds = new Set(world.decisions.slice(0, remove).map(item => item.id));
     world.decisions.splice(0, remove);
+    const removedDeltaIds = new Set(world.stateDeltas.filter(delta => delta.decisionId && removedIds.has(delta.decisionId)).map(delta => delta.id));
     world.stateDeltas = world.stateDeltas.filter(delta => !delta.decisionId || !removedIds.has(delta.decisionId));
+    for (const event of world.events) {
+      if (event.decisionId && removedIds.has(event.decisionId)) event.decisionId = undefined;
+      if (event.stateDeltaIds) event.stateDeltaIds = event.stateDeltaIds.filter(id => !removedDeltaIds.has(id));
+    }
   }
   if (world.stateDeltas.length > MAX_STATE_DELTAS) {
     const removable = world.stateDeltas.length - MAX_STATE_DELTAS;

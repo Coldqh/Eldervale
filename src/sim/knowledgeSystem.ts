@@ -629,7 +629,17 @@ function trimKnowledgeCollections(world: WorldState): void {
     world.rumors = keep.sort((a, b) => a.id - b.id);
     for (const state of world.settlementKnowledge) state.rumorIds = state.rumorIds.filter(id => ids.has(id));
   }
-  if (world.messages.length > MAX_MESSAGES) world.messages = [...world.messages].sort((a, b) => Number(b.status === 'в пути') - Number(a.status === 'в пути') || b.departedTick - a.departedTick).slice(0, MAX_MESSAGES).sort((a, b) => a.id - b.id);
+  if (world.messages.length > MAX_MESSAGES) {
+    const protectedMessageIds = new Set<number>([
+      ...world.royalOrders.map(order => order.messageId).filter((id): id is number => typeof id === 'number'),
+      ...world.diplomaticAgreements.map(agreement => agreement.messageId).filter((id): id is number => typeof id === 'number'),
+    ]);
+    const keepLimit = Math.max(MAX_MESSAGES, protectedMessageIds.size);
+    world.messages = [...world.messages]
+      .sort((a, b) => Number(protectedMessageIds.has(b.id)) - Number(protectedMessageIds.has(a.id)) || Number(b.status === 'в пути') - Number(a.status === 'в пути') || b.departedTick - a.departedTick)
+      .slice(0, keepLimit)
+      .sort((a, b) => a.id - b.id);
+  }
   if (world.knowledgeFacts.length > MAX_FACTS) {
     const protectedIds = new Set<number>();
     world.characters.forEach(character => character.knowledge.factIds.forEach(id => protectedIds.add(id)));

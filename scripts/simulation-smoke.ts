@@ -35,10 +35,12 @@ function signature(world: ReturnType<typeof generateHistoricalWorld>) {
 const first = generateHistoricalWorld(config);
 const second = generateHistoricalWorld(config);
 assert.deepEqual(signature(first), signature(second), 'один seed должен давать одинаковую прожитую историю');
-assert.equal(first.version, 17);
+assert.equal(first.version, 18);
 assert.ok(first.decisions.length > 0, 'история должна содержать решения');
 assert.ok(first.stateDeltas.length > 0, 'история должна содержать изменения состояния');
 assert.ok(first.characters.every(character => character.mind), 'каждый живой персонаж должен иметь психику');
+assert.ok(first.relationships.every(relation => relation.trust !== undefined && relation.tension !== undefined), 'каждая связь должна иметь социальное состояние');
+assert.ok(Array.isArray(first.socialObligations), 'мир должен хранить личные обязательства');
 
 const focused = structuredClone(first);
 const unfocused = structuredClone(first);
@@ -53,16 +55,15 @@ const report = inspectWorldIntegrity(focusedFuture);
 assert.deepEqual(report.errors, [], `ошибки целостности: ${report.errors.join(' | ')}`);
 
 const legacy = structuredClone(first) as any;
-legacy.version = 16;
-delete legacy.decisions;
-delete legacy.stateDeltas;
-for (const character of legacy.characters) delete character.mind;
-legacy.simulation.decisionCoreVersion = undefined;
-legacy.simulation.mindSystemVersion = undefined;
+legacy.version = 17;
+delete legacy.socialObligations;
+legacy.simulation.socialSystemVersion = undefined;
+legacy.simulation.lastSocialBurialId = undefined;
 const migrated = migrateWorld(legacy);
-assert.equal(migrated.version, 17);
+assert.equal(migrated.version, 18);
 assert.ok(migrated.characters.every(character => character.mind), 'миграция должна восстановить психику');
 assert.ok(Array.isArray(migrated.decisions) && Array.isArray(migrated.stateDeltas), 'миграция должна создать журналы причинности');
+assert.ok(Array.isArray(migrated.socialObligations), 'миграция должна создать социальные обязательства');
 assert.deepEqual(inspectWorldIntegrity(migrated).errors, [], 'мигрированный мир должен проходить проверку целостности');
 
 console.log(`OK: ${report.checks} проверок, ${focusedFuture.decisions.length} решений, ${focusedFuture.stateDeltas.length} изменений.`);

@@ -3,6 +3,8 @@ export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
 export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
+export type SocialContextKind = 'family' | 'household' | 'neighbors' | 'work' | 'market' | 'faith' | 'army' | 'court' | 'travel' | 'crime';
+export type RelationshipStatus = 'distant' | 'stable' | 'close' | 'strained' | 'hostile' | 'broken';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
 export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
@@ -487,6 +489,27 @@ export interface CharacterMind {
   lastDecisionTick: number;
 }
 
+
+export type SocialObligationKind = 'loan' | 'service' | 'promise' | 'protection' | 'patronage' | 'family_support' | 'work_referral' | 'silence';
+export type SocialObligationStatus = 'active' | 'fulfilled' | 'defaulted' | 'forgiven' | 'broken';
+
+export interface SocialObligation {
+  id: number;
+  kind: SocialObligationKind;
+  debtorCharacterId: number;
+  creditorCharacterId: number;
+  settlementId: number;
+  amount: number;
+  strength: number;
+  createdTick: number;
+  dueTick?: number;
+  resolvedTick?: number;
+  status: SocialObligationStatus;
+  reason: string;
+  secret: boolean;
+  history: string[];
+}
+
 export interface DecisionOptionScore {
   id: string;
   label: string;
@@ -805,6 +828,8 @@ export interface FallenRealm {
   causeOfFall: string;
   successorKingdomId?: number;
   ruinDungeonId?: number;
+  formerKingdomId?: number;
+  color?: string;
 }
 
 export interface HistoricalEraSummary {
@@ -911,6 +936,8 @@ export interface SimulationRuntimeState {
   knowledgeSystemVersion?: 1;
   settlementLifeVersion?: 1;
   stateMachineVersion?: 1;
+  socialSystemVersion?: 1;
+  lastSocialBurialId?: number;
   decisionCoreVersion?: 1;
   mindSystemVersion?: 1;
   clockTick: number;
@@ -1069,6 +1096,17 @@ export interface Relationship {
   sinceYear: number;
   public: boolean;
   reason: string;
+  contexts?: SocialContextKind[];
+  trust?: number;
+  affection?: number;
+  respect?: number;
+  fear?: number;
+  tension?: number;
+  familiarity?: number;
+  interactionCount?: number;
+  lastInteractionTick?: number;
+  status?: RelationshipStatus;
+  history?: string[];
 }
 
 export interface Dynasty {
@@ -1494,7 +1532,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 17;
+  version: 18;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1551,6 +1589,7 @@ export interface WorldState {
   royalOrders: RoyalOrder[];
   stateCrises: StateCrisis[];
   diplomaticAgreements: DiplomaticAgreement[];
+  socialObligations: SocialObligation[];
   decisions: DecisionRecord[];
   stateDeltas: StateDelta[];
   territoryHistory: TerritoryChange[];

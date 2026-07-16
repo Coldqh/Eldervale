@@ -19,7 +19,7 @@ const TILE_CHUNK_SIZE = 256;
 
 const entityCollections = [
   'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'militaryUnits', 'supplyWagons', 'monsters', 'cemeteries', 'burials', 'animalPopulations',
-  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'settlementGovernments', 'districtCivicStates', 'civicPatrols', 'crimes', 'courtCases', 'fireIncidents', 'kingdomGovernments', 'nobleTitles', 'vassalContracts', 'courtOffices', 'courtFactions', 'royalOrders', 'stateCrises', 'diplomaticAgreements', 'events', 'localMapChanges',
+  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'settlementGovernments', 'districtCivicStates', 'civicPatrols', 'crimes', 'courtCases', 'fireIncidents', 'kingdomGovernments', 'nobleTitles', 'vassalContracts', 'courtOffices', 'courtFactions', 'royalOrders', 'stateCrises', 'diplomaticAgreements', 'socialObligations', 'decisions', 'stateDeltas', 'events', 'localMapChanges',
 ] as const;
 
 type EntityCollection = typeof entityCollections[number];
@@ -190,7 +190,11 @@ async function loadPartitionedWorld(slotId: string): Promise<WorldState | undefi
   await transactionDone(transaction);
   db.close();
 
-  for (const name of entityCollections) collections[name]!.sort((a: any, b: any) => entityOrder(a) - entityOrder(b));
+  const legacyCore = core.core as unknown as Record<string, unknown>;
+  for (const name of entityCollections) {
+    if (collections[name]!.length === 0 && Array.isArray(legacyCore[name])) collections[name] = legacyCore[name] as unknown[];
+    collections[name]!.sort((a: any, b: any) => entityOrder(a) - entityOrder(b));
+  }
   tileChunks.sort((a, b) => a.order - b.order);
   fingerprintCache.set(slotId, fingerprints);
   return migrateWorld({ ...core.core, tiles: tileChunks.flatMap(chunk => chunk.data), ...collections });

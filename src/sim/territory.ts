@@ -49,6 +49,22 @@ export function advanceModernTerritories(world: WorldState, rng: RNG): void {
   }
 }
 
+export function transferKingdomTerritory(
+  world: WorldState,
+  fromKingdomId: number,
+  toKingdomId: number,
+  year: number,
+  month: number,
+  sourceSettlementId?: number,
+): number {
+  let transferred = 0;
+  for (const tile of world.tiles) {
+    if (tile.kingdomId !== fromKingdomId) continue;
+    if (claim(world, tile, toKingdomId, year, month, 'военное завоевание', sourceSettlementId)) transferred += 1;
+  }
+  return transferred;
+}
+
 export function captureTerritoryAroundSettlement(
   world: WorldState,
   target: Settlement,
@@ -359,12 +375,13 @@ export function territoryIntegrityIssues(world: WorldState): { errors: string[];
   const errors: string[] = [];
   const warnings: string[] = [];
   const kingdomIds = new Set(world.kingdoms.map(kingdom => kingdom.id));
+  const historicalKingdomIds = new Set((world.history?.fallenRealms ?? []).map(realm => realm.formerKingdomId).filter((id): id is number => typeof id === 'number'));
   const latest = new Map<string, TerritoryChange>();
   for (const change of world.territoryHistory) {
     const tile = tileAt(world, change.x, change.y);
     if (!tile) { errors.push(`Границы: изменение ${change.id} находится вне карты`); continue; }
     if (tile.terrain === 'ocean' && change.kingdomId !== undefined) errors.push(`Границы: океаническая клетка ${change.x}:${change.y} захвачена государством`);
-    if (change.kingdomId !== undefined && !kingdomIds.has(change.kingdomId)) errors.push(`Границы: изменение ${change.id} ссылается на несуществующее государство ${change.kingdomId}`);
+    if (change.kingdomId !== undefined && !kingdomIds.has(change.kingdomId) && !historicalKingdomIds.has(change.kingdomId)) errors.push(`Границы: изменение ${change.id} ссылается на несуществующее государство ${change.kingdomId}`);
     const coordinate = key(change.x, change.y);
     const previous = latest.get(coordinate);
     if (!previous || change.year > previous.year || change.year === previous.year && (change.month > previous.month || change.month === previous.month && change.id > previous.id)) latest.set(coordinate, change);

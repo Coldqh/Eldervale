@@ -221,7 +221,12 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
       if (!tile) continue;
       const historicalOwner = historicalState?.tileKingdomIds[index];
       let fill = terrainColor(tile.terrain);
-      if (layer === 'realms' && tile.terrain !== 'ocean') fill = world.kingdoms.find(kingdom => kingdom.id === (historicalState ? historicalOwner : tile.kingdomId))?.color ?? fill;
+      if (layer === 'realms' && tile.terrain !== 'ocean') {
+        const ownerId = historicalState ? historicalOwner : tile.kingdomId;
+        fill = world.kingdoms.find(kingdom => kingdom.id === ownerId)?.color
+          ?? world.history.fallenRealms.find(realm => realm.formerKingdomId === ownerId)?.color
+          ?? fill;
+      }
       if (layer === 'danger' && tile.terrain !== 'ocean') {
         const monster = world.monsters.find(item => monsterVisible(item.id, item.alive, historicalState) && Math.hypot(item.x - tile.x, item.y - tile.y) <= item.territoryRadius);
         fill = monster ? (monster.species === 'dragon' ? '#8e3f35' : '#6d4a57') : '#526a57';
