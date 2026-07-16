@@ -10,7 +10,7 @@ const labels: Record<EntityKind, string> = {
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
-  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец',
+  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец', militaryUnit: 'Военное подразделение', supplyWagon: 'Военный обоз',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
@@ -40,7 +40,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
-    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [],
+    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [],
   };
   const direct = map[ref.kind].find(item => item.id === ref.id);
   if (direct) return direct;
@@ -99,6 +99,26 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+  if (ref.kind === 'army') {
+    const kingdom = world.kingdoms.find(item => item.id === entity.kingdomId);
+    const commander = world.characters.find(item => item.id === entity.commanderId);
+    const garrison = entity.garrisonBuildingId ? world.buildings.find(item => item.id === entity.garrisonBuildingId) : undefined;
+    const arsenal = entity.arsenalBuildingId ? world.buildings.find(item => item.id === entity.arsenalBuildingId) : undefined;
+    const castle = entity.castleBuildingId ? world.buildings.find(item => item.id === entity.castleBuildingId) : undefined;
+    const soldierRefs = (entity.soldierIds ?? []).slice(0, 24).map((id: number) => ({ kind: 'character' as const, id }));
+    const unitRefs = (entity.unitIds ?? []).map((id: number) => ({ kind: 'militaryUnit' as const, id }));
+    const wagonRefs = (entity.supplyWagonIds ?? []).map((id: number) => ({ kind: 'supplyWagon' as const, id }));
+    return <>{row('Государство', kingdom ? link(kingdom.name, { kind: 'kingdom', id: kingdom.id }, onSelect) : 'неизвестно')}{row('Командир', commander ? link(commander.name, { kind: 'character', id: commander.id }, onSelect) : 'нет')}{row('Состояние', armyStatusLabel(entity.status))}{row('Именные бойцы', `${entity.soldierIds?.length ?? 0}`)}{row('Боевая сила', entity.strength)}{row('Готовность', `${Math.round(entity.readiness ?? 0)}%`)}{row('Мораль', `${Math.round(entity.morale)}%`)}{row('Снабжение', `${Math.round(entity.supplies)}%`)}{row('Еда', `${Math.round(entity.logistics?.foodDays ?? 0)} дней`)}{row('Вода', `${Math.round(entity.logistics?.waterDays ?? 0)} дней`)}{row('Броня', `${Math.round(entity.logistics?.armorCoverage ?? 0)}%`)}{row('Оружие', `${Math.round(entity.logistics?.equipmentCoverage ?? 0)}%`)}{row('Дальний бой', `${Math.round(entity.logistics?.rangedCoverage ?? 0)}%`)}{row('Лошади', entity.logistics?.horses ?? 0)}{row('Повозки', entity.logistics?.wagons ?? 0)}{row('Долг по жалованию', `${Math.round(entity.logistics?.payrollDebt ?? 0)} крон`)}{row('Дезертиры', entity.logistics?.desertions ?? 0)}{row('Раненые', entity.logistics?.wounded ?? 0)}{row('Казарма', garrison ? link(garrison.name, { kind: 'building', id: garrison.id }, onSelect) : 'нет')}{row('Арсенал', arsenal ? link(arsenal.name, { kind: 'building', id: arsenal.id }, onSelect) : 'нет')}{row('Замок', castle ? link(castle.name, { kind: 'building', id: castle.id }, onSelect) : 'нет')}{row('Подразделения', links(world, unitRefs, onSelect))}{row('Обозы', links(world, wagonRefs, onSelect))}{row('Бойцы', links(world, soldierRefs, onSelect))}{row('История походов', entity.campaignHistory.join(' '))}</>;
+  }
+  if (ref.kind === 'militaryUnit') {
+    const army = world.armies.find(item => item.id === entity.armyId);
+    const commander = world.characters.find(item => item.id === entity.commanderId);
+    return <>{row('Армия', army ? link(army.name, { kind: 'army', id: army.id }, onSelect) : 'нет')}{row('Тип', entity.type)}{row('Командир', commander ? link(commander.name, { kind: 'character', id: commander.id }, onSelect) : 'нет')}{row('Бойцы', `${entity.memberIds.length}`)}{row('Подготовка', `${Math.round(entity.training)}%`)}{row('Сплочённость', `${Math.round(entity.cohesion)}%`)}{row('Оснащение', `${Math.round(entity.equipmentCoverage)}%`)}{row('Лошади', entity.horseCount)}{row('Опыт', `${Math.round(entity.experience)}%`)}{row('Состав', links(world, entity.memberIds.slice(0, 32).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('История', entity.history.join(' '))}</>;
+  }
+  if (ref.kind === 'supplyWagon') {
+    const army = world.armies.find(item => item.id === entity.armyId);
+    return <>{row('Армия', army ? link(army.name, { kind: 'army', id: army.id }, onSelect) : 'нет')}{row('Состояние', entity.status)}{row('Координаты', `${entity.x}:${entity.y}`)}{row('Повозки', entity.wagonCount)}{row('Лошади', entity.horseCount)}{row('Вместимость', entity.capacity)}{row('Состояние повозок', `${Math.round(entity.condition)}%`)}{row('Охрана', links(world, entity.escortIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Груз', links(world, entity.inventoryItemIds.slice(0, 40).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}{row('История', entity.history.join(' '))}</>;
+  }
   if (ref.kind === 'travelingMerchant') {
     const character = world.characters.find(item => item.id === entity.characterId);
     const current = world.settlements.find(item => item.id === entity.currentSettlementId);
@@ -281,6 +301,10 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Личный кошелёк', `${Math.round((entity.wallet ?? 0) * 10) / 10} крон`)}
       {entity.equipment && row('Одежда', `${entity.equipment.socialTier} · ${entity.equipment.material} · ${entity.equipment.color} · состояние ${Math.round(entity.equipment.condition)}%`)}
       {entity.equipment && row('Экипировка', links(world, Object.values(entity.equipment.equippedItemIds ?? {}).filter((id): id is number => typeof id === 'number').map(id => ({ kind: 'item' as const, id })), onSelect))}
+      {entity.serviceStatus && entity.serviceStatus !== 'гражданский' && row('Военная служба', `${entity.serviceStatus}${entity.militaryRole ? ` · ${entity.militaryRole}` : ''}`)}
+      {entity.militaryUnitId && row('Подразделение', link(getTitle(world, { kind: 'militaryUnit', id: entity.militaryUnitId }), { kind: 'militaryUnit', id: entity.militaryUnitId }, onSelect))}
+      {typeof entity.militaryExperience === 'number' && row('Военный опыт', `${Math.round(entity.militaryExperience)}%`)}
+      {(entity.servicePayArrears ?? 0) > 0 && row('Невыплаченное жалование', `${Math.round(entity.servicePayArrears)} крон`)}
       {entity.skills && row('Навыки', Object.entries(entity.skills).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).slice(0, 10).map(([name, value]) => `${professionLabel(name)} ${value}`).join(', ') || 'нет развитых навыков')}
       {row('Личные вещи', links(world, (entity.inventoryItemIds ?? []).slice(0, 20).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}
       {row('Отношения', relationships.length ? <span className="relationship-stack">{relationships.map(relation => relationshipText(world, entity.id, relation, onSelect))}</span> : 'нет заметных связей')}
@@ -311,13 +335,6 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Опасность', `${entity.danger}/10`)}{row('Глубина', `${entity.depth} уровней`)}{row('Обитатели', entity.currentInhabitants)}
     {row('Владелец земель', entity.ownerKingdomId ? link(getTitle(world, { kind: 'kingdom', id: entity.ownerKingdomId }), { kind: 'kingdom', id: entity.ownerKingdomId }, onSelect) : 'никто')}
     {row('Артефакты', links(world, entity.artifactIds.map((id: number) => ({ kind: 'artifact' as const, id })), onSelect))}{row('История', entity.history.join(' ') || 'История места ещё скрыта.')}
-  </>;
-  if (ref.kind === 'army') return <>
-    {row('Государство', link(getTitle(world, { kind: 'kingdom', id: entity.kingdomId }), { kind: 'kingdom', id: entity.kingdomId }, onSelect))}
-    {row('Командир', link(getTitle(world, { kind: 'character', id: entity.commanderId }), { kind: 'character', id: entity.commanderId }, onSelect))}
-    {row('Численность', `${entity.strength} воинов`)}{row('Мораль', `${entity.morale}%`)}{row('Припасы', `${entity.supplies}%`)}{row('Состояние', armyStatusLabel(entity.status))}
-    {row('Цель похода', entity.targetMonsterId ? link(getTitle(world, { kind: 'monster', id: entity.targetMonsterId }), { kind: 'monster', id: entity.targetMonsterId }, onSelect) : entity.targetSettlementId ? link(getTitle(world, { kind: 'settlement', id: entity.targetSettlementId }), { kind: 'settlement', id: entity.targetSettlementId }, onSelect) : 'нет')}
-    {row('Походы', entity.campaignHistory.join(' ') || 'Не участвовало в крупных походах.')}
   </>;
   if (ref.kind === 'war') return <>
     {row('Нападающая сторона', link(getTitle(world, { kind: 'kingdom', id: entity.attackerId }), { kind: 'kingdom', id: entity.attackerId }, onSelect))}

@@ -45,14 +45,14 @@ function equippedToolFactor(world: WorldState, workers: Array<WorldState['charac
 const ESTABLISHMENT_FOR_BUILDING: Partial<Record<BuildingType, EstablishmentType>> = {
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
   blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня',
-  market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', warehouse: 'склад', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник',
+  market: 'рынок', shop: 'лавка', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', warehouse: 'склад', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
 const PROFESSION_FOR_ESTABLISHMENT: Record<EstablishmentType, string[]> = {
   'таверна': ['brewer', 'merchant'], 'постоялый двор': ['merchant', 'brewer'], 'пекарня': ['miller', 'brewer'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
   'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'портная мастерская': ['tailor', 'weaver'], 'красильня': ['dyer', 'weaver'], 'кожевенная мастерская': ['tanner'], 'сапожная мастерская': ['cobbler', 'tanner'], 'бронная мастерская': ['armorer', 'blacksmith'], 'инструментальная мастерская': ['toolmaker', 'blacksmith'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'],
   'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'], 'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'],
-  'склад': ['merchant'], 'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
+  'склад': ['merchant'], 'казарма': ['soldier', 'guard', 'cook'], 'арсенал': ['armorer', 'blacksmith', 'guard'], 'замковое хозяйство': ['soldier', 'guard', 'cook', 'scribe'], 'осадная мастерская': ['carpenter', 'blacksmith', 'toolmaker'], 'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
 };
 
 export function initializeAgricultureAndConstruction(world: WorldState, rng: RNG): void {
@@ -303,6 +303,10 @@ function constructionMaterials(type: BuildingType): Record<string, number> {
   if (type === 'house') return { timber: 8, planks: 10, stone: 4, nails: 2 };
   if (type === 'tenement' || type === 'manor') return { timber: 18, planks: 28, stone: 24, bricks: 18, nails: 6, lime: 6 };
   if (type === 'warehouse' || type === 'barracks') return { timber: 20, planks: 22, stone: 18, nails: 6, lime: 4 };
+  if (type === 'arsenal') return { timber: 24, planks: 24, stone: 30, bricks: 18, iron: 8, nails: 8, lime: 7 };
+  if (type === 'watchtower') return { timber: 10, planks: 8, stone: 14, nails: 3, lime: 2 };
+  if (type === 'siegeWorkshop') return { timber: 30, planks: 30, stone: 10, iron: 10, nails: 10, rope: 8 };
+  if (type === 'castle') return { timber: 70, planks: 80, stone: 180, bricks: 110, iron: 28, nails: 22, lime: 42, rope: 10 };
   if (type === 'kiln') return { stone: 22, bricks: 20, clay: 14, timber: 6, lime: 4 };
   if (type === 'quarry' || type === 'mine') return { timber: 16, planks: 10, tools: 4, rope: 3, nails: 3 };
   if (type === 'temple' || type === 'guildhall' || type === 'market') return { stone: 28, bricks: 20, timber: 14, planks: 18, nails: 5, lime: 8 };
@@ -312,17 +316,17 @@ function constructionMaterials(type: BuildingType): Record<string, number> {
 
 function constructionLabor(type: BuildingType): number {
   const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
-  const multiplier = ['tenement', 'manor', 'temple', 'guildhall'].includes(type) ? 6 : ['warehouse', 'barracks', 'kiln'].includes(type) ? 4.5 : 3.2;
+  const multiplier = type === 'castle' ? 11 : ['tenement', 'manor', 'temple', 'guildhall', 'arsenal'].includes(type) ? 6 : ['warehouse', 'barracks', 'kiln', 'siegeWorkshop'].includes(type) ? 4.5 : 3.2;
   return Math.round(dimensions.width * dimensions.height * multiplier);
 }
 
 function chooseConstructionDistrict(settlement: Settlement, type: BuildingType) {
-  const preferredRoles = type === 'farm' || type === 'quarry' || type === 'mine' ? ['поля', 'окраина'] : type === 'kiln' ? ['ремесленный район', 'окраина'] : type === 'house' || type === 'tenement' ? ['жилой район', 'окраина', 'центр'] : ['ремесленный район', 'центр', 'рынок'];
+  const preferredRoles = type === 'farm' || type === 'quarry' || type === 'mine' ? ['поля', 'окраина'] : type === 'castle' || type === 'barracks' || type === 'arsenal' || type === 'watchtower' ? ['крепость', 'центр', 'окраина'] : type === 'kiln' || type === 'siegeWorkshop' ? ['ремесленный район', 'окраина'] : type === 'house' || type === 'tenement' ? ['жилой район', 'окраина', 'центр'] : ['ремесленный район', 'центр', 'рынок'];
   return settlement.districts.find(district => preferredRoles.includes(district.role)) ?? settlement.districts[0];
 }
 
 function constructionName(type: BuildingType, settlement: Settlement, serial: number): string {
-  const labels: Partial<Record<BuildingType, string>> = { house: 'жилой дом', tenement: 'доходный дом', manor: 'усадьба', warehouse: 'склад', mill: 'мельница', bakery: 'пекарня', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', farm: 'ферма', barracks: 'казарма', temple: 'храм' };
+  const labels: Partial<Record<BuildingType, string>> = { house: 'жилой дом', tenement: 'доходный дом', manor: 'усадьба', warehouse: 'склад', mill: 'мельница', bakery: 'пекарня', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', farm: 'ферма', barracks: 'казарма', arsenal: 'арсенал', castle: 'замок', watchtower: 'сторожевая башня', siegeWorkshop: 'осадная мастерская', temple: 'храм' };
   return `${labels[type] ?? type} «${settlement.name.split(' ')[0]}-${serial}»`;
 }
 
@@ -375,8 +379,8 @@ function completeConstruction(world: WorldState, project: ConstructionProject, s
     globalX: project.globalX, globalY: project.globalY, localX: project.localX, localY: project.localY, localWidth: project.localWidth, localHeight: project.localHeight,
     entranceX: project.entranceX, entranceY: project.entranceY, name: project.name, type: project.buildingType, floors,
     capacity: completedBuildingCapacity(project.buildingType, project.localWidth, project.localHeight), condition: rng.int(92, 100), builtYear: world.year,
-    residentIds: [], workerIds: [], inventoryItemIds: [], rooms: completedBuildingRooms(project.buildingType), hasWater: !['quarry', 'mine', 'kiln'].includes(project.buildingType),
-    hasHearth: !['warehouse', 'market', 'quarry', 'mine'].includes(project.buildingType), history: [...project.history, `Завершено в ${world.year}.${String(world.month).padStart(2, '0')}.`],
+    residentIds: [], workerIds: [], inventoryItemIds: [], rooms: completedBuildingRooms(project.buildingType), hasWater: !['quarry', 'mine', 'kiln', 'watchtower'].includes(project.buildingType),
+    hasHearth: !['warehouse', 'market', 'quarry', 'mine', 'watchtower'].includes(project.buildingType), history: [...project.history, `Завершено в ${world.year}.${String(world.month).padStart(2, '0')}.`],
   };
   world.buildings.push(building); settlement.buildingIds.push(building.id); indexes.buildingById.set(building.id, building);
   const list = indexes.buildingsBySettlement.get(settlement.id) ?? []; list.push(building); indexes.buildingsBySettlement.set(settlement.id, list);
@@ -423,6 +427,9 @@ function completedBuildingCapacity(type: BuildingType, width: number, height: nu
   if (type === 'house') return Math.max(4, Math.round(area / 5));
   if (type === 'tenement') return Math.max(18, Math.round(area * .65));
   if (type === 'manor') return Math.max(10, Math.round(area * .35));
+  if (type === 'castle') return Math.max(120, Math.round(area * 1.15));
+  if (type === 'arsenal') return Math.round(area * 3.2);
+  if (type === 'watchtower') return Math.max(8, Math.round(area * .8));
   if (type === 'warehouse' || type === 'market') return Math.round(area * 3);
   return Math.max(8, Math.round(area * .8));
 }
@@ -431,7 +438,7 @@ function completedBuildingRooms(type: BuildingType): string[] {
   const map: Partial<Record<BuildingType, string[]>> = {
     house: ['общая комната', 'спальные места', 'кладовая'], tenement: ['коридор', 'жилые комнаты', 'общая кухня'], warehouse: ['склад', 'погрузочный двор'],
     mill: ['мельничный зал', 'склад зерна'], bakery: ['печи', 'склад муки', 'лавка'], kiln: ['обжиговая печь', 'сушильный двор', 'склад'], quarry: ['карьер', 'навес инструментов'],
-    farm: ['жилой двор', 'сарай', 'склад семян'], market: ['торговые ряды', 'весовая'], barracks: ['спальное помещение', 'оружейная', 'тренировочный двор'],
+    farm: ['жилой двор', 'сарай', 'склад семян'], market: ['торговые ряды', 'весовая'], barracks: ['спальные залы', 'оружейная комната', 'кухня', 'тренировочный двор'], arsenal: ['оружейный склад', 'бронная кладовая', 'ремонтная мастерская', 'караульная'], castle: ['донжон', 'тронный зал', 'внутренний двор', 'казармы', 'конюшни', 'кухня', 'темница', 'башни'], watchtower: ['караульная', 'лестница', 'сигнальная площадка'], siegeWorkshop: ['сборочный двор', 'склад материалов', 'кузнечный навес'],
   };
   return map[type] ?? ['рабочее помещение', 'кладовая'];
 }

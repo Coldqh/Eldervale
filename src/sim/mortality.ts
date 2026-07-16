@@ -360,20 +360,30 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
 
   const householdById = new Map(world.households.map(item => [item.id, item]));
   const buildingById = new Map(world.buildings.map(item => [item.id, item]));
+  const armyBySoldierId = new Map<number, WorldState['armies'][number]>();
+  for (const army of world.armies) for (const soldierId of army.soldierIds ?? []) armyBySoldierId.set(soldierId, army);
   for (const item of world.items) if (item.ownerCharacterId && deadIds.has(item.ownerCharacterId)) {
     const owner = deadById.get(item.ownerCharacterId);
     item.ownerCharacterId = undefined;
     item.equippedByCharacterId = undefined;
     const inheritedHouseholdId = owner?.householdId && !emptyHouseholdIds.has(owner.householdId) ? owner.householdId : undefined;
     const inheritedBuildingId = owner?.homeBuildingId;
+    if (item.householdId && emptyHouseholdIds.has(item.householdId)) item.householdId = undefined;
     item.householdId ??= inheritedHouseholdId;
     item.buildingId ??= inheritedBuildingId;
-    if (item.householdId) {
-      const inventory = householdById.get(item.householdId)?.inventoryItemIds;
-      if (inventory && !inventory.includes(item.id)) inventory.push(item.id);
+    const inheritedHousehold = item.householdId && !emptyHouseholdIds.has(item.householdId) ? householdById.get(item.householdId) : undefined;
+    if (inheritedHousehold) {
+      if (!inheritedHousehold.inventoryItemIds.includes(item.id)) inheritedHousehold.inventoryItemIds.push(item.id);
     } else if (item.buildingId) {
+      item.householdId = undefined;
       const inventory = buildingById.get(item.buildingId)?.inventoryItemIds;
       if (inventory && !inventory.includes(item.id)) inventory.push(item.id);
+    } else if (owner) {
+      const army = armyBySoldierId.get(owner.id);
+      if (army) {
+        if (!army.inventoryItemIds.includes(item.id)) army.inventoryItemIds.push(item.id);
+        item.history.push(`Подобрано бойцами армии ${army.name}.`);
+      }
     }
     item.history.push(`Остался после смерти ${owner?.name ?? 'владельца'}.`);
   }
@@ -385,6 +395,14 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
     artifact.settlementId ??= owner?.settlementId;
     artifact.history.push(`В ${world.year} году остался без владельца после смерти ${owner?.name ?? 'прежнего владельца'}.`);
   }
+
+  for (const army of world.armies) army.soldierIds = (army.soldierIds ?? []).filter(id => !deadIds.has(id));
+  for (const unit of world.militaryUnits ?? []) {
+    unit.memberIds = unit.memberIds.filter(id => !deadIds.has(id));
+    if (deadIds.has(unit.commanderId)) unit.commanderId = unit.memberIds.find(id => liveById.has(id)) ?? 0;
+  }
+  world.militaryUnits = (world.militaryUnits ?? []).filter(unit => unit.memberIds.length > 0 || unit.type === 'штаб');
+  for (const wagon of world.supplyWagons ?? []) wagon.escortIds = wagon.escortIds.filter(id => !deadIds.has(id));
 
   const commanderCandidates = new Map<number, Character[]>();
   for (const survivor of world.characters) {
@@ -425,6 +443,19 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   for (const survivor of world.characters) survivor.relationshipIds = survivor.relationshipIds.filter(id => !removedRelations.has(id));
 
   if (emptyHouseholdIds.size) {
+    const itemById = new Map(world.items.map(item => [item.id, item]));
+    for (const household of world.households.filter(item => emptyHouseholdIds.has(item.id))) {
+      const building = household.homeBuildingId ? buildingById.get(household.homeBuildingId) : undefined;
+      for (const itemId of household.inventoryItemIds) {
+        const item = itemById.get(itemId);
+        if (!item) continue;
+        item.householdId = undefined;
+        if (building) {
+          item.buildingId = building.id;
+          if (!building.inventoryItemIds.includes(item.id)) building.inventoryItemIds.push(item.id);
+        }
+      }
+    }
     world.households = world.households.filter(item => !emptyHouseholdIds.has(item.id));
     for (const settlement of world.settlements) settlement.householdIds = settlement.householdIds.filter(id => !emptyHouseholdIds.has(id));
   }

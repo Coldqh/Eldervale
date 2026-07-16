@@ -358,7 +358,7 @@ function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x0: numb
 function MarkerCard({ marker, world, onSelect }: { marker: LocalMarker; world: WorldState; onSelect: (ref: EntityRef) => void }) {
   const iconKind = marker.kind === 'corpse' ? 'corpse' : marker.kind === 'grave' ? 'grave' : marker.kind === 'cemetery' ? 'cemetery' : marker.kind === 'item' ? 'item' : marker.kind === 'merchant' ? 'travelingMerchant' : marker.kind === 'person' || marker.kind === 'group' ? 'character' : marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'settlement' ? 'building' : marker.kind === 'field' ? 'field' : marker.kind === 'construction' ? 'constructionProject' : marker.kind === 'monster' ? 'monster' : marker.kind === 'army' ? 'army' : marker.kind === 'artifact' ? 'artifact' : marker.kind === 'resource' ? 'ingredient' : marker.kind === 'dungeon' ? 'dungeon' : 'terrain';
   return <div className="local-marker-card">
-    <div><TextureIcon kind={iconKind} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
+    <div><TextureIcon kind={iconKind} subtype={marker.visualRole} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
     {marker.refs.length > 0 && <div className="local-marker-actions">
       {marker.refs.slice(0, 12).map(ref => <button key={`${ref.kind}-${ref.id}`} onClick={() => onSelect(ref)}>{entityName(world, ref)}</button>)}
       {marker.refs.length > 12 && <small>ещё {marker.refs.length - 12}</small>}
@@ -370,7 +370,7 @@ function entityName(world: WorldState, ref: EntityRef): string {
   const collections: Record<EntityRef['kind'], readonly { id: number; name?: string; title?: string }[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
-    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants, militaryUnit: world.militaryUnits, supplyWagon: world.supplyWagons,
   };
   let entity = collections[ref.kind].find(item => item.id === ref.id);
   if (!entity && (ref.kind === 'character' || ref.kind === 'monster')) entity = world.burials.find(item => item.subjectKind === ref.kind && item.subjectId === ref.id);

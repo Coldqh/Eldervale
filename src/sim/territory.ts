@@ -378,9 +378,11 @@ export function territoryIntegrityIssues(world: WorldState): { errors: string[];
     const foundations = world.territoryHistory.filter(change => change.kingdomId === kingdom.id && change.reason === 'основание столицы');
     if (foundations.length !== 1) errors.push(`${kingdom.name}: должно быть одно территориальное основание, найдено ${foundations.length}`);
     const foundation = foundations[0];
-    if (foundation && capital && (foundation.x !== capital.x || foundation.y !== capital.y)) errors.push(`${kingdom.name}: государство основано не в клетке столицы`);
+    const foundingSettlement = foundation?.sourceSettlementId ? settlementById(world, foundation.sourceSettlementId) : undefined;
+    if (foundation && foundingSettlement && (foundation.x !== foundingSettlement.x || foundation.y !== foundingSettlement.y)) errors.push(`${kingdom.name}: основание не совпадает с исторической столицей`);
     const owned = world.tiles.filter(tile => tile.kingdomId === kingdom.id);
     if (!owned.length) warnings.push(`${kingdom.name}: не контролирует ни одной клетки`);
+    else if (capital && capital.kingdomId !== kingdom.id) warnings.push(`${kingdom.name}: не имеет подконтрольного поселения для новой столицы`);
     if (capital && owned.length) {
       const ownedKeys = new Set(owned.map(tile => key(tile.x, tile.y)));
       const start = key(capital.x, capital.y);

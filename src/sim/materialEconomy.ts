@@ -118,6 +118,16 @@ const ITEM_TEMPLATES: ItemTemplate[] = [
   { id: 'tailoring_kit', name: 'набор портного', category: 'инструмент', material: 'железо, дерево и нить', unit: 'набор', weight: 1.2, perishability: 0, value: 39, equipmentSlot: 'workTool', toolType: 'портняжное дело', requiredProfession: 'tailor', maxCondition: 90 },
   { id: 'spindle', name: 'веретено и челнок', category: 'инструмент', material: 'дерево', unit: 'набор', weight: .8, perishability: 0, value: 18, equipmentSlot: 'workTool', toolType: 'ткачество', requiredProfession: 'weaver', maxCondition: 80 },
   { id: 'tanner_knife', name: 'нож кожевника', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: .8, perishability: 0, value: 27, equipmentSlot: 'workTool', toolType: 'кожевенное дело', requiredProfession: 'tanner', maxCondition: 90 },
+  { id: 'crossbow', name: 'арбалет', category: 'оружие', material: 'дерево и железо', unit: 'штука', weight: 4.2, perishability: 0, value: 105, equipmentSlot: 'mainHand', damage: 13, maxCondition: 110 },
+  { id: 'arrow_bundle', name: 'колчан стрел', category: 'оружие', material: 'дерево, железо и перо', unit: 'колчан', weight: 2.2, perishability: 0, value: 22, maxCondition: 100 },
+  { id: 'bolt_bundle', name: 'связка арбалетных болтов', category: 'оружие', material: 'дерево и железо', unit: 'связка', weight: 2.8, perishability: 0, value: 28, maxCondition: 100 },
+  { id: 'lance', name: 'кавалерийское копьё', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 4.5, perishability: 0, value: 62, equipmentSlot: 'mainHand', damage: 14, maxCondition: 105 },
+  { id: 'mace', name: 'железная булава', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 2.4, perishability: 0, value: 78, equipmentSlot: 'mainHand', damage: 12, maxCondition: 120 },
+  { id: 'bandages', name: 'чистые перевязочные материалы', category: 'лекарство', material: 'лён', unit: 'набор', weight: .6, perishability: 18, value: 10 },
+  { id: 'military_rations', name: 'походный паёк', category: 'еда', material: 'сухари, соль и сушёное мясо', unit: 'паёк', weight: 1.1, perishability: 12, value: 4.5 },
+  { id: 'tent', name: 'походная палатка', category: 'предмет быта', material: 'лён, кожа и дерево', unit: 'штука', weight: 18, perishability: 0, value: 65, maxCondition: 100 },
+  { id: 'wagon_parts', name: 'детали для повозок', category: 'инструмент', material: 'дерево и железо', unit: 'комплект', weight: 26, perishability: 0, value: 58, toolType: 'ремонт обоза', maxCondition: 110 },
+  { id: 'horse_feed', name: 'корм для лошадей', category: 'сырьё', material: 'овёс и сено', unit: 'мешок', weight: 20, perishability: 8, value: 6 },
   { id: 'cobbler_tools', name: 'инструменты сапожника', category: 'инструмент', material: 'железо и дерево', unit: 'набор', weight: 1.4, perishability: 0, value: 36, equipmentSlot: 'workTool', toolType: 'сапожное дело', requiredProfession: 'cobbler', maxCondition: 95 },
 ];
 const ITEM_BY_ID = new Map(ITEM_TEMPLATES.map(item => [item.id, item]));
@@ -152,8 +162,8 @@ interface MaterialRuntime {
 let activeRuntime: MaterialRuntime | undefined;
 const materialRuntimeCache = new WeakMap<WorldState, MaterialRuntime>();
 
-function itemOwnerKey(item: Pick<WorldItem, 'householdId' | 'establishmentId' | 'buildingId' | 'ownerCharacterId'>): string {
-  return `${item.householdId ?? 0}:${item.establishmentId ?? 0}:${item.buildingId ?? 0}:${item.ownerCharacterId ?? 0}`;
+function itemOwnerKey(item: Pick<WorldItem, 'householdId' | 'establishmentId' | 'buildingId' | 'ownerCharacterId' | 'supplyWagonId'>): string {
+  return `${item.householdId ?? 0}:${item.establishmentId ?? 0}:${item.buildingId ?? 0}:${item.ownerCharacterId ?? 0}:${item.supplyWagonId ?? 0}`;
 }
 
 function itemStackKey(item: Pick<WorldItem, 'templateId' | 'householdId' | 'establishmentId' | 'buildingId' | 'ownerCharacterId' | 'quality' | 'freshness' | 'dye'>): string {
@@ -293,6 +303,11 @@ const recipeSeeds: Omit<ProductionRecipe, 'id'>[] = [
   { name: 'Инструменты текстильщиков', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tailoring_kit', quantity: 1 }, { templateId: 'spindle', quantity: 1 }], laborHours: 18, minimumSkill: 18, description: 'Мастер делает ножницы, иглы, веретено и челнок.' },
   { name: 'Инструменты кожевников', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tanner_knife', quantity: 1 }, { templateId: 'cobbler_tools', quantity: 1 }], laborHours: 20, minimumSkill: 20, description: 'Мастер делает ножи, шилья и колодки для кожи и обуви.' },
   { name: 'Инструменты плотника', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'wood_axe', quantity: 1 }, { templateId: 'carpenter_saw', quantity: 1 }], laborHours: 30, minimumSkill: 26, description: 'Мастер делает топор и пилу.' },
+  { name: 'Изготовление стрел', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['арсенал', 'оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: .4 }, { templateId: 'timber', quantity: .6 }], outputs: [{ templateId: 'arrow_bundle', quantity: 3 }], laborHours: 12, minimumSkill: 16, description: 'Кузнец и древодел готовят колчаны стрел.' },
+  { name: 'Изготовление арбалетов и болтов', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['арсенал', 'осадная мастерская', 'кузница'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'planks', quantity: 2 }, { templateId: 'rope', quantity: 1 }], outputs: [{ templateId: 'crossbow', quantity: 1 }, { templateId: 'bolt_bundle', quantity: 2 }], laborHours: 34, minimumSkill: 32, description: 'Сложное метательное оружие собирается для гарнизонов.' },
+  { name: 'Походные пайки', category: 'готовка', profession: 'cook', establishmentTypes: ['казарма', 'замковое хозяйство', 'пекарня'], inputs: [{ templateId: 'bread', quantity: 4 }, { templateId: 'smoked_meat', quantity: 1 }, { templateId: 'salt', quantity: .3 }], outputs: [{ templateId: 'military_rations', quantity: 8 }], laborHours: 8, minimumSkill: 10, description: 'Сухие пайки готовятся для похода и осады.' },
+  { name: 'Походные палатки', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская', 'арсенал'], inputs: [{ templateId: 'linen_cloth', quantity: 6 }, { templateId: 'leather', quantity: 2 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tent', quantity: 1 }], laborHours: 28, minimumSkill: 22, description: 'Портные шьют прочные армейские палатки.' },
+  { name: 'Ремонтные детали обоза', category: 'ремесло', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская', 'осадная мастерская'], inputs: [{ templateId: 'planks', quantity: 3 }, { templateId: 'iron', quantity: 1 }, { templateId: 'nails', quantity: 1 }], outputs: [{ templateId: 'wagon_parts', quantity: 1 }], laborHours: 24, minimumSkill: 22, description: 'Колёса, оси и скобы готовятся для военных повозок.' },
 ];
 
 const professionForEstablishment: Record<EstablishmentType, string[]> = {
@@ -302,15 +317,17 @@ const professionForEstablishment: Record<EstablishmentType, string[]> = {
   'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'], 'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'],
   'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'], 'склад': ['merchant'],
   'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
+  'казарма': ['soldier', 'guard'], 'арсенал': ['armorer', 'blacksmith', 'guard'], 'замковое хозяйство': ['guard', 'soldier', 'scribe', 'cook'], 'осадная мастерская': ['carpenter', 'blacksmith', 'toolmaker'],
 };
 
 const establishmentForBuilding: Partial<Record<BuildingType, EstablishmentType>> = {
   tavern: 'таверна', inn: 'постоялый двор', bakery: 'пекарня', brewery: 'пивоварня', winery: 'винодельня', blacksmith: 'кузница', carpenter: 'плотницкая мастерская',
   weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
-  warehouse: 'склад', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
+  warehouse: 'склад', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
 const buildingMapping: Record<string, BuildingType> = {
+  'королевская цитадель': 'castle', 'цитадель': 'castle', 'замок': 'castle', 'арсенал': 'arsenal', 'оружейная': 'arsenal', 'сторожевые башни': 'watchtower', 'учебный двор': 'barracks', 'осадная мастерская': 'siegeWorkshop',
   'жилой дом': 'house', 'доходный дом': 'tenement', 'большой семейный дом': 'manor', 'казарма': 'barracks', 'казармы': 'barracks', 'монастырь': 'monastery',
   'зерновой сарай': 'warehouse', 'амбар': 'warehouse', 'склад': 'warehouse', 'поля и пастбища': 'farm', 'ферма': 'farm', 'мельница': 'mill',
   'пекарня': 'bakery', 'трактир': 'tavern', 'таверна': 'tavern', 'постоялый двор': 'inn', 'пивоварня': 'brewery', 'винодельня': 'winery',
@@ -358,6 +375,10 @@ function buildingCapacity(type: BuildingType, rng: RNG): number {
   if (type === 'tenement') return rng.int(18, 36);
   if (type === 'manor') return rng.int(10, 22);
   if (type === 'barracks') return rng.int(45, 140);
+  if (type === 'castle') return rng.int(120, 420);
+  if (type === 'arsenal') return rng.int(100, 320);
+  if (type === 'watchtower') return rng.int(8, 24);
+  if (type === 'siegeWorkshop') return rng.int(18, 54);
   if (type === 'monastery') return rng.int(18, 75);
   if (type === 'tavern' || type === 'inn') return rng.int(24, 70);
   if (type === 'warehouse' || type === 'market') return rng.int(80, 220);
@@ -369,7 +390,7 @@ function roomsFor(type: BuildingType): string[] {
   const rooms: Partial<Record<BuildingType, string[]>> = {
     house: ['общая комната', 'спальное место', 'кладовая'], tenement: ['общий коридор', 'жилые комнаты', 'общая кухня'], manor: ['зал', 'спальни', 'кухня', 'кладовая'],
     tavern: ['общий зал', 'кухня', 'кладовая', 'подвал'], inn: ['общий зал', 'кухня', 'комнаты постояльцев', 'конюшенный двор'], bakery: ['пекарня', 'склад муки', 'лавка'],
-    blacksmith: ['горн', 'рабочий двор', 'склад металла'], kiln: ['обжиговая печь', 'сушильный двор', 'склад глины'], quarry: ['карьер', 'навес инструментов', 'погрузочная площадка'], warehouse: ['главный склад', 'погрузочный двор'], market: ['торговые ряды', 'весовая'],
+    blacksmith: ['горн', 'рабочий двор', 'склад металла'], barracks: ['спальные залы', 'оружейная комната', 'кухня', 'учебный двор'], arsenal: ['оружейный склад', 'бронная кладовая', 'ремонтная мастерская', 'караульная'], castle: ['донжон', 'тронный зал', 'внутренний двор', 'казармы', 'конюшни', 'кухня', 'темница', 'башни'], watchtower: ['караульная', 'лестница', 'сигнальная площадка'], siegeWorkshop: ['сборочный двор', 'склад древесины', 'кузнечный навес'], kiln: ['обжиговая печь', 'сушильный двор', 'склад глины'], quarry: ['карьер', 'навес инструментов', 'погрузочная площадка'], warehouse: ['главный склад', 'погрузочный двор'], market: ['торговые ряды', 'весовая'],
   };
   return rooms[type] ?? ['рабочее помещение', 'кладовая'];
 }
@@ -413,10 +434,11 @@ function addItem(world: WorldState, data: Omit<WorldItem, 'id' | 'history'> & { 
   if (item.establishmentId) (activeRuntime?.establishmentById.get(item.establishmentId) ?? world.establishments.find(establishment => establishment.id === item.establishmentId))?.inventoryItemIds.push(item.id);
   if (item.buildingId) (activeRuntime?.buildingById.get(item.buildingId) ?? world.buildings.find(building => building.id === item.buildingId))?.inventoryItemIds.push(item.id);
   if (item.ownerCharacterId) (directOwnerCharacter?.id === item.ownerCharacterId ? directOwnerCharacter : activeRuntime?.characterById.get(item.ownerCharacterId) ?? world.characters.find(character => character.id === item.ownerCharacterId))?.inventoryItemIds.push(item.id);
+  if (item.supplyWagonId) { const wagon = world.supplyWagons?.find(candidate => candidate.id === item.supplyWagonId); if (wagon && !wagon.inventoryItemIds.includes(item.id)) wagon.inventoryItemIds.push(item.id); }
   return item;
 }
 
-function seedItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number }, rng: RNG, source: string): void {
+function seedItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number; supplyWagonId?: number }, rng: RNG, source: string): void {
   if (quantity <= 0) return;
   const template = ITEM_BY_ID.get(templateId)!;
   addItem(world, {
@@ -426,7 +448,7 @@ function seedItem(world: WorldState, templateId: string, quantity: number, settl
   });
 }
 
-export function addMaterialItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number }, source: string, quality = 55, itemIndex?: Map<number, WorldItem>, forceUnique = false, directOwnerCharacter?: Character): WorldItem | undefined {
+export function addMaterialItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number; supplyWagonId?: number }, source: string, quality = 55, itemIndex?: Map<number, WorldItem>, forceUnique = false, directOwnerCharacter?: Character): WorldItem | undefined {
   if (quantity <= .0001) return undefined;
   const template = ITEM_BY_ID.get(templateId);
   if (!template) return undefined;
@@ -462,7 +484,7 @@ function ensureBuilding(world: WorldState, settlement: Settlement, type: Buildin
     name: type === 'house' || type === 'tenement' || type === 'manor' ? `${label} №${index + 1}` : `${label} «${settlement.name.split(' ')[0]}-${index + 1}»`,
     type, floors, capacity: buildingCapacity(type, rng), condition: rng.int(58, 100),
     builtYear: rng.int(Math.max(1, settlement.foundedYear), world.year), residentIds: [], workerIds: [], inventoryItemIds: [], rooms: roomsFor(type),
-    hasWater: rng.chance(type === 'house' ? .55 : .82), hasHearth: !['warehouse', 'market', 'mine'].includes(type), history: [`Построено не позднее ${world.year} года.`],
+    hasWater: rng.chance(type === 'house' ? .55 : .82), hasHearth: !['warehouse', 'market', 'mine', 'watchtower'].includes(type), history: [`Построено не позднее ${world.year} года.`],
   };
   assignBuildingFootprint(world, building);
   world.buildings.push(building);
@@ -598,13 +620,24 @@ function ensureRequiredBuildings(world: WorldState, settlement: Settlement, rng:
     required.set('dyehouse', Math.max(1, Math.ceil(population / 2400)));
     required.set('armorer', Math.max(1, Math.ceil(population / 2200)));
   }
+  const kingdom = world.kingdoms.find(item => item.id === settlement.kingdomId);
+  const isCapital = kingdom?.capitalId === settlement.id;
+  if (isCapital) {
+    required.set('barracks', Math.max(1, Math.ceil(population / 1200)));
+    required.set('arsenal', 1);
+    if (settlement.type === 'city' || settlement.type === 'fortress' || population >= 650) required.set('castle', 1);
+    if (population >= 1300 && (kingdom?.aggression ?? 0) >= 45) required.set('siegeWorkshop', 1);
+  } else if (settlement.type === 'fortress' || population >= 900) {
+    required.set('barracks', 1);
+  }
+  if (settlement.type === 'fortress') required.set('watchtower', Math.max(1, Math.ceil(population / 700)));
   if (settlement.type === 'port' || settlement.resource === 'рыба') required.set('fishery', Math.max(1, Math.ceil(population / 260)));
   if (settlement.resource === 'железо' || settlement.resource === 'серебро') required.set('mine', Math.max(1, Math.ceil(population / 420)));
   if (settlement.resource === 'камень' || settlement.resource === 'глина' || ['hills', 'mountains', 'plains'].includes(world.tiles[settlement.y * world.config.width + settlement.x]?.terrain ?? '')) required.set('quarry', Math.max(1, Math.ceil(population / 900)));
   for (const [type, target] of required) {
     let existing = existingCounts.get(type) ?? 0;
     while (existing < target) {
-      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'kiln' ? 'кирпичная мастерская' : type === 'quarry' ? 'каменоломня' : type === 'tailor' ? 'портная мастерская' : type === 'dyehouse' ? 'красильня' : type === 'tannery' ? 'кожевенная мастерская' : type === 'cobbler' ? 'сапожная мастерская' : type === 'armorer' ? 'бронная мастерская' : type === 'toolmaker' ? 'инструментальная мастерская' : type === 'public' ? 'колодец и водоразбор' : type;
+      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'kiln' ? 'кирпичная мастерская' : type === 'quarry' ? 'каменоломня' : type === 'tailor' ? 'портная мастерская' : type === 'dyehouse' ? 'красильня' : type === 'tannery' ? 'кожевенная мастерская' : type === 'cobbler' ? 'сапожная мастерская' : type === 'armorer' ? 'бронная мастерская' : type === 'toolmaker' ? 'инструментальная мастерская' : type === 'castle' ? 'замок' : type === 'arsenal' ? 'арсенал' : type === 'barracks' ? 'казарма' : type === 'watchtower' ? 'сторожевая башня' : type === 'siegeWorkshop' ? 'осадная мастерская' : type === 'public' ? 'колодец и водоразбор' : type;
       const building = ensureBuilding(world, settlement, type, label, settlement.buildingIds.length, rng);
       if (type === 'public') building.hasWater = true;
       existing += 1;
@@ -867,6 +900,8 @@ function cleanEmptyItems(world: WorldState): void {
     }
   }
   for (const merchant of world.travelingMerchants ?? []) merchant.wagonInventoryItemIds = clean(merchant.wagonInventoryItemIds);
+  for (const army of world.armies) army.inventoryItemIds = clean(army.inventoryItemIds ?? []);
+  for (const wagon of world.supplyWagons ?? []) wagon.inventoryItemIds = clean(wagon.inventoryItemIds ?? []);
   if (activeRuntime) for (const key of offerKeys) {
     const offers = activeRuntime.offersBySettlementTemplate.get(key);
     if (offers) activeRuntime.offersBySettlementTemplate.set(key, offers.filter(entry => !removed.has(entry.item.id)));
@@ -1449,6 +1484,8 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
     countLocation(establishment.inventoryItemIds);
   }
   for (const character of world.characters) countLocation(character.inventoryItemIds ?? []);
+  for (const army of world.armies) countLocation(army.inventoryItemIds ?? []);
+  for (const wagon of world.supplyWagons ?? []) countLocation(wagon.inventoryItemIds ?? []);
   for (const item of world.items) {
     if (item.quantity <= 0) issues.push(`${item.name} ${item.id}: неположительное количество`);
     if (!settlementIds.has(item.settlementId)) issues.push(`${item.name} ${item.id}: нет поселения`);

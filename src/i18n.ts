@@ -18,7 +18,7 @@ const buildingTypes: Record<BuildingType, string> = {
   house: 'жилой дом', tenement: 'доходный дом', manor: 'большой семейный дом', barracks: 'казарма', monastery: 'монастырь', warehouse: 'склад',
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
   blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня',
-  healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник', cemetery: 'кладбищенская постройка', public: 'общественное здание',
+  healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник', cemetery: 'кладбищенская постройка', castle: 'замок', arsenal: 'арсенал', watchtower: 'сторожевая башня', siegeWorkshop: 'осадная мастерская', public: 'общественное здание',
 };
 
 const settlementTypes: Record<Settlement['type'], string> = {

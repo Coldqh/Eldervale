@@ -515,17 +515,19 @@ function buildSurfaceMarkers(
     return assigned.x === tile.x && assigned.y === tile.y;
   }) : [];
   const walkable = cells.filter(cell => !cell.blocked && cell.ground !== 'water');
-  const groups = new Map<string, { point: Point; refs: EntityRef[]; names: string[]; professions: string[] }>();
+  const groups = new Map<string, { point: Point; refs: EntityRef[]; names: string[]; professions: string[]; visualRoles: string[] }>();
   for (const character of liveCharacters) {
     const anchor = characterAnchorBuilding(world, character);
     const point = anchor && anchor.globalX === tile.x && anchor.globalY === tile.y
       ? buildingInteriorPoint(anchor, `${world.config.seed}:житель-в-здании:${character.id}:${world.month}`)
       : characterPosition(character.id, walkable, world.config.seed, tile.x, tile.y);
     const key = `${point.x}:${point.y}`;
-    const group = groups.get(key) ?? { point, refs: [], names: [], professions: [] };
+    const group = groups.get(key) ?? { point, refs: [], names: [], professions: [], visualRoles: [] };
     group.refs.push({ kind: 'character', id: character.id });
     group.names.push(character.name);
     group.professions.push(professionLabel(character.profession));
+    const isRuler = world.kingdoms.some(kingdom => kingdom.rulerId === character.id);
+    group.visualRoles.push(isRuler ? 'king' : character.visualRole ?? character.profession);
     groups.set(key, group);
   }
 
@@ -534,6 +536,7 @@ function buildSurfaceMarkers(
       id: `people-${key}`, x: group.point.x, y: group.point.y, kind: group.refs.length > 1 ? 'group' : 'person',
       label: group.refs.length > 1 ? `${group.refs.length} жителей` : group.names[0]!, refs: group.refs, count: group.refs.length,
       detail: group.refs.length > 1 ? group.names.slice(0, 4).join(', ') : group.professions[0],
+      visualRole: group.refs.length > 1 ? (group.visualRoles.some(role => ['king', 'commander', 'officer', 'knight'].includes(role)) ? 'military-group' : 'group') : group.visualRoles[0],
     });
   }
 
@@ -576,8 +579,18 @@ function buildSurfaceMarkers(
 
   for (const army of world.armies.filter(item => item.x === tile.x && item.y === tile.y)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:армия:${army.id}:${tile.x}:${tile.y}`), 5);
-    markers.push({ id: `army-${army.id}`, x: point.x, y: point.y, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.strength, detail: `${army.strength} воинов · ${army.status}` });
+    markers.push({ id: `army-${army.id}`, x: point.x, y: point.y, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.soldierIds?.length ?? army.strength, detail: `${army.soldierIds?.length ?? 0} именных бойцов · готовность ${Math.round(army.readiness ?? 0)}% · снабжение ${army.supplies}% · ${army.status}`, visualRole: 'army' });
   }
+  for (const wagon of (world.supplyWagons ?? []).filter(item => item.x === tile.x && item.y === tile.y && item.status !== 'уничтожен')) {
+    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:военный-обоз:${wagon.id}:${tile.x}:${tile.y}`), 5);
+    const army = world.armies.find(item => item.id === wagon.armyId);
+    markers.push({
+      id: `supply-wagon-${wagon.id}`, x: point.x, y: point.y, kind: 'army', label: `Обоз ${army?.name ?? `№${wagon.id}`}`,
+      refs: [{ kind: 'supplyWagon', id: wagon.id }, ...(army ? [{ kind: 'army' as const, id: army.id }] : [])], count: wagon.wagonCount,
+      detail: `${wagon.wagonCount} повозок · ${wagon.horseCount} лошадей · состояние ${Math.round(wagon.condition)}% · ${wagon.status}`, visualRole: 'wagon',
+    });
+  }
+
   for (const monster of world.monsters.filter(item => item.alive && item.x === tile.x && item.y === tile.y)) {
     const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:чудовище:${monster.id}:${tile.x}:${tile.y}`), 6);
     const footprintWidth = Math.max(1, monster.footprintWidth ?? 1);

@@ -8,14 +8,14 @@ const groups: { kind: EntityKind; label: string }[] = [
   { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'field', label: 'Поля' }, { kind: 'constructionProject', label: 'Стройки' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
   { kind: 'monster', label: 'Живые существа' }, { kind: 'burial', label: 'Умершие и павшие' }, { kind: 'cemetery', label: 'Кладбища' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
   { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Животные' }, { kind: 'ingredient', label: 'Ресурсы' }, { kind: 'recipe', label: 'Алхимия' },
-  { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'travelingMerchant', label: 'Странствующие торговцы' }, { kind: 'army', label: 'Армии' }, { kind: 'war', label: 'Войны' },
+  { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'travelingMerchant', label: 'Странствующие торговцы' }, { kind: 'army', label: 'Армии' }, { kind: 'militaryUnit', label: 'Военные подразделения' }, { kind: 'supplyWagon', label: 'Военные обозы' }, { kind: 'war', label: 'Войны' },
 ];
 
 function listFor(world: WorldState, kind: EntityKind): any[] {
   const lists: Record<EntityKind, any[]> = {
     character: world.characters, settlement: world.settlements, kingdom: world.kingdoms, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, war: world.wars,
-    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants,
+    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants, militaryUnit: world.militaryUnits, supplyWagon: world.supplyWagons,
   };
   return lists[kind];
 }
@@ -41,7 +41,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
 }
 
 function rune(kind: EntityKind): string {
-  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', field: '▥', constructionProject: '▧', cemetery: '†', burial: '✝', travelingMerchant: '♢' } as Record<EntityKind, string>)[kind];
+  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', field: '▥', constructionProject: '▧', cemetery: '†', burial: '✝', travelingMerchant: '♢', militaryUnit: '♞', supplyWagon: '▰' } as Record<EntityKind, string>)[kind];
 }
 
 function subtitle(kind: EntityKind, item: any): string {
@@ -61,7 +61,9 @@ function subtitle(kind: EntityKind, item: any): string {
   if (kind === 'artifact') return `${materialLabel(item.material)} · сила ${item.power}`;
   if (kind === 'book') return `${item.subject} · ${item.copies} копий`;
   if (kind === 'dungeon') return `${item.origin} · опасность ${item.danger}/10`;
-  if (kind === 'army') return `${item.strength} воинов · ${armyStatusLabel(item.status)}`;
+  if (kind === 'army') return `${item.soldierIds?.length ?? item.strength} воинов · готовность ${Math.round(item.readiness ?? 0)}% · ${armyStatusLabel(item.status)}`;
+  if (kind === 'militaryUnit') return `${item.type} · ${item.memberIds.length} бойцов · подготовка ${Math.round(item.training)}%`;
+  if (kind === 'supplyWagon') return `${item.wagonCount} повозок · ${item.horseCount} лошадей · ${item.status}`;
   if (kind === 'war') return item.active ? `${item.goal} · война продолжается` : `окончена в ${item.endYear} году`;
   if (kind === 'dynasty') return `${item.memberIds.length} членов · престиж ${item.prestige}`;
   if (kind === 'travelingMerchant') return `${item.status} · ${Math.round(item.cash)} крон · ${item.routeSettlementIds.length} остановки`;

@@ -10,8 +10,10 @@ import { RNG } from './rng';
 import { generatePhysicalEconomy } from './materialEconomy';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { initializeLivingEconomy } from './livingEconomy';
+import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
+import { normalizeKingdomCapitals } from './kingdomState';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -74,6 +76,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
 
   onProgress?.('Связывание книг, артефактов и руин', 89, 100, 'Источники получают реальные события и владельцев');
   linkKnowledgeAndArtifacts(world, rng);
+  normalizeKingdomCapitals(world);
   generatePhysicalEconomy(world, new RNG(`${config.seed}:повседневная-жизнь-v1`), (phase, percent, detail) => {
     onProgress?.(phase, 90 + Math.round(percent * .055), 100, detail);
   });
@@ -81,6 +84,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeAgricultureAndConstruction(world, new RNG(`${config.seed}:земледелие-и-стройка-v1`));
   onProgress?.('Одежда, инструменты и личные рынки', 97, 100, 'назначаем экипировку, кошельки, продавцов и странствующих торговцев');
   initializeLivingEconomy(world, new RNG(`${config.seed}:личная-экономика-v1`));
+  onProgress?.('Казармы, замки и реальные гарнизоны', 97.8, 100, 'формируем подразделения, арсеналы, обозы и снабжение');
+  initializeMilitaryInfrastructure(world, new RNG(`${config.seed}:военная-инфраструктура-v1`));
   onProgress?.('Кладбища и архив павших', 98, 100, 'переносим умерших и убитых существ из активной симуляции');
   ensureCemeteries(world, rng);
   compactDeadEntities(world, rng);
@@ -105,7 +110,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 12;
+  world.version = 13;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

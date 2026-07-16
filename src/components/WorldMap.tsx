@@ -302,7 +302,13 @@ function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLa
       const x = ox + (army.x + .5) * cell;
       const y = oy + (army.y + .5) * cell;
       const radius = Math.min(9, Math.max(4, cell * .22));
-      paintTextureMarker(ctx, { id: `army-${army.id}`, x: 0, y: 0, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.strength }, x - radius, y - radius, radius * 2);
+      paintTextureMarker(ctx, { id: `army-${army.id}`, x: 0, y: 0, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.soldierIds?.length ?? army.strength, visualRole: 'army' }, x - radius, y - radius, radius * 2);
+    }
+    for (const wagon of (world.supplyWagons ?? []).filter(item => item.status !== 'уничтожен' && item.status !== 'склад' && item.x >= startX - 1 && item.x <= endX + 1 && item.y >= startY - 1 && item.y <= endY + 1)) {
+      const x = ox + (wagon.x + .62) * cell;
+      const y = oy + (wagon.y + .62) * cell;
+      const radius = Math.min(7, Math.max(3.6, cell * .18));
+      paintTextureMarker(ctx, { id: `wagon-${wagon.id}`, x: 0, y: 0, kind: 'army', label: `Военный обоз №${wagon.id}`, refs: [{ kind: 'supplyWagon', id: wagon.id }], count: wagon.wagonCount, visualRole: 'wagon' }, x - radius, y - radius, radius * 2);
     }
   }
 }

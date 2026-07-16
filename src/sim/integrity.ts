@@ -8,6 +8,7 @@ import { worldTick } from './scheduler';
 import { buildingRect, constructionRect } from './spatial';
 import { agricultureConstructionIntegrityIssues } from './agricultureConstruction';
 import { livingEconomyIntegrityIssues } from './livingEconomy';
+import { militaryInfrastructureIntegrityIssues } from './militaryInfrastructure';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -17,9 +18,9 @@ export interface WorldIntegrityReport {
 
 export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   const territory = territoryIntegrityIssues(world);
-  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...agricultureConstructionIntegrityIssues(world), ...livingEconomyIntegrityIssues(world), ...territory.errors];
+  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...agricultureConstructionIntegrityIssues(world), ...livingEconomyIntegrityIssues(world), ...militaryInfrastructureIntegrityIssues(world), ...territory.errors];
   const warnings: string[] = [...territory.warnings];
-  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0) + (world.fields?.length ?? 0) + (world.constructionProjects?.length ?? 0) + (world.travelingMerchants?.length ?? 0) + (world.marketTransactions?.length ?? 0);
+  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0) + (world.fields?.length ?? 0) + (world.constructionProjects?.length ?? 0) + (world.travelingMerchants?.length ?? 0) + (world.marketTransactions?.length ?? 0) + (world.militaryUnits?.length ?? 0) + (world.supplyWagons?.length ?? 0);
 
   for (const settlement of world.settlements) {
     const housing = housingIntegrity(settlement);

@@ -413,7 +413,7 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
     const commander = characters.filter(character => character.kingdomId === kingdom.id && character.age >= 20).sort((a, b) => b.renown - a.renown)[1] ?? characters.find(character => character.kingdomId === kingdom.id)!;
     commander.titles.push('Маршал');
     commander.profession = 'soldier';
-    return { id: index + 1, name: `Войско ${capital.name}`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), supplies: rng.int(60, 100), status: 'garrison', campaignHistory: [] };
+    return { id: index + 1, name: `Войско ${capital.name}`, kingdomId: kingdom.id, commanderId: commander.id, x: capital.x, y: capital.y, strength: kingdom.armyStrength, morale: rng.int(55, 90), supplies: rng.int(60, 100), status: 'garrison', campaignHistory: [], soldierIds: [], unitIds: [], supplyWagonIds: [], inventoryItemIds: [], logistics: { foodDays: 45, waterDays: 35, medicine: 12, tents: 0, tools: 0, horses: 0, wagons: 0, equipmentCoverage: 0, armorCoverage: 0, rangedCoverage: 0, payrollDebt: 0, desertions: 0, wounded: 0 }, monthlyPayroll: 0, readiness: 35 };
   });
 
   const dungeons: Dungeon[] = [];
@@ -565,11 +565,11 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
 
   report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
   const world: WorldState = {
-    version: 12, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, cemeteries: [], burials: [], animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], fields: [], constructionProjects: [], items: [], productionRecipes: [], employments: [], shipments: [], travelingMerchants: [], marketTransactions: [], territoryHistory: [], events, localMapChanges: [],
+    version: 13, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, militaryUnits: [], supplyWagons: [], monsters, cemeteries: [], burials: [], animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], fields: [], constructionProjects: [], items: [], productionRecipes: [], employments: [], shipments: [], travelingMerchants: [], marketTransactions: [], territoryHistory: [], events, localMapChanges: [],
     simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
     history: { engineVersion: 1, generatedYears: config.historyYears, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },
-    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1, building: 1, household: 1, establishment: 1, item: 1, productionRecipe: 1, employment: 1, shipment: 1, travelingMerchant: 1, marketTransaction: 1, field: 1, constructionProject: 1, territoryChange: 1, cemetery: 1, burial: 1 },
+    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1, building: 1, household: 1, establishment: 1, item: 1, productionRecipe: 1, employment: 1, shipment: 1, travelingMerchant: 1, marketTransaction: 1, militaryUnit: 1, supplyWagon: 1, field: 1, constructionProject: 1, territoryChange: 1, cemetery: 1, burial: 1 },
   };
   report('Мир готов', 100);
   return world;

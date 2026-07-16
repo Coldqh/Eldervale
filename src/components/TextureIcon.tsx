@@ -9,7 +9,11 @@ export function TextureIcon({ kind, subtype, className = '' }: { kind: EntityKin
 }
 
 function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', subtype?: string) {
-  if (kind === 'character') return <><circle cx="16" cy="11" r="5" /><path d="M7 28c1-8 5-11 9-11s8 3 9 11" /><path className="texture-cut" d="M13 10h1m4 0h1" /></>;
+  if (kind === 'character') {
+    if (subtype === 'king') return <><path d="m7 11 4 3 5-8 5 8 4-3-2 7H9z"/><circle cx="16" cy="18" r="4"/><path d="M7 29c1-6 5-9 9-9s8 3 9 9"/></>;
+    if (['soldier','militia','archer','cavalry','knight','officer','commander','military-group'].includes(subtype ?? '')) return <><path d="M9 13c0-6 3-9 7-9s7 3 7 9v3H9z"/><circle className="texture-cut" cx="16" cy="13" r="3"/><path d="M6 29c1-8 5-11 10-11s9 3 10 11"/><path d="M24 10v18m0-14 5 3-5 3"/></>;
+    return <><circle cx="16" cy="11" r="5" /><path d="M7 28c1-8 5-11 9-11s8 3 9 11" /><path className="texture-cut" d="M13 10h1m4 0h1" /></>;
+  }
   if (kind === 'travelingMerchant') return <><circle cx="16" cy="9" r="4"/><path d="M8 27c1-8 4-12 8-12s7 4 8 12"/><path d="M5 18h22v5H5z"/><circle className="texture-cut" cx="10" cy="25" r="2"/><circle className="texture-cut" cx="22" cy="25" r="2"/></>;
   if (kind === 'monster') {
     if (subtype === 'dragon') return <><path d="M4 20 11 8l5 5 5-8 7 15-6-3-6 10-6-10z"/><circle className="texture-cut" cx="20" cy="12" r="1.5" /></>;
@@ -17,7 +21,9 @@ function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', s
   }
   if (kind === 'building' || kind === 'establishment' || kind === 'settlement') return <><path d="M4 15 16 5l12 10v13H4z"/><rect className="texture-cut" x="13" y="19" width="6" height="9"/><rect className="texture-cut" x="7" y="17" width="4" height="4"/><rect className="texture-cut" x="21" y="17" width="4" height="4"/></>;
   if (kind === 'item' || kind === 'artifact') return <><path d="M6 9h20l2 7-4 12H8L4 16z"/><path className="texture-cut" d="M9 9c0-4 14-4 14 0M10 17h12"/></>;
-  if (kind === 'army') return <><path d="M7 28V5l13 4-13 5"/><path d="M12 28h14l-4-7-4 3-3-6-3 4z"/></>;
+  if (kind === 'army') return subtype === 'wagon' ? <><path d="M5 10h18l4 8-3 7H7L4 17z"/><circle className="texture-cut" cx="10" cy="26" r="3"/><circle className="texture-cut" cx="22" cy="26" r="3"/></> : <><path d="M7 28V5l13 4-13 5"/><path d="M12 28h14l-4-7-4 3-3-6-3 4z"/></>;
+  if (kind === 'militaryUnit') return <><path d="M5 27V8l11-4 11 4v19"/><path className="texture-cut" d="M10 12h12M10 17h12M10 22h12"/></>;
+  if (kind === 'supplyWagon') return <><path d="M4 10h20l4 8-4 7H7L4 18z"/><circle className="texture-cut" cx="10" cy="26" r="3"/><circle className="texture-cut" cx="23" cy="26" r="3"/></>;
   if (kind === 'cemetery' || kind === 'grave') return <><path d="M12 28V9h8v19"/><path d="M9 13h14M16 5v8"/><path className="texture-cut" d="M5 28h22"/></>;
   if (kind === 'burial' || kind === 'corpse') return <><circle cx="10" cy="17" r="4"/><path d="M14 18h12v5H14zM5 25h22"/><path className="texture-cut" d="M8 16h1m2 0h1"/></>;
   if (kind === 'dungeon') return <><path d="M5 28V11l5-6 6 6 6-6 5 6v17z"/><path className="texture-cut" d="M12 28V17h8v11M8 13h3m10 0h3"/></>;

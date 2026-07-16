@@ -6,23 +6,25 @@ import { normalizeEventCausality } from './causality';
 import { generateAlchemyRecipes, generateAnimalPopulations, generateNaturalIngredients } from './ecology';
 import { createHousingProfile } from './settlements';
 import { createSimulationRuntime, ensureSimulationRuntime } from './scheduler';
-import { generatePhysicalEconomy } from './materialEconomy';
+import { generatePhysicalEconomy, pruneEmptyMaterialItems } from './materialEconomy';
 import { rebuildTerritoryHistoryFromCurrent } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { ensureAllBuildingFootprints } from './spatial';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { initializeLivingEconomy } from './livingEconomy';
+import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
+import { normalizeKingdomCapitals } from './kingdomState';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-12`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-13`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 12;
+  localized.version = 13;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -48,10 +50,13 @@ export function migrateWorld(input: unknown): WorldState {
   localized.shipments ??= [];
   localized.travelingMerchants ??= [];
   localized.marketTransactions ??= [];
+  localized.militaryUnits ??= [];
+  localized.supplyWagons ??= [];
   localized.territoryHistory ??= [];
   localized.nextIds ??= {};
   localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
   if (sourceVersion < 12) localized.simulation.livingEconomyVersion = undefined;
+  if (sourceVersion < 13) localized.simulation.militaryInfrastructureVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -115,12 +120,18 @@ export function migrateWorld(input: unknown): WorldState {
     character.needs ??= { hunger: 10, thirst: 8, rest: 10, warmth: 10, safety: 12, social: 16, lastUpdatedTick: (localized.year ?? 1) * 12 + (localized.month ?? 1) - 1 };
     character.schedule ??= { wakeHour: 6, workStartHour: character.age >= 14 ? 8 : 0, workEndHour: character.age >= 14 ? 17 : 0, sleepHour: 22, restDay: 1 + character.id % 7, currentActivity: character.age >= 14 ? 'занят обычной работой' : 'живёт в семье и учится' };
     character.wallet ??= Math.max(0, Math.round(character.wealth * .18 * 100) / 100);
+    character.serviceStatus ??= 'гражданский';
+    character.militaryExperience ??= 0;
+    character.servicePayArrears ??= 0;
   }
   for (const army of localized.armies) {
     army.supplies ??= 70;
     army.campaignHistory ??= [];
     army.targetMonsterId ??= undefined;
     if (army.status === 'battle' && army.targetMonsterId) army.status = 'hunting';
+    army.soldierIds ??= []; army.unitIds ??= []; army.supplyWagonIds ??= []; army.inventoryItemIds ??= [];
+    army.logistics ??= { foodDays: Math.max(8, Math.round(army.supplies * .65)), waterDays: Math.max(6, Math.round(army.supplies * .5)), medicine: 12, tents: 0, tools: 0, horses: 0, wagons: 0, equipmentCoverage: 0, armorCoverage: 0, rangedCoverage: 0, payrollDebt: 0, desertions: 0, wounded: 0 };
+    army.monthlyPayroll ??= 0; army.readiness ??= 35;
   }
   for (const monster of localized.monsters) {
     monster.hunger ??= rng.int(20, 65);
@@ -167,14 +178,20 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.shipment = Math.max(0, ...localized.shipments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.travelingMerchant = Math.max(0, ...localized.travelingMerchants.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.marketTransaction = Math.max(0, ...localized.marketTransactions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.militaryUnit = Math.max(0, ...localized.militaryUnits.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.supplyWagon = Math.max(0, ...localized.supplyWagons.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
 
+  normalizeKingdomCapitals(localized);
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
   ensureAllBuildingFootprints(localized as WorldState);
   initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));
   initializeLivingEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-личная-экономика-v1`));
+  initializeMilitaryInfrastructure(localized as WorldState, new RNG(`${localized.config.seed}:переход-военная-инфраструктура-v1`));
+  pruneEmptyMaterialItems(localized as WorldState);
+  repairMigratedItemLocations(localized as WorldState, sourceVersion);
   ensureCemeteries(localized as WorldState, rng);
   compactDeadEntities(localized as WorldState, rng);
   synchronizeMortalityIds(localized as WorldState);
@@ -184,6 +201,73 @@ export function migrateWorld(input: unknown): WorldState {
   ensureSimulationRuntime(localized as WorldState);
 
   return localized as WorldState;
+}
+
+
+function repairMigratedItemLocations(world: WorldState, sourceVersion: number): void {
+  const itemIds = new Set(world.items.map(item => item.id));
+  const uniqueValid = (ids: number[] | undefined): number[] => [...new Set((ids ?? []).filter(id => itemIds.has(id)))];
+  const characterById = new Map(world.characters.map(character => [character.id, character]));
+  const householdById = new Map(world.households.map(household => [household.id, household]));
+  const buildingById = new Map(world.buildings.map(building => [building.id, building]));
+  const establishmentById = new Map(world.establishments.map(establishment => [establishment.id, establishment]));
+  const wagonById = new Map((world.supplyWagons ?? []).map(wagon => [wagon.id, wagon]));
+
+  for (const character of world.characters) character.inventoryItemIds = uniqueValid(character.inventoryItemIds);
+  for (const household of world.households) household.inventoryItemIds = uniqueValid(household.inventoryItemIds);
+  for (const building of world.buildings) building.inventoryItemIds = uniqueValid(building.inventoryItemIds);
+  for (const establishment of world.establishments) establishment.inventoryItemIds = uniqueValid(establishment.inventoryItemIds);
+  for (const army of world.armies) army.inventoryItemIds = uniqueValid(army.inventoryItemIds);
+  for (const wagon of world.supplyWagons ?? []) wagon.inventoryItemIds = uniqueValid(wagon.inventoryItemIds);
+  for (const merchant of world.travelingMerchants ?? []) merchant.wagonInventoryItemIds = uniqueValid(merchant.wagonInventoryItemIds);
+
+  const located = new Set<number>();
+  const mark = (ids: number[]) => ids.forEach(id => located.add(id));
+  world.characters.forEach(character => mark(character.inventoryItemIds));
+  world.households.forEach(household => mark(household.inventoryItemIds));
+  world.buildings.forEach(building => mark(building.inventoryItemIds));
+  world.establishments.forEach(establishment => mark(establishment.inventoryItemIds));
+  world.armies.forEach(army => mark(army.inventoryItemIds));
+  (world.supplyWagons ?? []).forEach(wagon => mark(wagon.inventoryItemIds));
+  (world.travelingMerchants ?? []).forEach(merchant => mark(merchant.wagonInventoryItemIds));
+
+  const addUnique = (ids: number[], itemId: number): void => { if (!ids.includes(itemId)) ids.push(itemId); located.add(itemId); };
+  const fallbackBuilding = (settlementId: number) => {
+    const candidates = world.buildings.filter(building => building.settlementId === settlementId);
+    return candidates.find(building => building.type === 'arsenal')
+      ?? candidates.find(building => building.type === 'warehouse')
+      ?? candidates.find(building => building.type === 'barracks')
+      ?? candidates.find(building => building.type === 'castle')
+      ?? candidates[0];
+  };
+
+  for (const item of world.items) {
+    if (sourceVersion < 13 && item.supplyWagonId && !wagonById.has(item.supplyWagonId)) item.supplyWagonId = undefined;
+
+    const owner = item.ownerCharacterId ? characterById.get(item.ownerCharacterId) : undefined;
+    const household = item.householdId ? householdById.get(item.householdId) : undefined;
+    const establishment = item.establishmentId ? establishmentById.get(item.establishmentId) : undefined;
+    const wagon = item.supplyWagonId ? wagonById.get(item.supplyWagonId) : undefined;
+    const building = item.buildingId ? buildingById.get(item.buildingId) : undefined;
+
+    if (owner) addUnique(owner.inventoryItemIds, item.id);
+    if (household) addUnique(household.inventoryItemIds, item.id);
+    if (establishment) addUnique(establishment.inventoryItemIds, item.id);
+    if (wagon) addUnique(wagon.inventoryItemIds, item.id);
+    if (building && !owner && !household && !establishment && !wagon) addUnique(building.inventoryItemIds, item.id);
+
+    if (located.has(item.id)) continue;
+    const destination = fallbackBuilding(item.settlementId);
+    if (!destination) continue;
+    item.ownerCharacterId = undefined;
+    item.householdId = undefined;
+    item.establishmentId = undefined;
+    item.supplyWagonId = undefined;
+    item.buildingId = destination.id;
+    item.history ??= [];
+    item.history.push(`После обновления хранилища предмет передан в ${destination.name}.`);
+    addUnique(destination.inventoryItemIds, item.id);
+  }
 }
 
 function workplaceFor(profession: string): string {
