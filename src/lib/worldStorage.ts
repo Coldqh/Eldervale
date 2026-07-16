@@ -19,7 +19,7 @@ const TILE_CHUNK_SIZE = 256;
 
 const entityCollections = [
   'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'militaryUnits', 'supplyWagons', 'monsters', 'cemeteries', 'burials', 'animalPopulations',
-  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'events', 'localMapChanges',
+  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'settlementGovernments', 'districtCivicStates', 'civicPatrols', 'crimes', 'courtCases', 'fireIncidents', 'kingdomGovernments', 'nobleTitles', 'vassalContracts', 'courtOffices', 'courtFactions', 'royalOrders', 'stateCrises', 'diplomaticAgreements', 'events', 'localMapChanges',
 ] as const;
 
 type EntityCollection = typeof entityCollections[number];

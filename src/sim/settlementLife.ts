@@ -70,10 +70,10 @@ export function advanceSettlementLife(
     const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
     if (!government) continue;
     updateCivicRoster(world, settlement, government, indexes);
-    updateHomelessness(world, settlement, government);
-    updateDistrictConditions(world, settlement, government, active ? 1 : 6);
+    updateHomelessness(world, settlement, government, indexes);
+    updateDistrictConditions(world, settlement, government, active ? 1 : 6, indexes);
     collectLocalTaxes(world, settlement, government, active ? 1 : 6);
-    fundServices(world, settlement, government, active ? 1 : 6);
+    fundServices(world, settlement, government, active ? 1 : 6, indexes);
     ensureFutureCivicProjects(world, settlement, rng);
     if (active) {
       advancePatrols(world, settlement, government, rng);
@@ -370,14 +370,20 @@ function advanceFires(world: WorldState, settlement: Settlement, government: Set
   }
 }
 
-function updateHomelessness(world: WorldState, settlement: Settlement, government: SettlementGovernment): void {
-  const households = world.households.filter(item => item.settlementId === settlement.id);
+function updateHomelessness(world: WorldState, settlement: Settlement, government: SettlementGovernment, indexes: WorldIndexes): void {
+  const households = indexes.householdsBySettlement.get(settlement.id) ?? [];
   let homeless = 0;
   for (const household of households) {
-    const home = household.homeBuildingId ? world.buildings.find(item => item.id === household.homeBuildingId && item.condition > 0) : undefined;
-    const isHomeless = !home;
-    for (const id of household.memberIds) { const character = world.characters.find(item => item.id === id); if (character) character.homeless = isHomeless; }
-    if (isHomeless) homeless += household.memberIds.length;
+    const home = household.homeBuildingId ? indexes.buildingById.get(household.homeBuildingId) : undefined;
+    const isHomeless = !home || home.condition <= 0;
+    let livingMembers = 0;
+    for (const id of household.memberIds) {
+      const character = indexes.characterById.get(id);
+      if (!character?.alive) continue;
+      character.homeless = isHomeless;
+      livingMembers += 1;
+    }
+    if (isHomeless) homeless += livingMembers;
   }
   const states = world.districtCivicStates.filter(item => item.settlementId === settlement.id);
   states.forEach(item => { item.homelessCount = 0; });
@@ -390,9 +396,10 @@ function updateHomelessness(world: WorldState, settlement: Settlement, governmen
   }
 }
 
-function updateDistrictConditions(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number): void {
-  const hasBath = world.buildings.some(item => item.settlementId === settlement.id && item.type === 'bathhouse' && item.condition > 20);
-  const wells = world.buildings.filter(item => item.settlementId === settlement.id && item.hasWater && item.condition > 20).length;
+function updateDistrictConditions(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number, indexes: WorldIndexes): void {
+  const buildings = indexes.buildingsBySettlement.get(settlement.id) ?? [];
+  const hasBath = buildings.some(item => item.type === 'bathhouse' && item.condition > 20);
+  const wells = buildings.filter(item => item.hasWater && item.condition > 20).length;
   const activeFires = world.fireIncidents.filter(item => item.settlementId === settlement.id && ['горит', 'локализован'].includes(item.status)).length;
   for (const state of world.districtCivicStates.filter(item => item.settlementId === settlement.id)) {
     const patrols = world.civicPatrols.filter(item => state.patrolIds.includes(item.id) && item.status === 'патрулирует');
@@ -412,9 +419,9 @@ function collectLocalTaxes(world: WorldState, settlement: Settlement, government
   government.monthlyTaxIncome = collected; government.treasury += collected;
 }
 
-function fundServices(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number): void {
+function fundServices(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number, indexes: WorldIndexes): void {
   const payroll = (government.guardIds.length * 1.2 + government.judgeIds.length * 2.4 + government.firefighterIds.length * 1 + government.teacherIds.length * .9 + government.gravediggerIds.length * .7) * elapsedMonths;
-  const maintenance = world.buildings.filter(item => item.settlementId === settlement.id && ['townHall', 'courthouse', 'prison', 'fireStation', 'school', 'shelter'].includes(item.type)).length * 1.4 * elapsedMonths;
+  const maintenance = (indexes.buildingsBySettlement.get(settlement.id) ?? []).filter(item => ['townHall', 'courthouse', 'prison', 'fireStation', 'school', 'shelter'].includes(item.type)).length * 1.4 * elapsedMonths;
   const due = payroll + maintenance;
   const paid = Math.min(government.treasury, due); government.treasury -= paid; government.monthlyExpenses = paid;
   if (paid < due * .65) {

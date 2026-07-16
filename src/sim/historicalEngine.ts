@@ -13,6 +13,7 @@ import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { initializeKnowledgeSystem } from './knowledgeSystem';
 import { initializeSettlementLife } from './settlementLife';
+import { initializeStateMachine } from './stateMachine';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { normalizeKingdomCapitals } from './kingdomState';
@@ -95,6 +96,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeKnowledgeSystem(world, new RNG(`${config.seed}:память-и-знания-v1`));
   onProgress?.('Городские службы, стража и суды', 99.2, 100, 'создаём управы, патрули, пожарные команды и местные бюджеты');
   initializeSettlementLife(world, new RNG(`${config.seed}:жизнь-поселений-v1`));
+  onProgress?.('Дворы, вассалы и государственная власть', 99.6, 100, 'распределяем титулы, должности, налоги, группировки и старые договоры');
+  initializeStateMachine(world, new RNG(`${config.seed}:государственная-машина-v1`));
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
   const landmarkEventIds = [...world.events]
     .sort((a, b) => b.importance - a.importance || b.year - a.year || b.id - a.id)
@@ -116,7 +119,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 15;
+  world.version = 16;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

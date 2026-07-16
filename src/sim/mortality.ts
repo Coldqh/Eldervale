@@ -81,6 +81,7 @@ export function archiveCharactersBatch(world: WorldState, indexes: WorldIndexes 
       for (const [profession, workers] of professions) professions.set(profession, workers.filter(item => !deadIds.has(item.id)));
     }
   }
+  detachDeadKnowledge(world, deadIds);
   detachCharactersBatch(world, deadIds, deadById);
   world.burials.push(...burials);
   for (const burial of burials) finalizeInitialBurial(world, burial, unique.get(burial.subjectId!)!.context, rng);
@@ -326,6 +327,28 @@ function addCorpseEffect(world: WorldState, burial: BurialRecord): void {
   });
 }
 
+
+function detachDeadKnowledge(world: WorldState, deadIds: Set<number>): void {
+  const removedMemoryIds = new Set((world.memories ?? []).filter(memory => deadIds.has(memory.characterId)).map(memory => memory.id));
+  if (removedMemoryIds.size) {
+    world.memories = world.memories.filter(memory => !removedMemoryIds.has(memory.id));
+    for (const survivor of world.characters) {
+      survivor.knowledge.memoryIds = survivor.knowledge.memoryIds.filter(id => !removedMemoryIds.has(id));
+    }
+  }
+
+  for (const rumor of world.rumors ?? []) {
+    if (rumor.carrierCharacterId && deadIds.has(rumor.carrierCharacterId)) {
+      rumor.carrierCharacterId = undefined;
+      rumor.history.push(`Носитель слуха умер в ${world.year} году; рассказ остался в поселении.`);
+    }
+  }
+  for (const message of world.messages ?? []) {
+    if (message.senderCharacterId && deadIds.has(message.senderCharacterId)) message.senderCharacterId = undefined;
+    if (message.recipientCharacterId && deadIds.has(message.recipientCharacterId)) message.recipientCharacterId = undefined;
+  }
+}
+
 function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById: Map<number, Character>): void {
   const liveById = new Map(world.characters.map(item => [item.id, item]));
   const emptyHouseholdIds = new Set<number>();
@@ -460,6 +483,48 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
       army.strength = 0;
       army.status = 'recovering';
       army.campaignHistory.push(`После смерти ${former?.name ?? 'командира'} армия осталась без командования и распалась.`);
+    }
+  }
+
+  for (const government of world.settlementGovernments ?? []) {
+    government.councilCharacterIds = government.councilCharacterIds.filter(id => !deadIds.has(id));
+    government.guardIds = government.guardIds.filter(id => !deadIds.has(id));
+    government.judgeIds = government.judgeIds.filter(id => !deadIds.has(id));
+    government.firefighterIds = government.firefighterIds.filter(id => !deadIds.has(id));
+    government.teacherIds = government.teacherIds.filter(id => !deadIds.has(id));
+    government.gravediggerIds = government.gravediggerIds.filter(id => !deadIds.has(id));
+    government.prisonerIds = government.prisonerIds.filter(id => !deadIds.has(id));
+    if (!deadIds.has(government.leaderCharacterId)) continue;
+    const former = deadById.get(government.leaderCharacterId);
+    const successor = government.councilCharacterIds
+      .map(id => liveById.get(id))
+      .find((item): item is Character => Boolean(item?.alive && item.legalStatus !== 'заключён'))
+      ?? world.characters
+        .filter(item => item.alive && item.settlementId === government.settlementId && item.age >= 16 && item.legalStatus !== 'заключён')
+        .sort((a, b) => b.renown - a.renown || b.loyalty - a.loyalty || a.id - b.id)[0];
+    government.leaderCharacterId = successor?.id ?? 0;
+    government.history.push(successor
+      ? `После смерти ${former?.name ?? 'руководителя'} власть принял ${successor.name}.`
+      : `После смерти ${former?.name ?? 'руководителя'} местная власть осталась без главы.`);
+  }
+  for (const patrol of world.civicPatrols ?? []) {
+    patrol.guardIds = patrol.guardIds.filter(id => !deadIds.has(id));
+    if (!patrol.guardIds.length) patrol.status = 'разбита';
+  }
+  for (const crime of world.crimes ?? []) {
+    crime.witnessIds = crime.witnessIds.filter(id => !deadIds.has(id));
+    if (crime.perpetratorId && deadIds.has(crime.perpetratorId) && ['совершено', 'расследуется', 'подозреваемый найден', 'передано в суд'].includes(crime.status)) {
+      crime.status = 'раскрыто';
+      crime.resolvedTick = worldTick(world);
+      crime.history.push(`Подозреваемый умер до завершения разбирательства в ${world.year} году.`);
+    }
+  }
+  for (const courtCase of world.courtCases ?? []) {
+    if (courtCase.judgeId && deadIds.has(courtCase.judgeId)) courtCase.judgeId = undefined;
+    if (courtCase.defendantId && deadIds.has(courtCase.defendantId) && courtCase.status !== 'завершено') {
+      courtCase.status = 'прекращено';
+      courtCase.closedTick = worldTick(world);
+      courtCase.history.push(`Дело прекращено после смерти обвиняемого в ${world.year} году.`);
     }
   }
 

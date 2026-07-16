@@ -32,6 +32,14 @@ function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', s
   if (kind === 'constructionProject') return <><path d="M5 27V9h22v18M9 9l7-5 7 5"/><path className="texture-cut" d="M8 15h16M8 21h16M11 9v18m10-18v18"/></>;
   if (kind === 'animalPopulation') return <><circle cx="9" cy="11" r="3"/><circle cx="16" cy="8" r="3"/><circle cx="23" cy="11" r="3"/><circle cx="16" cy="20" r="7"/></>;
   if (kind === 'ingredient') return <><path d="M16 28V12M16 17c-7 0-10-4-10-9 7 0 10 4 10 9Zm0 4c7 0 10-4 10-9-7 0-10 4-10 9Z"/></>;
+  if (kind === 'kingdomGovernment') return <><path d="M5 27h22M8 24V12h16v12M6 12l10-7 10 7"/><path className="texture-cut" d="M12 15v7m8-7v7M10 24h12"/></>;
+  if (kind === 'nobleTitle') return <><path d="m5 10 6 5 5-10 5 10 6-5-3 17H8z"/><path className="texture-cut" d="M9 22h14M12 18h8"/></>;
+  if (kind === 'vassalContract') return <><path d="M6 8h20v18H6z"/><path className="texture-cut" d="M10 13h12M10 18h12M10 23h7"/><circle cx="23" cy="23" r="4"/></>;
+  if (kind === 'courtOffice') return <><circle cx="16" cy="9" r="5"/><path d="M7 28c1-8 5-12 9-12s8 4 9 12"/><path className="texture-cut" d="M11 21h10M16 17v11"/></>;
+  if (kind === 'courtFaction') return <><circle cx="10" cy="12" r="4"/><circle cx="22" cy="12" r="4"/><circle cx="16" cy="20" r="5"/><path className="texture-cut" d="M5 28c1-6 4-9 7-9m15 9c-1-6-4-9-7-9"/></>;
+  if (kind === 'royalOrder') return <><path d="M7 5h18v22H7z"/><path className="texture-cut" d="M11 11h10M11 16h10M11 21h6"/><path d="m20 23 5-5 3 3-5 5z"/></>;
+  if (kind === 'stateCrisis') return <><path d="M7 28V5l17 5-17 6"/><path d="M12 28h13l-4-6-4 3-3-5-2 3z"/></>;
+  if (kind === 'diplomaticAgreement') return <><path d="M5 11c4-5 8-5 11 0l3 4 8-6"/><path d="M5 21c4 5 8 5 11 0l3-4 8 6"/><circle className="texture-cut" cx="16" cy="16" r="3"/></>;
   if (kind === 'kingdom' || kind === 'dynasty') return <><path d="m5 10 6 5 5-10 5 10 6-5-3 17H8z"/><path className="texture-cut" d="M9 22h14"/></>;
   if (kind === 'war') return <><path d="m7 5 18 22M25 5 7 27"/><path className="texture-cut" d="m5 9 4-4m14 0 4 4M5 23l4 4m14 0 4-4"/></>;
   if (kind === 'knowledgeFact') return <><circle cx="16" cy="16" r="10"/><path className="texture-cut" d="M16 9v8m0 5v1M9 16h14"/></>;

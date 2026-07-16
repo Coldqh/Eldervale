@@ -18,6 +18,7 @@ import { advanceModernTerritories, captureTerritoryAroundSettlement } from './te
 import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
 import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
 import { advanceSettlementLife } from './settlementLife';
+import { advanceStateMachine } from './stateMachine';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -823,6 +824,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   onPhase?.('Кладбища, погребения и исчезновение следов');
   advanceBurials(world, rng);
   succession(world, rng);
+  onPhase?.('Дворы, вассалы, налоги, приказы и внутренняя политика');
+  advanceStateMachine(world, rng, indexes);
 
   if (schedule.runBooks) writeBooks(world, rng);
   if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);

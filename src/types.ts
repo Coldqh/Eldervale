@@ -1,7 +1,7 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
 export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
@@ -260,6 +260,167 @@ export interface FireIncident {
   endedTick?: number;
   deaths: number;
   destroyedBuildingIds: number[];
+  history: string[];
+}
+
+export type GovernmentForm = 'феодальная монархия' | 'племенной союз' | 'выборная монархия' | 'республика' | 'теократия' | 'военная диктатура' | 'городской союз' | 'кочевая конфедерация';
+export type NobleRank = 'корона' | 'герцогство' | 'графство' | 'баронство' | 'лордство';
+export type CourtOfficeKind = 'канцлер' | 'казначей' | 'маршал' | 'глава разведки' | 'придворный лекарь' | 'верховный жрец' | 'придворный маг';
+export type CourtFactionKind = 'корона' | 'знать' | 'армия' | 'духовенство' | 'купцы' | 'народ';
+export type RoyalOrderKind = 'помощь поселению' | 'укрепление границы' | 'требование налогов' | 'назначение чиновника' | 'расследование коррупции' | 'дарование автономии' | 'созыв ополчения' | 'дипломатическая миссия';
+export type RoyalOrderStatus = 'обсуждается' | 'утверждён' | 'в пути' | 'исполнен' | 'отказано' | 'провален';
+export type StateCrisisKind = 'кризис наследования' | 'заговор' | 'вассальный мятеж' | 'гражданская война' | 'переворот' | 'сепаратизм' | 'регентский кризис';
+export type StateCrisisStatus = 'назревает' | 'активен' | 'подавлен' | 'победа мятежников' | 'урегулирован';
+export type DiplomaticAgreementKind = 'ненападение' | 'торговый договор' | 'оборонительный союз' | 'дань' | 'династический брак' | 'гарантия границ';
+
+export interface NobleTitle {
+  id: number;
+  kingdomId: number;
+  settlementId?: number;
+  name: string;
+  rank: NobleRank;
+  holderCharacterId: number;
+  liegeTitleId?: number;
+  hereditary: boolean;
+  taxShare: number;
+  levyShare: number;
+  legitimacy: number;
+  autonomy: number;
+  status: 'действует' | 'вакантен' | 'конфискован' | 'оспаривается';
+  claimantIds: number[];
+  history: string[];
+}
+
+export interface VassalContract {
+  id: number;
+  kingdomId: number;
+  liegeTitleId: number;
+  vassalTitleId: number;
+  liegeCharacterId: number;
+  vassalCharacterId: number;
+  taxRate: number;
+  levyRate: number;
+  loyalty: number;
+  autonomy: number;
+  taxArrears: number;
+  levyArrears: number;
+  status: 'верен' | 'напряжение' | 'отказывается' | 'мятеж';
+  lastPaidTick: number;
+  history: string[];
+}
+
+export interface CourtOffice {
+  id: number;
+  kingdomId: number;
+  kind: CourtOfficeKind;
+  holderCharacterId?: number;
+  salary: number;
+  influence: number;
+  competence: number;
+  loyalty: number;
+  appointedTick: number;
+  vacantSinceTick?: number;
+  history: string[];
+}
+
+export interface CourtFaction {
+  id: number;
+  kingdomId: number;
+  name: string;
+  kind: CourtFactionKind;
+  leaderCharacterId: number;
+  memberIds: number[];
+  influence: number;
+  loyalty: number;
+  treasury: number;
+  goal: string;
+  grievance: string;
+  status: 'лояльна' | 'торгуется' | 'в оппозиции' | 'заговор';
+  history: string[];
+}
+
+export interface RoyalOrder {
+  id: number;
+  kingdomId: number;
+  kind: RoyalOrderKind;
+  issuerCharacterId: number;
+  targetSettlementId?: number;
+  targetCharacterId?: number;
+  targetKingdomId?: number;
+  messageId?: number;
+  factId?: number;
+  status: RoyalOrderStatus;
+  priority: number;
+  cost: number;
+  createdTick: number;
+  dispatchedTick?: number;
+  resolvedTick?: number;
+  reason: string;
+  outcome?: string;
+  history: string[];
+}
+
+export interface StateCrisis {
+  id: number;
+  kingdomId: number;
+  kind: StateCrisisKind;
+  instigatorCharacterId?: number;
+  factionId?: number;
+  claimantCharacterId?: number;
+  settlementIds: number[];
+  severity: number;
+  support: number;
+  opposition: number;
+  status: StateCrisisStatus;
+  startedTick: number;
+  resolvedTick?: number;
+  history: string[];
+}
+
+export interface DiplomaticAgreement {
+  id: number;
+  kingdomIds: [number, number];
+  kind: DiplomaticAgreementKind;
+  status: 'переговоры' | 'действует' | 'нарушен' | 'истёк' | 'отклонён';
+  initiatorKingdomId: number;
+  messageId?: number;
+  signedTick?: number;
+  expiresTick?: number;
+  tributeAmount: number;
+  marriageCharacterIds?: [number, number];
+  terms: string[];
+  history: string[];
+}
+
+export interface KingdomGovernment {
+  id: number;
+  kingdomId: number;
+  form: GovernmentForm;
+  sovereignCharacterId: number;
+  heirCharacterId?: number;
+  regentCharacterId?: number;
+  capitalSettlementId: number;
+  sovereignTitleId: number;
+  titleIds: number[];
+  vassalContractIds: number[];
+  courtOfficeIds: number[];
+  factionIds: number[];
+  orderIds: number[];
+  crisisIds: number[];
+  agreementIds: number[];
+  legitimacy: number;
+  centralization: number;
+  administration: number;
+  corruption: number;
+  monthlyTaxIncome: number;
+  monthlyCourtCost: number;
+  monthlyInfrastructureCost: number;
+  monthlyReliefCost: number;
+  debt: number;
+  taxRate: number;
+  levyRate: number;
+  successionLaw: string;
+  activeDecision: string;
   history: string[];
 }
 
@@ -646,6 +807,7 @@ export interface SimulationRuntimeState {
   militaryInfrastructureVersion?: 1;
   knowledgeSystemVersion?: 1;
   settlementLifeVersion?: 1;
+  stateMachineVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -693,6 +855,7 @@ export interface Kingdom {
   claims: number[];
   diplomacy: DiplomacyRecord[];
   laws: string[];
+  governmentStateId?: number;
 }
 
 export interface SettlementDistrict {
@@ -785,6 +948,10 @@ export interface Character {
   wantedForCrimeIds?: number[];
   sentenceUntilTick?: number;
   homeless?: boolean;
+  nobleTitleIds?: number[];
+  courtOfficeIds?: number[];
+  courtFactionId?: number;
+  politicalInfluence?: number;
 }
 
 export interface Relationship {
@@ -1217,7 +1384,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 15;
+  version: 16;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1266,6 +1433,14 @@ export interface WorldState {
   crimes: CrimeIncident[];
   courtCases: CourtCase[];
   fireIncidents: FireIncident[];
+  kingdomGovernments: KingdomGovernment[];
+  nobleTitles: NobleTitle[];
+  vassalContracts: VassalContract[];
+  courtOffices: CourtOffice[];
+  courtFactions: CourtFaction[];
+  royalOrders: RoyalOrder[];
+  stateCrises: StateCrisis[];
+  diplomaticAgreements: DiplomaticAgreement[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];
