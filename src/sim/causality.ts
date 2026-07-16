@@ -24,6 +24,8 @@ export function causalEvent(
     traces: input.traces ?? input.entityRefs,
     entityRefs: input.entityRefs,
     importance: input.importance,
+    decisionId: input.decisionId,
+    stateDeltaIds: input.stateDeltaIds ? [...input.stateDeltaIds] : undefined,
   };
 }
 
@@ -119,6 +121,7 @@ export function normalizeEventCausality(event: any): WorldEvent {
   event.outcome ||= event.consequences.join('; ');
   event.entityRefs ??= [];
   event.traces = Array.isArray(event.traces) && event.traces.length ? event.traces : event.entityRefs;
+  event.stateDeltaIds = Array.isArray(event.stateDeltaIds) ? event.stateDeltaIds : [];
   return event as WorldEvent;
 }
 

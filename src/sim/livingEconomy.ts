@@ -498,31 +498,26 @@ export interface DetailedPopulationContext {
   householdIds: Set<number>;
 }
 
-export function detailedPopulationContext(world: WorldState, indexes: WorldIndexes): DetailedPopulationContext {
+export function detailedPopulationContext(world: WorldState, indexes: WorldIndexes, activeSettlementIds?: ReadonlySet<number>): DetailedPopulationContext {
   const context: DetailedPopulationContext = { settlementIds: new Set(), characterIds: new Set(), householdIds: new Set() };
-  const focus = world.simulation.observerFocus;
-  if (!focus) return context;
-  const tile = indexes.tileByCoordinate.get(`${focus.x}:${focus.y}`);
-  const settlement = tile?.settlementId
-    ? indexes.settlementById.get(tile.settlementId)
-    : world.settlements.find(item => item.districts.some(district => district.x === focus.x && district.y === focus.y));
-  if (!settlement) return context;
-  context.settlementIds.add(settlement.id);
-  const radius = Math.max(0, focus.radius ?? 1);
-  const residents = indexes.residentsBySettlement.get(settlement.id) ?? [];
-  const candidates = residents.filter(character => {
-    if (!character.alive) return false;
-    const working = character.age >= 14 && character.profession !== 'child';
-    const buildingId = working ? character.workplaceBuildingId ?? character.homeBuildingId : character.homeBuildingId;
-    const building = buildingId ? indexes.buildingById.get(buildingId) : undefined;
-    if (building) return Math.abs(building.globalX - focus.x) + Math.abs(building.globalY - focus.y) <= radius;
-    const districts = settlement.districts.length ? settlement.districts : [{ x: settlement.x, y: settlement.y }];
-    const assigned = districts[hashSeed(`${world.config.seed}:район-жителя:${character.id}`) % districts.length]!;
-    return Math.abs(assigned.x - focus.x) + Math.abs(assigned.y - focus.y) <= radius;
-  }).sort((a, b) => Number(Boolean(b.titles.length)) - Number(Boolean(a.titles.length)) || b.renown - a.renown || a.id - b.id).slice(0, MAX_DETAILED_CHARACTERS);
-  for (const character of candidates) {
-    context.characterIds.add(character.id);
-    if (character.householdId) context.householdIds.add(character.householdId);
+  const settlementIds = activeSettlementIds ?? new Set<number>();
+  if (!settlementIds.size) return context;
+  const perSettlementLimit = Math.max(8, Math.floor(MAX_DETAILED_CHARACTERS / Math.max(1, settlementIds.size)));
+  for (const settlementId of settlementIds) {
+    const residents = indexes.residentsBySettlement.get(settlementId) ?? [];
+    const candidates = residents
+      .filter(character => character.alive)
+      .sort((a, b) => Number(Boolean(b.titles.length)) - Number(Boolean(a.titles.length))
+        || Number(Boolean(b.courtOfficeIds?.length)) - Number(Boolean(a.courtOfficeIds?.length))
+        || b.renown - a.renown || a.id - b.id)
+      .slice(0, perSettlementLimit);
+    if (!candidates.length) continue;
+    context.settlementIds.add(settlementId);
+    for (const character of candidates) {
+      if (context.characterIds.size >= MAX_DETAILED_CHARACTERS) break;
+      context.characterIds.add(character.id);
+      if (character.householdId) context.householdIds.add(character.householdId);
+    }
   }
   return context;
 }

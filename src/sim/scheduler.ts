@@ -96,8 +96,7 @@ function collectActiveRegions(world: WorldState, indexes: WorldIndexes): { regio
     for (const district of settlement.districts) activate(district.x, district.y, 1);
   };
 
-  const focus = world.simulation.observerFocus;
-  if (focus) activate(focus.x, focus.y, Math.max(1, focus.radius));
+  // Камера наблюдателя не меняет ход мира. Активность определяется только состоянием сущностей.
 
   for (const settlement of world.settlements) {
     if (settlement.shortages.length || settlement.damaged >= 20 || settlement.unrest >= 35 || settlement.population > settlement.residentialCapacity * .96) activateSettlement(settlement);

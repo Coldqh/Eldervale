@@ -1,5 +1,5 @@
 import type {
-  Artifact, Character, CausalEventInput, FallenRealm, HistoricalEraKind, HistoricalEraSummary,
+  Artifact, Character, CausalEventInput, EntityRef, FallenRealm, HistoricalEraKind, HistoricalEraSummary,
   Kingdom, Settlement, Species, War, WorldConfig, WorldEvent, WorldState,
 } from '../types';
 import { causalEvent } from './causality';
@@ -17,6 +17,8 @@ import { initializeStateMachine } from './stateMachine';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { normalizeKingdomCapitals } from './kingdomState';
+import { initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
+import { ensureCharacterMind, initializeMindSystem, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -40,8 +42,14 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   const presentYear = Math.max(1, config.historyYears);
   world.events = [];
   world.wars = [];
+  world.decisions = [];
+  world.stateDeltas = [];
   world.nextIds.event = 1;
   world.nextIds.war = 1;
+  world.nextIds.decision = 1;
+  world.nextIds.stateDelta = 1;
+  initializeDecisionCore(world);
+  initializeMindSystem(world);
   world.year = presentYear;
   world.month = 1;
   initializeTerritorialHistory(world);
@@ -87,6 +95,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeAgricultureAndConstruction(world, new RNG(`${config.seed}:земледелие-и-стройка-v1`));
   onProgress?.('Одежда, инструменты и личные рынки', 97, 100, 'назначаем экипировку, кошельки, продавцов и странствующих торговцев');
   initializeLivingEconomy(world, new RNG(`${config.seed}:личная-экономика-v1`));
+  initializeMindSystem(world);
   onProgress?.('Казармы, замки и реальные гарнизоны', 97.8, 100, 'формируем подразделения, арсеналы, обозы и снабжение');
   initializeMilitaryInfrastructure(world, new RNG(`${config.seed}:военная-инфраструктура-v1`));
   onProgress?.('Кладбища и архив павших', 98.2, 100, 'переносим умерших и убитых существ из активной симуляции');
@@ -106,20 +115,22 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
 
   const report = inspectWorldIntegrity(world);
   world.history = {
-    engineVersion: 1,
+    engineVersion: 2,
     generatedYears: presentYear,
     eras,
     landmarkEventIds: [...new Set([...foundationalIds, ...landmarkEventIds])].slice(0, 40),
     fallenRealms,
     compressedEventCount: estimateCompressedEvents(config, totalSteps),
     logicWarnings: [...report.errors, ...report.warnings].slice(0, 40),
+    historicalSimulationVersion: 1,
+    livedDecisionIds: world.decisions.filter(item => item.historical).map(item => item.id).slice(-1200),
   };
   world.nextIds.event = Math.max(0, ...world.events.map(event => event.id)) + 1;
   world.nextIds.war = Math.max(0, ...world.wars.map(war => war.id)) + 1;
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 16;
+  world.version = 17;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }
@@ -326,14 +337,27 @@ function historicalMigration(world: WorldState, rng: RNG, year: number, span: nu
   const to = destinations.length ? rng.pick(destinations) : rng.pick(world.settlements.filter(item => item.id !== from.id));
   const amount = rng.int(8, Math.max(10, Math.min(140, Math.round(from.population * .12))));
   const eventYear = clampYear(year + rng.int(0, Math.max(0, span - 1)), world.year);
+  const eventMonth = rng.int(1, 12);
   const cause = rng.pick(['неурожай', 'нехватка земли', 'религиозный конфликт', 'последствия войны', 'новые ремесленные работы', 'опасность чудовищ']);
+  const fromBefore = { unrest: from.unrest, prosperity: from.prosperity };
+  const toBefore = { unrest: to.unrest, prosperity: to.prosperity };
+  from.unrest = Math.min(100, from.unrest + Math.max(1, Math.round(amount / Math.max(20, from.population) * 10)));
+  from.prosperity = Math.max(1, from.prosperity - 1);
+  to.unrest = Math.min(100, to.unrest + Math.max(0, Math.round(amount / Math.max(50, to.population) * 3)));
+  to.prosperity = Math.min(100, to.prosperity + 1);
   from.history.push(`В ${eventYear} году часть семей ушла в ${to.name}: ${cause}.`);
-  return addHistoricalEvent(world, eventYear, rng.int(1, 12), {
+  to.history.push(`В ${eventYear} году в поселение прибыли семьи из ${from.name}.`);
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  const deltas = [
+    recordStateDelta(world, { entityRef: { kind: 'settlement', id: from.id }, field: 'unrest/prosperity', before: fromBefore, after: { unrest: from.unrest, prosperity: from.prosperity }, cause, historical: true, tick }),
+    recordStateDelta(world, { entityRef: { kind: 'settlement', id: to.id }, field: 'unrest/prosperity', before: toBefore, after: { unrest: to.unrest, prosperity: to.prosperity }, cause: `прибытие ${amount} переселенцев`, historical: true, tick }),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  return addHistoricalEvent(world, eventYear, eventMonth, {
     kind: 'migration', title: `Переселение из ${from.name} в ${to.name}`, description: `${amount} жителей и их семьи сменили место жизни.`,
     cause, conditions: [`в ${from.name} возникло устойчивое давление`, `${to.name} мог принять новых работников`],
     decision: 'семьи выбрали переселение вместо ожидания дальнейшего ухудшения', outcome: `новые жители прибыли в ${to.name}`,
     consequences: ['изменилась численность рабочих рук', 'культуры и семейные связи смешались', 'на дороге появились новые стоянки'],
-    entityRefs: [{ kind: 'settlement', id: from.id }, { kind: 'settlement', id: to.id }], importance: 2,
+    entityRefs: [{ kind: 'settlement', id: from.id }, { kind: 'settlement', id: to.id }], importance: 2, stateDeltaIds: deltas.map(item => item.id),
   }).id;
 }
 
@@ -342,16 +366,31 @@ function tradeAndCraft(world: WorldState, rng: RNG, year: number, span: number):
   const from = settlement(world, route.fromSettlementId)!;
   const to = settlement(world, route.toSettlementId)!;
   const eventYear = clampYear(year + rng.int(0, Math.max(0, span - 1)), world.year);
+  const eventMonth = rng.int(1, 12);
   const flourishing = rng.chance(.68);
+  const cause = flourishing ? 'спрос на товары, безопасность дорог и урожай' : rng.pick(['война', 'разбойники', 'обвал моста', 'падёж вьючных животных', 'нападения чудовищ']);
+  const routeBefore = { volume: route.volume, safety: route.safety, active: route.active };
+  const fromBefore = from.prosperity;
+  const toBefore = to.prosperity;
+  route.volume = Math.max(1, Math.round(route.volume * (flourishing ? 1.12 : .72)));
+  route.safety = Math.max(0, Math.min(100, route.safety + (flourishing ? 4 : -12)));
+  route.active = route.safety >= 18;
+  from.prosperity = Math.max(1, Math.min(100, from.prosperity + (flourishing ? 2 : -2)));
+  to.prosperity = Math.max(1, Math.min(100, to.prosperity + (flourishing ? 2 : -2)));
   route.history.push(flourishing ? `В ${eventYear} году путь пережил торговый подъём.` : `В ${eventYear} году путь временно пришёл в упадок.`);
-  return addHistoricalEvent(world, eventYear, rng.int(1, 12), {
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  const deltas = [
+    recordStateDelta(world, { entityRef: { kind: 'tradeRoute', id: route.id }, field: 'volume/safety/active', before: routeBefore, after: { volume: route.volume, safety: route.safety, active: route.active }, cause, historical: true, tick }),
+    recordStateDelta(world, { entityRef: { kind: 'settlement', id: from.id }, field: 'prosperity', before: fromBefore, after: from.prosperity, amount: from.prosperity - fromBefore, cause, historical: true, tick }),
+    recordStateDelta(world, { entityRef: { kind: 'settlement', id: to.id }, field: 'prosperity', before: toBefore, after: to.prosperity, amount: to.prosperity - toBefore, cause, historical: true, tick }),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  return addHistoricalEvent(world, eventYear, eventMonth, {
     kind: 'trade', title: flourishing ? `Расцвёл путь ${route.name}` : `Ослаб путь ${route.name}`,
     description: flourishing ? `Караваны увеличили перевозки ${route.goods.join(' и ')}.` : 'Караваны сократили движение, склады опустели.',
-    cause: flourishing ? 'спрос на товары, безопасность дорог и урожай' : rng.pick(['война', 'разбойники', 'обвал моста', 'падёж вьючных животных', 'нападения чудовищ']),
-    conditions: [`маршрут связывал ${from.name} и ${to.name}`], decision: flourishing ? 'купцы объединили охрану и вложились в караваны' : 'купцы выбрали обходные пути',
+    cause, conditions: [`маршрут связывал ${from.name} и ${to.name}`], decision: flourishing ? 'купцы объединили охрану и вложились в караваны' : 'купцы выбрали обходные пути',
     outcome: flourishing ? 'объём торговли вырос' : 'объём торговли временно упал',
     consequences: flourishing ? ['богатство поселений выросло', 'мастера получили сырьё'] : ['цены выросли', 'местные запасы стали важнее'],
-    entityRefs: [{ kind: 'tradeRoute', id: route.id }, { kind: 'settlement', id: from.id }, { kind: 'settlement', id: to.id }], importance: flourishing ? 2 : 3,
+    entityRefs: [{ kind: 'tradeRoute', id: route.id }, { kind: 'settlement', id: from.id }, { kind: 'settlement', id: to.id }], importance: flourishing ? 2 : 3, stateDeltaIds: deltas.map(item => item.id),
   }).id;
 }
 
@@ -360,15 +399,21 @@ function dynasticEvent(world: WorldState, rng: RNG, year: number, span: number):
   const kingdom = dynasty.kingdomId ? world.kingdoms.find(item => item.id === dynasty.kingdomId) : rng.pick(world.kingdoms);
   const capital = settlement(world, kingdom?.capitalId ?? rng.pick(world.settlements).id)!;
   const eventYear = clampYear(year + rng.int(0, Math.max(0, span - 1)), world.year);
+  const eventMonth = rng.int(1, 12);
   const figure = createHistoricalFigure(world, rng, capital, kingdom, eventYear, rng.pick(['регент', 'воевода', 'наследник', 'королева', 'мятежный князь']));
+  const cause = rng.pick(['смерть прежнего наследника', 'удачный брак', 'победа в походе', 'богатство торговых владений', 'поддержка храмов']);
+  const before = { prestige: dynasty.prestige, wealth: dynasty.wealth };
+  dynasty.prestige = Math.min(1000, dynasty.prestige + rng.int(4, 16));
+  dynasty.wealth += rng.int(8, 80);
   dynasty.memberIds.push(figure.id);
   dynasty.history.push(`В ${eventYear} году ${figure.name} изменил положение рода.`);
-  return addHistoricalEvent(world, eventYear, rng.int(1, 12), {
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  const delta = recordStateDelta(world, { entityRef: { kind: 'dynasty', id: dynasty.id }, field: 'prestige/wealth/memberIds', before, after: { prestige: dynasty.prestige, wealth: dynasty.wealth, addedMemberId: figure.id }, cause, historical: true, tick });
+  return addHistoricalEvent(world, eventYear, eventMonth, {
     kind: 'dynasty', title: `${figure.name} возвысил ${dynasty.name}`, description: `При дворе произошла смена влияния и должностей.`,
-    cause: rng.pick(['смерть прежнего наследника', 'удачный брак', 'победа в походе', 'богатство торговых владений', 'поддержка храмов']),
-    conditions: ['у рода были сторонники, деньги или военная сила'], decision: `${figure.name} принял власть и распределил должности`,
+    cause, conditions: ['у рода были сторонники, деньги или военная сила'], decision: `${figure.name} принял власть и распределил должности`,
     outcome: `${dynasty.name} укрепил положение`, consequences: ['изменился порядок наследования', 'соперники потеряли влияние', 'род получил новые обязательства'],
-    entityRefs: [{ kind: 'dynasty', id: dynasty.id }, { kind: 'character', id: figure.id }, ...(kingdom ? [{ kind: 'kingdom' as const, id: kingdom.id }] : [])], importance: 3,
+    entityRefs: [{ kind: 'dynasty', id: dynasty.id }, { kind: 'character', id: figure.id }, ...(kingdom ? [{ kind: 'kingdom' as const, id: kingdom.id }] : [])], importance: 3, stateDeltaIds: delta ? [delta.id] : [],
   }).id;
 }
 
@@ -376,31 +421,54 @@ function religiousOrCulturalEvent(world: WorldState, rng: RNG, year: number, spa
   const kingdom = rng.pick(world.kingdoms);
   const capital = settlement(world, kingdom.capitalId)!;
   const eventYear = clampYear(year + rng.int(0, Math.max(0, span - 1)), world.year);
+  const eventMonth = rng.int(1, 12);
   const schism = rng.chance(.52);
-  return addHistoricalEvent(world, eventYear, rng.int(1, 12), {
+  const before = { stability: kingdom.stability, laws: [...kingdom.laws] };
+  kingdom.stability = Math.max(0, Math.min(100, kingdom.stability + (schism ? -rng.int(3, 9) : rng.int(1, 4))));
+  if (!schism) {
+    const law = `обычай, признанный в ${eventYear} году`;
+    if (!kingdom.laws.includes(law)) kingdom.laws.push(law);
+  }
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  const delta = recordStateDelta(world, { entityRef: { kind: 'kingdom', id: kingdom.id }, field: 'stability/laws', before, after: { stability: kingdom.stability, laws: kingdom.laws }, cause: schism ? 'религиозный раскол' : 'закрепление нового обычая', historical: true, tick });
+  return addHistoricalEvent(world, eventYear, eventMonth, {
     kind: 'politics', title: schism ? `Раскол веры «${kingdom.religion}»` : `Новый обычай ${kingdom.culture}`,
     description: schism ? `Жрецы ${capital.name} спорили о власти храмов и толковании обрядов.` : 'Гильдии, семьи и дружины закрепили новый общественный обычай.',
     cause: schism ? 'разные интересы храмов, двора и общин' : 'изменение торговли, войны и состава населения',
     conditions: [`событие развивалось внутри ${kingdom.name}`], decision: schism ? 'часть жрецов создала отдельное течение' : 'правитель признал обычай законом или привилегией',
     outcome: schism ? 'появилось новое религиозное течение' : 'обычай стал частью культуры',
     consequences: schism ? ['храмы разделились', 'появились паломничества и конфликты'] : ['изменились права гильдий и семей', 'обычай распространился в поселениях'],
-    entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'settlement', id: capital.id }], importance: 3,
+    entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'settlement', id: capital.id }], importance: 3, stateDeltaIds: delta ? [delta.id] : [],
   }).id;
 }
 
 function disasterOrRecovery(world: WorldState, rng: RNG, year: number, span: number): number {
   const place = rng.pick(world.settlements);
   const eventYear = clampYear(year + rng.int(0, Math.max(0, span - 1)), world.year);
+  const eventMonth = rng.int(1, 12);
   const disaster = rng.chance(.55);
   const cause = rng.pick(['пожар после засухи', 'весеннее наводнение', 'болезнь скота', 'обвал шахты', 'мор среди жителей', 'буря и разрушение пристани']);
-  return addHistoricalEvent(world, eventYear, rng.int(1, 12), {
+  const before = { damaged: place.damaged, prosperity: place.prosperity, unrest: place.unrest };
+  if (disaster) {
+    place.damaged = Math.min(100, place.damaged + rng.int(8, 26));
+    place.prosperity = Math.max(1, place.prosperity - rng.int(2, 8));
+    place.unrest = Math.min(100, place.unrest + rng.int(3, 12));
+  } else {
+    place.damaged = Math.max(0, place.damaged - rng.int(6, 18));
+    place.prosperity = Math.min(100, place.prosperity + rng.int(2, 6));
+    place.unrest = Math.max(0, place.unrest - rng.int(1, 5));
+  }
+  place.history.push(disaster ? `В ${eventYear} году поселение пострадало: ${cause}.` : `В ${eventYear} году община восстановила повреждённые районы.`);
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  const delta = recordStateDelta(world, { entityRef: { kind: 'settlement', id: place.id }, field: 'damaged/prosperity/unrest', before, after: { damaged: place.damaged, prosperity: place.prosperity, unrest: place.unrest }, cause: disaster ? cause : 'организованное восстановление', historical: true, tick });
+  return addHistoricalEvent(world, eventYear, eventMonth, {
     kind: disaster ? 'disaster' : 'construction', title: disaster ? `${place.name} пережил бедствие` : `${place.name} восстановил старый район`,
     description: disaster ? `Причиной стало: ${cause}.` : 'Жители отстроили дома, склады и защитные сооружения.',
     cause: disaster ? cause : 'рост населения и память о прежнем бедствии', conditions: [`у ${place.name} были уязвимые здания и запасы`],
     decision: disaster ? 'жители спасали семьи, запасы и скот' : 'община направила материалы на восстановление',
     outcome: disaster ? 'часть имущества и построек погибла' : 'жилые и хозяйственные площади выросли',
     consequences: disaster ? ['возникли беженцы', 'цены на материалы выросли', 'местность сохранила следы разрушений'] : ['вместимость поселения выросла', 'появились новые рабочие места'],
-    entityRefs: [{ kind: 'settlement', id: place.id }], importance: disaster ? 3 : 2,
+    entityRefs: [{ kind: 'settlement', id: place.id }], importance: disaster ? 3 : 2, stateDeltaIds: delta ? [delta.id] : [],
   }).id;
 }
 
@@ -461,9 +529,75 @@ function linkKnowledgeAndArtifacts(world: WorldState, rng: RNG): void {
 }
 
 function addHistoricalEvent(world: WorldState, year: number, month: number, input: CausalEventInput): WorldEvent {
-  const event = causalEvent(world.nextIds.event++, clampYear(year, world.year), Math.max(1, Math.min(12, month)), input);
+  const eventYear = clampYear(year, world.year);
+  const eventMonth = Math.max(1, Math.min(12, month));
+  const tick = (eventYear - 1) * 12 + eventMonth - 1;
+  let decisionId = input.decisionId;
+  let stateDeltaIds = [...(input.stateDeltaIds ?? [])];
+  if (!decisionId) {
+    const actor = historicalActor(world, input.entityRefs);
+    if (actor) {
+      ensureCharacterMind(world, actor);
+      const dangerous = ['war', 'battle', 'monster', 'dragon', 'hero', 'disaster', 'rebellion'].includes(input.kind);
+      const political = ['politics', 'dynasty', 'state', 'diplomacy', 'rebellion'].includes(input.kind);
+      const options = [
+        scoreMotivatedAction(world, actor, {
+          id: 'withdraw', label: 'Отказаться или отложить', base: 12, orderBenefit: dangerous ? 5 : -4,
+          risk: dangerous ? -12 : 2, powerGain: political ? -8 : 0, socialApproval: -5,
+        }),
+        scoreMotivatedAction(world, actor, {
+          id: 'act', label: input.decision?.trim() || input.description, base: 20 + input.importance * 4,
+          powerGain: political ? 18 : 4, wealthGain: input.kind === 'trade' || input.kind === 'construction' ? 16 : 0,
+          orderBenefit: input.kind === 'construction' || input.kind === 'settlement' ? 18 : dangerous ? -12 : 5,
+          familyBenefit: input.kind === 'migration' || input.kind === 'hero' ? 12 : 0,
+          risk: dangerous ? 28 : 7, harm: ['war', 'battle', 'disaster'].includes(input.kind) ? 24 : 0,
+          violence: ['war', 'battle', 'monster', 'dragon'].includes(input.kind) ? 30 : 0,
+          situational: { 'историческое давление': input.importance * 5 },
+        }),
+      ];
+      const decision = recordDecision(world, {
+        actorRef: { kind: 'character', id: actor.id }, goal: input.cause, context: `${eventYear}.${String(eventMonth).padStart(2, '0')}: ${input.title}`,
+        knownFactIds: actor.knowledge?.factIds.slice(-24) ?? [], options, chosenOptionId: 'act', reason: input.decision,
+        historical: true, tick, tags: ['прожитая история', input.kind],
+      });
+      decisionId = decision.id;
+      setDecisionMoment(world, actor);
+      const traceRef = input.traces?.[0] ?? input.entityRefs[0];
+      if (traceRef) {
+        const delta = recordStateDelta(world, {
+          entityRef: traceRef, field: `historical:${input.kind}:${input.title}`, before: 'событие ещё не произошло',
+          after: input.outcome?.trim() || input.consequences.join('; '), cause: input.cause, decisionId, historical: true, tick,
+        });
+        if (delta) stateDeltaIds.push(delta.id);
+      }
+    }
+  }
+  const event = causalEvent(world.nextIds.event++, eventYear, eventMonth, { ...input, decisionId, stateDeltaIds });
   world.events.push(event);
+  linkDecisionToEvent(world, decisionId, event, stateDeltaIds);
   return event;
+}
+
+function historicalActor(world: WorldState, refs: EntityRef[]): Character | undefined {
+  const direct = refs.find(ref => ref.kind === 'character');
+  if (direct) {
+    const character = world.characters.find(item => item.id === direct.id);
+    if (character) return character;
+  }
+  const kingdomRef = refs.find(ref => ref.kind === 'kingdom');
+  if (kingdomRef) {
+    const kingdom = world.kingdoms.find(item => item.id === kingdomRef.id);
+    const ruler = kingdom ? world.characters.find(item => item.id === kingdom.rulerId) : undefined;
+    if (ruler) return ruler;
+  }
+  const settlementRef = refs.find(ref => ref.kind === 'settlement');
+  if (settlementRef) {
+    const government = world.settlementGovernments.find(item => item.settlementId === settlementRef.id);
+    const leader = government ? world.characters.find(item => item.id === government.leaderCharacterId) : undefined;
+    if (leader) return leader;
+    return world.characters.find(item => item.settlementId === settlementRef.id && item.alive && item.age >= 18);
+  }
+  return world.characters.find(item => item.alive && item.titles.length > 0) ?? world.characters.find(item => item.alive && item.age >= 18);
 }
 
 function summarizeEra(world: WorldState, plan: EraPlan, eventIds: number[]): string {

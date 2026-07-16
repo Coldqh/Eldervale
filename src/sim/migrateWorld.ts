@@ -17,17 +17,19 @@ import { emptyCharacterKnowledge, initializeKnowledgeSystem } from './knowledgeS
 import { initializeSettlementLife } from './settlementLife';
 import { initializeStateMachine } from './stateMachine';
 import { normalizeKingdomCapitals } from './kingdomState';
+import { initializeDecisionCore } from './decisionCore';
+import { initializeMindSystem } from './mindSystem';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-16`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-17`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 16;
+  localized.version = 17;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -72,6 +74,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.royalOrders ??= [];
   localized.stateCrises ??= [];
   localized.diplomaticAgreements ??= [];
+  localized.decisions ??= [];
+  localized.stateDeltas ??= [];
   localized.militaryUnits ??= [];
   localized.supplyWagons ??= [];
   localized.territoryHistory ??= [];
@@ -82,17 +86,19 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 14) localized.simulation.knowledgeSystemVersion = undefined;
   if (sourceVersion < 15) localized.simulation.settlementLifeVersion = undefined;
   if (sourceVersion < 16) localized.simulation.stateMachineVersion = undefined;
+  if (sourceVersion < 17) { localized.simulation.decisionCoreVersion = undefined; localized.simulation.mindSystemVersion = undefined; }
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
   };
-  localized.history.engineVersion = 1;
+  localized.history.engineVersion = Math.max(1, localized.history.engineVersion ?? 1);
   localized.history.generatedYears ??= localized.config.historyYears ?? localized.year ?? 1;
   localized.history.eras ??= [];
   localized.history.landmarkEventIds ??= [...localized.events].sort((a: any, b: any) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 32).map((event: any) => event.id);
   localized.history.fallenRealms ??= [];
   localized.history.compressedEventCount ??= 0;
   localized.history.logicWarnings ??= [];
+  localized.history.livedDecisionIds ??= [];
 
   if (previousLocalSize !== localized.config.localMapSize) {
     const ratio = localized.config.localMapSize / Math.max(1, previousLocalSize);
@@ -176,6 +182,13 @@ export function migrateWorld(input: unknown): WorldState {
   for (const dungeon of localized.dungeons) { dungeon.purpose ??= dungeon.origin; dungeon.discovered ??= true; }
   for (const war of localized.wars) { war.goal ??= 'добиться уступок'; war.contestedSettlementIds ??= []; war.history ??= []; }
   localized.events = localized.events.map(normalizeEventCausality);
+  if (sourceVersion < 17) {
+    for (const event of localized.events) {
+      event.decisionId = undefined;
+      event.stateDeltaIds = [];
+    }
+    localized.history.livedDecisionIds = [];
+  }
 
   localized.animalPopulations ??= generateAnimalPopulations(localized.config.seed, localized.tiles, localized.config.ecologyDensity);
   localized.ingredients ??= generateNaturalIngredients(localized.config.seed, localized.tiles, localized.config.ecologyDensity);
@@ -225,6 +238,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.royalOrder = Math.max(0, ...localized.royalOrders.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.stateCrisis = Math.max(0, ...localized.stateCrises.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.diplomaticAgreement = Math.max(0, ...localized.diplomaticAgreements.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.decision = Math.max(0, ...localized.decisions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.stateDelta = Math.max(0, ...localized.stateDeltas.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.militaryUnit = Math.max(0, ...localized.militaryUnits.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.supplyWagon = Math.max(0, ...localized.supplyWagons.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
@@ -236,6 +251,8 @@ export function migrateWorld(input: unknown): WorldState {
   ensureAllBuildingFootprints(localized as WorldState);
   initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));
   initializeLivingEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-личная-экономика-v1`));
+  initializeDecisionCore(localized as WorldState);
+  initializeMindSystem(localized as WorldState);
   initializeMilitaryInfrastructure(localized as WorldState, new RNG(`${localized.config.seed}:переход-военная-инфраструктура-v1`));
   pruneEmptyMaterialItems(localized as WorldState);
   repairMigratedItemLocations(localized as WorldState, sourceVersion);
@@ -250,6 +267,9 @@ export function migrateWorld(input: unknown): WorldState {
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }
   ensureSimulationRuntime(localized as WorldState);
 
+  localized.history.engineVersion = 2;
+  localized.history.historicalSimulationVersion ??= 1;
+  localized.history.livedDecisionIds ??= localized.decisions.filter((item: any) => item.historical).map((item: any) => item.id).slice(-1200);
   return localized as WorldState;
 }
 

@@ -10,6 +10,8 @@ import { requestConstructionProject } from './agricultureConstruction';
 import { assignBuildingFootprint, buildingDimensions, buildingRect } from './spatial';
 import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
+import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
+import { addCharacterSecret, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 
 const CIVIC_BUILDINGS: Partial<Record<BuildingType, { minPopulation: number; label: string; rooms: string[] }>> = {
   townHall: { minPopulation: 90, label: 'городская управа', rooms: ['зал совета', 'канцелярия', 'казначейская', 'приёмная'] },
@@ -247,34 +249,106 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
   if (!states.length) return;
   const averageCrime = states.reduce((sum, item) => sum + item.crimeRate, 0) / states.length;
   const poverty = states.reduce((sum, item) => sum + item.homelessCount, 0) / Math.max(1, settlement.population);
-  const chance = clamp(.015 + averageCrime / 1200 + settlement.unrest / 1700 + poverty * .35 - government.guardIds.length / Math.max(1, settlement.population) * 1.8, .005, .34);
-  if (!rng.chance(chance)) return;
+  const opportunityChance = clamp(.008 + averageCrime / 1800 + settlement.unrest / 2300 + poverty * .22 - government.guardIds.length / Math.max(1, settlement.population) * 1.5, .002, .24);
+  if (!rng.chance(opportunityChance)) return;
   const district = rng.weighted(states.map(item => ({ value: item, weight: Math.max(1, item.crimeRate + item.homelessCount * 4) })));
   const residents = residentsOf(world, settlement.id, indexes).filter(character => character.alive && character.age >= 14 && character.legalStatus !== 'заключён');
   if (residents.length < 2) return;
-  const perpetratorCandidates = residents.filter(character => character.id !== government.leaderCharacterId && !government.guardIds.includes(character.id));
-  const perpetrator = rng.pick(perpetratorCandidates.length ? perpetratorCandidates : residents);
-  const victim = rng.pick(residents.filter(character => character.id !== perpetrator.id));
-  const type = chooseCrimeType(settlement, perpetrator, district, rng);
-  const witnesses = residents.filter(character => character.id !== perpetrator.id && character.id !== victim.id && character.homeDistrict === district.districtName).slice(0, rng.int(0, 4));
+  const candidates = residents.filter(character => character.id !== government.leaderCharacterId && !government.guardIds.includes(character.id));
+  if (!candidates.length) return;
+
+  const evaluated = candidates.map(character => {
+    const mind = ensureCharacterMind(world, character);
+    const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
+    const scarcity = Math.max(character.needs.hunger, household?.needs.hunger ?? 0, character.homeless ? 78 : 0);
+    const anger = mind.emotions.anger;
+    const guardPressure = government.guardIds.length / Math.max(1, settlement.population) * 900 + district.safety * .25;
+    const options = [
+      scoreMotivatedAction(world, character, {
+        id: 'abstain', label: 'Не совершать преступление', base: 18, orderBenefit: 25, socialApproval: 16,
+        survivalBenefit: scarcity < 55 ? 8 : -8, freedomBenefit: 7,
+      }),
+      scoreMotivatedAction(world, character, {
+        id: 'кража', label: 'Совершить кражу', base: scarcity * .24 + district.crimeRate * .12,
+        wealthGain: 22, survivalBenefit: scarcity * .35, risk: 18 + guardPressure * .18, harm: 8, deception: 24, legalPenalty: 24,
+      }),
+      scoreMotivatedAction(world, character, {
+        id: 'грабёж', label: 'Ограбить жителя', base: scarcity * .18 + anger * .2,
+        wealthGain: 32, survivalBenefit: scarcity * .22, risk: 30 + guardPressure * .2, harm: 24, deception: 8, violence: 28, legalPenalty: 38,
+      }),
+      scoreMotivatedAction(world, character, {
+        id: 'нападение', label: 'Напасть на человека', base: anger * .48 + mind.traits.cruelty * .18,
+        powerGain: 8, risk: 35 + guardPressure * .2, harm: 42, violence: 52, legalPenalty: 42,
+      }),
+      scoreMotivatedAction(world, character, {
+        id: character.profession === 'merchant' || character.profession === 'scribe' ? 'мошенничество' : 'взлом',
+        label: character.profession === 'merchant' || character.profession === 'scribe' ? 'Провести мошенничество' : 'Взломать помещение',
+        base: scarcity * .12 + mind.traits.greed * .18, wealthGain: 28, risk: 24 + guardPressure * .16,
+        harm: 10, deception: 38, legalPenalty: 30,
+      }),
+    ];
+    const chosen = [...options].sort((a, b) => b.utility - a.utility)[0]!;
+    const abstain = options[0]!;
+    return { character, options, chosen, margin: chosen.id === 'abstain' ? -100 : chosen.utility - abstain.utility };
+  }).sort((a, b) => b.margin - a.margin || b.chosen.utility - a.chosen.utility);
+
+  const selected = evaluated[0];
+  if (!selected || selected.margin < 4 || !rng.chance(Math.min(.82, .12 + selected.margin / 110))) return;
+  const perpetrator = selected.character;
+  const type = selected.chosen.id as CrimeType;
+  const victims = residents.filter(character => character.id !== perpetrator.id);
+  const victim = [...victims].sort((a, b) => {
+    const aHouse = a.householdId ? world.households.find(item => item.id === a.householdId)?.wealth ?? a.wealth : a.wealth;
+    const bHouse = b.householdId ? world.households.find(item => item.id === b.householdId)?.wealth ?? b.wealth : b.wealth;
+    return (type === 'кража' || type === 'грабёж' || type === 'мошенничество' || type === 'взлом') ? bHouse - aHouse : Math.abs(a.id - perpetrator.id) - Math.abs(b.id - perpetrator.id);
+  })[0] ?? rng.pick(victims);
+  const witnesses = residents
+    .filter(character => character.id !== perpetrator.id && character.id !== victim.id && character.homeDistrict === district.districtName)
+    .filter(character => rng.chance(Math.max(.08, district.safety / 140)))
+    .slice(0, rng.int(0, 4));
   const severity = crimeSeverity(type);
-  const evidence = clamp(rng.int(8, 44) + witnesses.length * 16 + government.guardIds.length / Math.max(1, settlement.population) * 800, 0, 100);
+  const evidence = clamp(rng.int(6, 36) + witnesses.length * 16 + government.guardIds.length / Math.max(1, settlement.population) * 760, 0, 100);
+  const decision = recordDecision(world, {
+    actorRef: { kind: 'character', id: perpetrator.id }, goal: selected.chosen.id === 'нападение' ? 'выплеснуть злость или запугать жертву' : 'получить ресурсы незаконным путём',
+    context: `${perpetrator.name} находится в районе ${district.districtName} поселения ${settlement.name}`,
+    knownFactIds: decisionKnowledge(world, { kind: 'character', id: perpetrator.id }), options: selected.options, chosenOptionId: selected.chosen.id,
+    tags: ['преступление', type, 'личное решение'],
+  });
+  setDecisionMoment(world, perpetrator);
+
   const crime: CrimeIncident = {
     id: world.nextIds.crime++, type, settlementId: settlement.id, districtName: district.districtName,
     perpetratorId: perpetrator.id, victimCharacterId: victim.id, victimEstablishmentId: type === 'кража' || type === 'взлом' ? rng.pick(world.establishments.filter(item => item.settlementId === settlement.id))?.id : undefined,
-    witnessIds: witnesses.map(item => item.id), evidence, severity, stolenItemIds: [], status: witnesses.length || evidence >= 45 ? 'расследуется' : 'совершено', createdTick: worldTick(world), history: [`Совершено в районе ${district.districtName}.`],
+    witnessIds: witnesses.map(item => item.id), evidence, severity, stolenItemIds: [], status: witnesses.length || evidence >= 45 ? 'расследуется' : 'совершено', createdTick: worldTick(world), history: [`Совершено в районе ${district.districtName}.`, `Мотив: ${decision.reason}.`],
   };
-  world.crimes.push(crime); perpetrator.wantedForCrimeIds ??= [];
+  world.crimes.push(crime);
+  const perpetratorBefore = { legalStatus: perpetrator.legalStatus, wantedForCrimeIds: [...(perpetrator.wantedForCrimeIds ?? [])] };
+  const victimBefore = { health: victim.health, safety: victim.needs.safety, inventoryItemIds: [...victim.inventoryItemIds], wealth: victim.wealth };
+  const districtBefore = district.crimeRate;
+  perpetrator.wantedForCrimeIds ??= [];
   if (crime.status === 'расследуется') { perpetrator.wantedForCrimeIds.push(crime.id); perpetrator.legalStatus = 'разыскивается'; }
   district.crimeRate = clamp(district.crimeRate + severity * .8, 0, 100);
   victim.needs.safety = clamp(victim.needs.safety + severity * 3, 0, 100);
-  if (type === 'кража' || type === 'грабёж' || type === 'взлом') transferStolenProperty(world, perpetrator, victim, crime, rng);
+  if (type === 'кража' || type === 'грабёж' || type === 'взлом' || type === 'мошенничество') transferStolenProperty(world, perpetrator, victim, crime, rng);
   if (type === 'нападение' || type === 'убийство') victim.health = Math.max(type === 'убийство' ? 1 : 8, victim.health - rng.int(8, type === 'убийство' ? 80 : 35));
-  recordCivicEvent(world, {
+  if (!witnesses.length) addCharacterSecret(world, perpetrator, { kind: 'crime', severity: severity * 8, knownByCharacterIds: [perpetrator.id], exposed: false, summary: `${perpetrator.name} скрывает преступление «${crimeLabel(type)}» в ${settlement.name}.`, id: `crime:${crime.id}` });
+
+  const deltaIds: number[] = [];
+  for (const delta of [
+    recordStateDelta(world, { entityRef: { kind: 'character', id: perpetrator.id }, field: 'legalStatus/wantedForCrimeIds', before: perpetratorBefore, after: { legalStatus: perpetrator.legalStatus, wantedForCrimeIds: perpetrator.wantedForCrimeIds }, cause: `совершено преступление ${crime.id}`, decisionId: decision.id }),
+    recordStateDelta(world, { entityRef: { kind: 'character', id: victim.id }, field: 'health/safety/inventory/wealth', before: victimBefore, after: { health: victim.health, safety: victim.needs.safety, inventoryItemIds: victim.inventoryItemIds, wealth: victim.wealth }, cause: `жертва преступления ${crime.id}`, decisionId: decision.id }),
+    recordStateDelta(world, { entityRef: { kind: 'settlement', id: settlement.id }, field: `district:${district.districtName}:crimeRate`, before: districtBefore, after: district.crimeRate, amount: district.crimeRate - districtBefore, cause: `преступление ${crime.id}`, decisionId: decision.id }),
+  ]) if (delta) deltaIds.push(delta.id);
+
+  const event = recordCivicEvent(world, {
     kind: 'crime', title: `${crimeLabel(type)} в ${settlement.name}`, description: witnesses.length ? `${witnesses.length} свидетелей сообщили страже.` : 'Очевидцев почти не оказалось.',
-    cause: crimeCause(type, perpetrator, settlement), consequences: ['страх жителей вырос', crime.status === 'расследуется' ? 'стража начала расследование' : 'дело пока не раскрыто'],
-    entityRefs: [{ kind: 'crime', id: crime.id }, { kind: 'settlement', id: settlement.id }, { kind: 'character', id: victim.id }], importance: severity >= 8 ? 4 : 2,
+    cause: crimeCause(type, perpetrator, settlement), conditions: [`решение принял ${perpetrator.name}`, `лучший преступный вариант превысил отказ на ${Math.round(selected.margin)} пунктов`],
+    decision: decision.reason, outcome: crime.status === 'расследуется' ? 'стража получила основания для расследования' : 'преступник пока не установлен',
+    consequences: ['страх жителей вырос', crime.status === 'расследуется' ? 'стража начала расследование' : 'дело пока не раскрыто'],
+    entityRefs: [{ kind: 'crime', id: crime.id }, { kind: 'settlement', id: settlement.id }, { kind: 'character', id: victim.id }, { kind: 'character', id: perpetrator.id }], importance: severity >= 8 ? 4 : 2,
+    decisionId: decision.id, stateDeltaIds: deltaIds,
   });
+  linkDecisionToEvent(world, decision.id, event, deltaIds);
 }
 
 function investigateCrimes(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG): void {

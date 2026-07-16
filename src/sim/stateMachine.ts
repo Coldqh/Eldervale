@@ -10,6 +10,8 @@ import { requestConstructionProject } from './agricultureConstruction';
 import { controlledCapital, normalizeKingdomCapitals } from './kingdomState';
 import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
+import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
+import { ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 
 const OFFICE_DEFINITIONS: Record<CourtOfficeKind, { professions: string[]; salary: number; influence: number }> = {
   'канцлер': { professions: ['scribe', 'merchant', 'priest'], salary: 12, influence: 18 },
@@ -445,10 +447,31 @@ function maybeCreateOrder(world: WorldState, kingdom: Kingdom, state: KingdomGov
   else if (state.corruption > 55) { kind = 'расследование коррупции'; target = controlledCapital(world, kingdom.id); reason = `коррупция двора достигла ${Math.round(state.corruption)}%`; cost = 8; }
   else if (rng.chance(.06)) { kind = 'назначение чиновника'; target = controlledCapital(world, kingdom.id); reason = 'двору требуется усиление управления'; cost = 4; }
   if (!kind || !target) return;
-  createOrder(world, kingdom, state, kind, target, reason, cost, tick);
+  const ruler = livingCharacter(world, state.sovereignCharacterId);
+  if (!ruler) return;
+  ensureCharacterMind(world, ruler);
+  const urgency = target.unrest + target.damaged + (target.shortages.length ? 35 : 0) + (kind === 'требование налогов' ? Math.min(50, arrears?.taxArrears ?? 0) : 0);
+  const options = [
+    scoreMotivatedAction(world, ruler, { id: 'delay', label: 'Отложить решение', base: 12, orderBenefit: -Math.min(25, urgency * .18), risk: Math.max(0, urgency * .12), wealthGain: cost > 0 ? 6 : 0 }),
+    scoreMotivatedAction(world, ruler, {
+      id: kind, label: `${kind}: ${target.name}`, base: 18 + urgency * .18, orderBenefit: kind === 'помощь поселению' || kind === 'укрепление границы' ? 28 : 12,
+      powerGain: kind === 'требование налогов' || kind === 'расследование коррупции' ? 22 : 8,
+      familyBenefit: kind === 'помощь поселению' ? 14 : 0, wealthGain: kind === 'требование налогов' ? 24 : -cost,
+      risk: kind === 'требование налогов' ? 18 : 7, socialApproval: kind === 'помощь поселению' ? 25 : 5,
+    }),
+  ];
+  const chosen = [...options].sort((a, b) => b.utility - a.utility)[0]!;
+  if (chosen.id === 'delay') return;
+  const decision = recordDecision(world, {
+    actorRef: { kind: 'character', id: ruler.id }, goal: reason, context: `совет государства ${kingdom.name} обсуждает распоряжение для ${target.name}`,
+    knownFactIds: decisionKnowledge(world, { kind: 'character', id: ruler.id }), options, chosenOptionId: kind,
+    tags: ['королевский указ', kind, 'государственное решение'],
+  });
+  setDecisionMoment(world, ruler);
+  createOrder(world, kingdom, state, kind, target, reason, cost, tick, decision.id);
 }
 
-function createOrder(world: WorldState, kingdom: Kingdom, state: KingdomGovernment, kind: RoyalOrderKind, target: Settlement, reason: string, cost: number, tick: number): RoyalOrder {
+function createOrder(world: WorldState, kingdom: Kingdom, state: KingdomGovernment, kind: RoyalOrderKind, target: Settlement, reason: string, cost: number, tick: number, decisionId?: number): RoyalOrder {
   const ruler = livingCharacter(world, state.sovereignCharacterId)!;
   const capital = controlledCapital(world, kingdom.id) ?? target;
   const factId = world.nextIds.knowledgeFact++;
@@ -468,8 +491,12 @@ function createOrder(world: WorldState, kingdom: Kingdom, state: KingdomGovernme
     id: world.nextIds.royalOrder++, kingdomId: kingdom.id, kind, issuerCharacterId: ruler.id, targetSettlementId: target.id, messageId, factId,
     status: 'в пути', priority: kind === 'помощь поселению' ? 5 : 3, cost, createdTick: tick, dispatchedTick: tick, reason, history: ['Совет обсудил приказ, казначей проверил расходы, гонец выехал из столицы.'],
   };
-  world.royalOrders.push(order); addUnique(state.orderIds, order.id); state.activeDecision = `${kind}: ${target.name}`;
-  recordStateEvent(world, { kind: 'state', title: `Издан приказ: ${kind}`, description: `Гонец отправлен из ${capital.name} в ${target.name}.`, cause: reason, consequences: ['исполнение начнётся только после доставки указа'], entityRefs: [{ kind: 'royalOrder', id: order.id }, { kind: 'kingdomGovernment', id: state.id }, { kind: 'settlement', id: target.id }, { kind: 'message', id: messageId }], importance: 3 });
+  world.royalOrders.push(order); addUnique(state.orderIds, order.id);
+  const beforeDecision = state.activeDecision;
+  state.activeDecision = `${kind}: ${target.name}`;
+  const delta = recordStateDelta(world, { entityRef: { kind: 'kingdomGovernment', id: state.id }, field: 'activeDecision/orderIds', before: { activeDecision: beforeDecision, orderIds: state.orderIds.filter(id => id !== order.id) }, after: { activeDecision: state.activeDecision, orderIds: state.orderIds }, cause: reason, decisionId });
+  const event = recordStateEvent(world, { kind: 'state', title: `Издан приказ: ${kind}`, description: `Гонец отправлен из ${capital.name} в ${target.name}.`, cause: reason, conditions: [`решение принял ${ruler.name}`, 'совет рассмотрел цену, срочность и риск'], decision: decisionId ? world.decisions.find(item => item.id === decisionId)?.reason : undefined, outcome: 'приказ запечатан и передан гонцу', consequences: ['исполнение начнётся только после доставки указа'], entityRefs: [{ kind: 'royalOrder', id: order.id }, { kind: 'kingdomGovernment', id: state.id }, { kind: 'settlement', id: target.id }, { kind: 'message', id: messageId }], importance: 3, decisionId, stateDeltaIds: delta ? [delta.id] : [] });
+  linkDecisionToEvent(world, decisionId, event, delta ? [delta.id] : []);
   return order;
 }
 
@@ -665,9 +692,10 @@ function seedHistoricalAgreements(world: WorldState, rng: RNG, tick: number): vo
   }
 }
 
-function recordStateEvent(world: WorldState, input: Parameters<typeof appendCausalEvent>[1]): void {
+function recordStateEvent(world: WorldState, input: Parameters<typeof appendCausalEvent>[1]): ReturnType<typeof appendCausalEvent> {
   const event = appendCausalEvent(world, input);
   if (world.simulation.knowledgeSystemVersion === 1) registerWorldEventKnowledge(world, event, { createRumor: event.importance >= 4 });
+  return event;
 }
 
 function recordCrisisResolution(world: WorldState, state: KingdomGovernment, crisis: StateCrisis, description: string): void {

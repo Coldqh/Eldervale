@@ -48,6 +48,9 @@ jobs:
         env:
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
 
+      - name: Simulation invariants
+        run: npm run test:sim
+
       - name: Build
         run: npm run build
 

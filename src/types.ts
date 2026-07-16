@@ -424,6 +424,107 @@ export interface KingdomGovernment {
   history: string[];
 }
 
+export type CharacterTraitKey = 'greed' | 'empathy' | 'courage' | 'patience' | 'honesty' | 'cruelty' | 'ambition' | 'riskTolerance';
+export type CharacterValueKey = 'family' | 'faith' | 'wealth' | 'power' | 'freedom' | 'order';
+export type PersonalGoalKind = 'survive' | 'feed_family' | 'earn_wealth' | 'gain_power' | 'protect_home' | 'serve_faith' | 'revenge' | 'escape_justice' | 'master_craft' | 'explore';
+export type PersonalGoalStatus = 'active' | 'blocked' | 'completed' | 'abandoned';
+
+export interface PersonalGoal {
+  id: string;
+  kind: PersonalGoalKind;
+  priority: number;
+  status: PersonalGoalStatus;
+  targetRef?: EntityRef;
+  reason: string;
+  progress: number;
+  createdTick: number;
+  updatedTick: number;
+}
+
+export interface CharacterObligation {
+  id: string;
+  kind: 'family' | 'debt' | 'employment' | 'oath' | 'office' | 'vassalage' | 'promise';
+  targetRef?: EntityRef;
+  strength: number;
+  dueTick?: number;
+  fulfilled: boolean;
+  reason: string;
+}
+
+export interface CharacterSecret {
+  id: string;
+  kind: 'crime' | 'affair' | 'plot' | 'hidden_debt' | 'forbidden_knowledge' | 'betrayal';
+  factId?: number;
+  severity: number;
+  knownByCharacterIds: number[];
+  exposed: boolean;
+  summary: string;
+}
+
+export interface GroupReputation {
+  group: 'family' | 'neighbors' | 'workers' | 'merchants' | 'guards' | 'clergy' | 'nobility' | 'army' | 'court';
+  score: number;
+  reason: string;
+  updatedTick: number;
+}
+
+export interface CharacterMind {
+  traits: Record<CharacterTraitKey, number>;
+  values: Record<CharacterValueKey, number>;
+  emotions: {
+    fear: number;
+    anger: number;
+    grief: number;
+    hope: number;
+    stress: number;
+    contentment: number;
+    updatedTick: number;
+  };
+  goals: PersonalGoal[];
+  obligations: CharacterObligation[];
+  secrets: CharacterSecret[];
+  reputations: GroupReputation[];
+  lastDecisionTick: number;
+}
+
+export interface DecisionOptionScore {
+  id: string;
+  label: string;
+  utility: number;
+  factors: Record<string, number>;
+  blockedReason?: string;
+}
+
+export interface DecisionRecord {
+  id: number;
+  tick: number;
+  actorRef: EntityRef;
+  goal: string;
+  context: string;
+  knownFactIds: number[];
+  optionScores: DecisionOptionScore[];
+  chosenOptionId: string;
+  reason: string;
+  stateDeltaIds: number[];
+  eventId?: number;
+  historical: boolean;
+  tags: string[];
+}
+
+export interface StateDelta {
+  id: number;
+  tick: number;
+  entityRef: EntityRef;
+  field: string;
+  before: string;
+  after: string;
+  amount?: number;
+  cause: string;
+  decisionId?: number;
+  eventId?: number;
+  historical: boolean;
+}
+
 export interface NeedState {
   hunger: number;
   thirst: number;
@@ -718,13 +819,15 @@ export interface HistoricalEraSummary {
 }
 
 export interface HistoricalState {
-  engineVersion: 1;
+  engineVersion: 1 | 2;
   generatedYears: number;
   eras: HistoricalEraSummary[];
   landmarkEventIds: number[];
   fallenRealms: FallenRealm[];
   compressedEventCount: number;
   logicWarnings: string[];
+  historicalSimulationVersion?: 1;
+  livedDecisionIds?: number[];
 }
 
 export interface WorldSlotMeta {
@@ -808,6 +911,8 @@ export interface SimulationRuntimeState {
   knowledgeSystemVersion?: 1;
   settlementLifeVersion?: 1;
   stateMachineVersion?: 1;
+  decisionCoreVersion?: 1;
+  mindSystemVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -952,6 +1057,7 @@ export interface Character {
   courtOfficeIds?: number[];
   courtFactionId?: number;
   politicalInfluence?: number;
+  mind?: CharacterMind;
 }
 
 export interface Relationship {
@@ -1287,6 +1393,8 @@ export interface WorldEvent {
   traces: EntityRef[];
   entityRefs: EntityRef[];
   importance: number;
+  decisionId?: number;
+  stateDeltaIds?: number[];
 }
 
 export interface CausalEventInput {
@@ -1301,6 +1409,8 @@ export interface CausalEventInput {
   entityRefs: EntityRef[];
   importance: number;
   traces?: EntityRef[];
+  decisionId?: number;
+  stateDeltaIds?: number[];
 }
 
 
@@ -1384,7 +1494,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 16;
+  version: 17;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1441,6 +1551,8 @@ export interface WorldState {
   royalOrders: RoyalOrder[];
   stateCrises: StateCrisis[];
   diplomaticAgreements: DiplomaticAgreement[];
+  decisions: DecisionRecord[];
+  stateDeltas: StateDelta[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];

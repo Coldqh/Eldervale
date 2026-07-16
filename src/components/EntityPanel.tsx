@@ -29,7 +29,7 @@ export function EntityPanel({ world, selected, onSelect }: { world: WorldState; 
     <div className="entity-stats">{renderStats(world, selected, entity, onSelect)}</div>
     {relatedEvents.length > 0 && <section><h3>След в истории</h3>{relatedEvents.map(event => <div className="history-link detailed-history" key={event.id}>
       <span>{event.year}.{String(event.month).padStart(2, '0')}</span>
-      <div><strong>{event.title}</strong><small>{event.description}</small><em>Причина: {event.cause}</em><em>Условия: {event.conditions.join('; ')}</em><em>Действие: {event.decision}</em><em>Результат: {event.outcome}</em>{event.consequences.length > 0 && <em>Последствия: {event.consequences.join('; ')}</em>}</div>
+      <div><strong>{event.title}</strong><small>{event.description}</small><em>Причина: {event.cause}</em><em>Условия: {event.conditions.join('; ')}</em><em>Действие: {event.decision}</em><em>Результат: {event.outcome}</em>{event.decisionId && <em>Решение №{event.decisionId}: {world.decisions.find(item => item.id === event.decisionId)?.reason ?? 'запись утрачена'}</em>}{Boolean(event.stateDeltaIds?.length) && <em>Реальные изменения: {event.stateDeltaIds!.map(id => world.stateDeltas.find(item => item.id === id)).filter(Boolean).map((delta: any) => `${delta.field}: ${delta.before} → ${delta.after}`).join('; ')}</em>}{event.consequences.length > 0 && <em>Последствия: {event.consequences.join('; ')}</em>}</div>
     </div>)}</section>}
   </div>;
 }
@@ -111,6 +111,17 @@ function relationshipText(world: WorldState, characterId: number, relationship: 
 function itemTemplateName(world: WorldState, templateId: string): string {
   return world.items.find(item => item.templateId === templateId)?.name ?? templateId.replaceAll('_', ' ');
 }
+function mindLabel(value: string): string {
+  const labels: Record<string, string> = {
+    greed: 'жадность', empathy: 'эмпатия', courage: 'смелость', patience: 'терпение', honesty: 'честность', cruelty: 'жестокость', ambition: 'амбиции', riskTolerance: 'риск',
+    family: 'семья', faith: 'вера', wealth: 'богатство', power: 'власть', freedom: 'свобода', order: 'порядок',
+    survive: 'выжить', feed_family: 'накормить семью', earn_wealth: 'заработать', gain_power: 'получить власть', protect_home: 'защитить дом', serve_faith: 'служить вере', revenge: 'отомстить', escape_justice: 'избежать закона', master_craft: 'стать мастером', explore: 'исследовать мир',
+    debt: 'долг', employment: 'работа', oath: 'присяга', office: 'должность', vassalage: 'вассальная обязанность', promise: 'обещание',
+    neighbors: 'соседи', workers: 'работники', merchants: 'купцы', guards: 'стража', clergy: 'духовенство', nobility: 'знать', army: 'армия', court: 'двор',
+  };
+  return labels[value] ?? value;
+}
+
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(value < 10 ? 1 : 0);
 }
@@ -350,6 +361,14 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Дети', links(world, entity.childIds.slice(0, 12).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}
       {row('Известность', entity.renown)}{row('Здоровье', `${entity.health}%`)}{row('Богатство', `${Math.round(entity.wealth)} крон`)}{row('Верность', `${entity.loyalty}%`)}
       {row('Цель', entity.ambition)}{row('Титулы', entity.titles.join(', ') || 'нет')}{row('Политическое влияние', `${Math.round(entity.politicalInfluence ?? 0)}%`)}
+      {entity.mind && row('Черты', Object.entries(entity.mind.traits).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).map(([key, value]) => `${mindLabel(key)} ${Math.round(Number(value))}`).join(', '))}
+      {entity.mind && row('Ценности', Object.entries(entity.mind.values).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).map(([key, value]) => `${mindLabel(key)} ${Math.round(Number(value))}`).join(', '))}
+      {entity.mind && row('Эмоции', `страх ${Math.round(entity.mind.emotions.fear)}, злость ${Math.round(entity.mind.emotions.anger)}, горе ${Math.round(entity.mind.emotions.grief)}, надежда ${Math.round(entity.mind.emotions.hope)}, стресс ${Math.round(entity.mind.emotions.stress)}, удовлетворённость ${Math.round(entity.mind.emotions.contentment)}`)}
+      {entity.mind && row('Активные цели', entity.mind.goals.filter((goal: any) => goal.status === 'active').map((goal: any) => `${mindLabel(goal.kind)} ${Math.round(goal.priority)}: ${goal.reason}`).join('; ') || 'нет')}
+      {entity.mind && row('Обязательства', entity.mind.obligations.map((item: any) => `${mindLabel(item.kind)} ${Math.round(item.strength)}: ${item.reason}`).join('; ') || 'нет')}
+      {entity.mind && row('Репутация', entity.mind.reputations.map((item: any) => `${mindLabel(item.group)} ${item.score}`).join(', ') || 'не сложилась')}
+      {entity.mind && row('Тайны', entity.mind.secrets.filter((item: any) => !item.exposed).map((item: any) => `${item.summary} [${item.severity}]`).join('; ') || 'неизвестны')}
+      {row('Последние решения', world.decisions.filter(item => item.actorRef.kind === 'character' && item.actorRef.id === entity.id).slice(-6).reverse().map(item => `${Math.floor(item.tick / 12) + 1}.${String(item.tick % 12 + 1).padStart(2, '0')} — ${item.goal}: ${item.reason}`).join('; ') || 'нет зафиксированных решений')}
       {row('Земельные титулы', links(world, (entity.nobleTitleIds ?? []).map((id: number) => ({ kind: 'nobleTitle' as const, id })), onSelect))}
       {row('Придворные должности', links(world, (entity.courtOfficeIds ?? []).map((id: number) => ({ kind: 'courtOffice' as const, id })), onSelect))}
       {row('Группировка', entity.courtFactionId ? link(getTitle(world, { kind: 'courtFaction', id: entity.courtFactionId }), { kind: 'courtFaction', id: entity.courtFactionId }, onSelect) : 'не состоит')}

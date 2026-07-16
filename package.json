@@ -1,12 +1,13 @@
 {
   "name": "eldervale",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:sim": "npx --yes tsx@4.20.6 scripts/simulation-smoke.ts"
   },
   "dependencies": {
     "react": "19.2.7",

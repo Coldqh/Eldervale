@@ -19,6 +19,8 @@ import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonste
 import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
 import { advanceSettlementLife } from './settlementLife';
 import { advanceStateMachine } from './stateMachine';
+import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
+import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -259,39 +261,101 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
 }
 
 function startWars(world: WorldState, rng: RNG): void {
-  if (!rng.chance(world.config.warlike * .075) || world.wars.filter(war => war.active).length >= Math.ceil(world.kingdoms.length / 3)) return;
+  if (world.wars.filter(war => war.active).length >= Math.ceil(world.kingdoms.length / 3)) return;
   const candidates = world.kingdoms.filter(kingdom => !world.wars.some(war => war.active && (war.attackerId === kingdom.id || war.defenderId === kingdom.id)));
   if (candidates.length < 2) return;
-  const attacker = [...candidates].sort((a, b) => b.aggression - a.aggression)[rng.int(0, Math.min(2, candidates.length - 1))]!;
-  const possibleDefenders = candidates.filter(kingdom => kingdom.id !== attacker.id).sort((a, b) => (relationBetween(world, attacker.id, a.id)?.score ?? 0) - (relationBetween(world, attacker.id, b.id)?.score ?? 0));
-  const defender = possibleDefenders[0]!;
-  const capital = world.settlements.find(item => item.id === attacker.capitalId);
-  if (!capital) return;
-  const target = nearestSettlement(world, capital.x, capital.y, settlement => settlement.kingdomId === defender.id);
-  if (!target) return;
-  const cause = rng.pick(['спорная пограничная крепость', 'неуплаченные торговые пошлины', 'династические притязания', 'набеги на приграничные деревни', `контроль над ресурсом «${target.resource}»`, 'убийство королевского посланника']);
-  const goal = cause.includes('династические') ? 'посадить родственника на чужой престол' : `захватить ${target.name}`;
+
+  let selected: { attacker: Kingdom; defender: Kingdom; target: Settlement; ruler: Character; options: ReturnType<typeof scoreMotivatedAction>[] } | undefined;
+  let selectedMargin = Number.NEGATIVE_INFINITY;
+  for (const attacker of candidates) {
+    const actingRuler = ruler(world, attacker);
+    const capital = world.settlements.find(item => item.id === attacker.capitalId);
+    if (!actingRuler || !capital) continue;
+    ensureCharacterMind(world, actingRuler);
+    const possibleDefenders = candidates
+      .filter(kingdom => kingdom.id !== attacker.id)
+      .map(defender => ({ defender, relation: relationBetween(world, attacker.id, defender.id)?.score ?? 0 }))
+      .sort((a, b) => a.relation - b.relation || b.defender.stability - a.defender.stability);
+    const defender = possibleDefenders[0]?.defender;
+    if (!defender) continue;
+    const target = nearestSettlement(world, capital.x, capital.y, settlement => settlement.kingdomId === defender.id);
+    if (!target) continue;
+    const claim = attacker.claims.includes(target.id) ? 20 : 0;
+    const hostility = Math.max(0, -(relationBetween(world, attacker.id, defender.id)?.score ?? 0));
+    const powerAdvantage = attacker.armyStrength - defender.armyStrength + attacker.treasury / 12 - defender.treasury / 18;
+    const warPressure = world.config.warlike * 28 + attacker.aggression * .28 + claim + hostility * .18 + powerAdvantage * .025;
+    const options = [
+      scoreMotivatedAction(world, actingRuler, {
+        id: 'peace', label: 'Сохранить мир', base: 18, orderBenefit: 25, familyBenefit: 8,
+        survivalBenefit: Math.max(0, -powerAdvantage) * .08, powerGain: -8, socialApproval: attacker.stability > 55 ? 10 : -4,
+        situational: { 'торговые связи': world.tradeRoutes.some(route => route.active && route.controlledByKingdomIds.includes(attacker.id) && route.controlledByKingdomIds.includes(defender.id)) ? 14 : 0 },
+      }),
+      scoreMotivatedAction(world, actingRuler, {
+        id: 'pressure', label: 'Давить угрозами и пошлинами', base: 12, powerGain: 18, wealthGain: 10,
+        risk: 8, deception: 5, orderBenefit: -5, situational: { 'враждебность соседа': hostility * .12 },
+      }),
+      scoreMotivatedAction(world, actingRuler, {
+        id: 'war', label: `Начать войну за ${target.name}`, base: warPressure, powerGain: 32 + claim,
+        wealthGain: Math.max(5, target.prosperity * .25), familyBenefit: -12, orderBenefit: -22,
+        risk: Math.max(12, 42 - powerAdvantage * .04), harm: 35, violence: 45, legalPenalty: 2,
+        situational: { 'военное преимущество': powerAdvantage * .035, 'агрессивность государства': attacker.aggression * .18 },
+      }),
+    ];
+    const war = options.find(option => option.id === 'war')!;
+    const alternative = Math.max(...options.filter(option => option.id !== 'war').map(option => option.utility));
+    const margin = war.utility - alternative;
+    if (margin > selectedMargin) { selectedMargin = margin; selected = { attacker, defender, target, ruler: actingRuler, options }; }
+  }
+
+  if (!selected || selectedMargin < 6 || !rng.chance(Math.min(.7, .08 + selectedMargin / 120 + world.config.warlike * .12))) return;
+  const { attacker, defender, target, ruler: actingRuler, options } = selected;
+  const cause = attacker.claims.includes(target.id)
+    ? `старое притязание на ${target.name}`
+    : rng.pick(['неуплаченные торговые пошлины', 'набеги на приграничные деревни', `контроль над ресурсом «${target.resource}»`, 'убийство королевского посланника']);
+  const goal = cause.includes('притязание') ? 'подчинить спорное владение' : `захватить ${target.name}`;
+  const army = world.armies.find(item => item.kingdomId === attacker.id && !item.targetMonsterId && (item.status === 'garrison' || item.status === 'recovering'));
+  if (!army) return;
+
+  const decision = recordDecision(world, {
+    actorRef: { kind: 'character', id: actingRuler.id }, goal, context: `${attacker.name} выбирает ответ государству ${defender.name}`,
+    knownFactIds: decisionKnowledge(world, { kind: 'character', id: actingRuler.id }), options, chosenOptionId: 'war',
+    tags: ['война', 'государство', 'внешняя политика'],
+  });
+  setDecisionMoment(world, actingRuler);
+  const deltas: number[] = [];
+  const addDelta = (delta: ReturnType<typeof recordStateDelta>) => { if (delta) deltas.push(delta.id); };
+
   const war: War = {
     id: world.nextIds.war++, name: `Война ${attacker.name} и ${defender.name}`, attackerId: attacker.id, defenderId: defender.id, startYear: world.year, active: true,
     cause, goal, contestedSettlementIds: [target.id], battles: 0, attackerLosses: 0, defenderLosses: 0, history: [`Война началась из-за причины: ${cause}.`],
   };
   world.wars.push(war);
-  attacker.enemies.push(defender.id);
-  defender.enemies.push(attacker.id);
-  attacker.claims.push(target.id);
+  const attackerEnemiesBefore = [...attacker.enemies];
+  const defenderEnemiesBefore = [...defender.enemies];
+  if (!attacker.enemies.includes(defender.id)) attacker.enemies.push(defender.id);
+  if (!defender.enemies.includes(attacker.id)) defender.enemies.push(attacker.id);
+  const claimsBefore = [...attacker.claims];
+  if (!attacker.claims.includes(target.id)) attacker.claims.push(target.id);
+  addDelta(recordStateDelta(world, { entityRef: { kind: 'kingdom', id: attacker.id }, field: 'enemies', before: attackerEnemiesBefore, after: attacker.enemies, cause, decisionId: decision.id }));
+  addDelta(recordStateDelta(world, { entityRef: { kind: 'kingdom', id: defender.id }, field: 'enemies', before: defenderEnemiesBefore, after: defender.enemies, cause, decisionId: decision.id }));
+  addDelta(recordStateDelta(world, { entityRef: { kind: 'kingdom', id: attacker.id }, field: 'claims', before: claimsBefore, after: attacker.claims, cause, decisionId: decision.id }));
   setDiplomacy(world, attacker.id, defender.id, -100, 'война', cause);
-  const army = world.armies.find(item => item.kingdomId === attacker.id && !item.targetMonsterId && (item.status === 'garrison' || item.status === 'recovering'));
-  if (!army) return;
+  const armyBefore = { status: army.status, targetKingdomId: army.targetKingdomId, targetSettlementId: army.targetSettlementId };
   army.targetMonsterId = undefined;
   army.targetKingdomId = defender.id;
   army.targetSettlementId = target.id;
   army.status = 'marching';
   army.campaignHistory.push(`В ${world.year} году выступило к ${target.name}.`);
-  addEvent(world, {
-    kind: 'war', title: `Началась ${war.name}`, description: `${ruler(world, attacker)?.name ?? 'Правитель'} приказал армии идти к ${target.name}.`, cause,
+  addDelta(recordStateDelta(world, { entityRef: { kind: 'army', id: army.id }, field: 'campaign', before: armyBefore, after: { status: army.status, targetKingdomId: army.targetKingdomId, targetSettlementId: army.targetSettlementId }, cause: `приказ ${actingRuler.name}`, decisionId: decision.id }));
+  const created = addEvent(world, {
+    kind: 'war', title: `Началась ${war.name}`, description: `${actingRuler.name} приказал армии идти к ${target.name}.`, cause,
+    conditions: [`правитель знал о состоянии армии и отношениях с ${defender.name}`, `вариант войны получил преимущество ${Math.round(selectedMargin)} пунктов`],
+    decision: decision.reason, outcome: `армия ${army.name} начала поход`,
     consequences: ['собрана армия', 'торговля между сторонами остановлена', `цель похода — ${goal}`],
     entityRefs: [{ kind: 'war', id: war.id }, { kind: 'kingdom', id: attacker.id }, { kind: 'kingdom', id: defender.id }, { kind: 'army', id: army.id }, { kind: 'settlement', id: target.id }], importance: 5,
+    decisionId: decision.id, stateDeltaIds: deltas,
   });
+  linkDecisionToEvent(world, decision.id, created, deltas);
 }
 
 function moveArmies(world: WorldState, rng: RNG, indexes: WorldIndexes, dueArmyIds: ReadonlySet<number>): void {
@@ -762,11 +826,12 @@ export function replaceSimulationWorld(engine: SimulationEngine, world: WorldSta
 
 export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: string) => void): number {
   const { world, indexes } = engine;
+  initializeDecisionCore(world);
   world.month += 1;
   if (world.month > 12) { world.month = 1; world.year += 1; }
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
   const schedule = prepareMonthSchedule(world, indexes);
-  const detailed = detailedPopulationContext(world, indexes);
+  const detailed = detailedPopulationContext(world, indexes, schedule.activeSettlementIds);
 
   onPhase?.('Поля, посевы и уход за урожаем');
   advanceAgriculture(world, rng, indexes, schedule.economySettlementIds);
@@ -801,6 +866,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
     advanceModernTerritories(world, new RNG(`${world.config.seed}:современные-границы:${world.year}`));
   }
 
+  onPhase?.('Цели, эмоции, обязательства и мотивы жителей');
+  advanceMindSystem(world, rng);
   onPhase?.('Казармы, гарнизоны, жалование и снабжение армий');
   advanceMilitaryInfrastructure(world, rng, indexes);
   pruneEmptyMaterialItems(world);
