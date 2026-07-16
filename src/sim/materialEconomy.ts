@@ -51,6 +51,22 @@ const ITEM_TEMPLATES: ItemTemplate[] = [
   { id: 'furniture', name: 'простая мебель', category: 'мебель', material: 'древесина', unit: 'предмет', weight: 16, perishability: 0, value: 22 },
   { id: 'herbal_medicine', name: 'лечебный отвар', category: 'лекарство', material: 'травы', unit: 'склянка', weight: .3, perishability: 4, value: 12 },
   { id: 'salt', name: 'соль', category: 'сырьё', material: 'соль', unit: 'мешочек', weight: 2, perishability: 0, value: 4 },
+  { id: 'wheat_seed', name: 'семена пшеницы', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
+  { id: 'barley_seed', name: 'семена ячменя', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
+  { id: 'rye_seed', name: 'семена ржи', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
+  { id: 'flax_seed', name: 'семена льна', category: 'семена', material: 'семена', unit: 'мера', weight: .8, perishability: 24, value: 5 },
+  { id: 'vegetable_seed', name: 'семена овощей', category: 'семена', material: 'семена', unit: 'мешочек', weight: .6, perishability: 18, value: 5 },
+  { id: 'wheat', name: 'пшеница', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 18, value: 8 },
+  { id: 'barley', name: 'ячмень', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 18, value: 7 },
+  { id: 'rye', name: 'рожь', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 20, value: 7 },
+  { id: 'flax', name: 'лён', category: 'сырьё', material: 'растительное волокно', unit: 'сноп', weight: 8, perishability: 10, value: 9 },
+  { id: 'straw', name: 'солома', category: 'сырьё', material: 'солома', unit: 'тюк', weight: 7, perishability: 18, value: 3 },
+  { id: 'planks', name: 'доски', category: 'сырьё', material: 'древесина', unit: 'связка', weight: 18, perishability: 0, value: 15 },
+  { id: 'clay', name: 'глина', category: 'сырьё', material: 'глина', unit: 'корзина', weight: 28, perishability: 0, value: 5 },
+  { id: 'bricks', name: 'обожжённый кирпич', category: 'сырьё', material: 'керамика', unit: 'партия', weight: 35, perishability: 0, value: 16 },
+  { id: 'lime', name: 'строительная известь', category: 'сырьё', material: 'известь', unit: 'мешок', weight: 20, perishability: 0, value: 12 },
+  { id: 'nails', name: 'железные гвозди', category: 'сырьё', material: 'железо', unit: 'короб', weight: 4, perishability: 0, value: 15 },
+  { id: 'rope', name: 'льняная верёвка', category: 'инструмент', material: 'лён', unit: 'моток', weight: 3, perishability: 0, value: 14 },
 ];
 const ITEM_BY_ID = new Map(ITEM_TEMPLATES.map(item => [item.id, item]));
 
@@ -163,8 +179,6 @@ function createMaterialRuntime(world: WorldState, indexes: WorldIndexes): Materi
 }
 
 const recipeSeeds: Omit<ProductionRecipe, 'id'>[] = [
-  { name: 'Сбор урожая зерна', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'grain', quantity: 30 }], laborHours: 18, minimumSkill: 10, description: 'Земледельцы собирают урожай с полей.' },
-  { name: 'Сбор овощей и кореньев', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'vegetables', quantity: 22 }], laborHours: 15, minimumSkill: 8, description: 'Огороды дают сезонную пищу.' },
   { name: 'Сбор хвороста и дров', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'firewood', quantity: 6 }], laborHours: 8, minimumSkill: 5, description: 'Сельские дворы заготавливают топливо в окрестных лесах и изгородях.' },
   { name: 'Молочное хозяйство', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'milk', quantity: 7 }], laborHours: 10, minimumSkill: 6, description: 'Скот даёт молоко для семей, рынков и кухонь.' },
   { name: 'Птичий двор', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'eggs', quantity: 6 }], laborHours: 7, minimumSkill: 5, description: 'Домашняя птица даёт яйца и поддерживает повседневное питание.' },
@@ -185,18 +199,27 @@ const recipeSeeds: Omit<ProductionRecipe, 'id'>[] = [
   { name: 'Изготовление мебели', category: 'ремесло', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская'], inputs: [{ templateId: 'timber', quantity: 2 }, { templateId: 'tools', quantity: .05 }], outputs: [{ templateId: 'furniture', quantity: 1 }], laborHours: 18, minimumSkill: 18, description: 'Плотники делают кровати, столы и сундуки.' },
   { name: 'Ткачество', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'cloth', quantity: 2 }], laborHours: 16, minimumSkill: 14, description: 'Шерсть превращается в ткань.' },
   { name: 'Пошив одежды', category: 'ремесло', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'cloth', quantity: 2 }], outputs: [{ templateId: 'clothes', quantity: 1 }], laborHours: 15, minimumSkill: 18, description: 'Ткань превращается в одежду.' },
+  { name: 'Помол пшеницы', category: 'переработка', profession: 'miller', establishmentTypes: ['мельница'], inputs: [{ templateId: 'wheat', quantity: 4 }], outputs: [{ templateId: 'flour', quantity: 4 }], laborHours: 8, minimumSkill: 8, description: 'Пшеница превращается в хлебную муку.' },
+  { name: 'Помол ржи', category: 'переработка', profession: 'miller', establishmentTypes: ['мельница'], inputs: [{ templateId: 'rye', quantity: 4 }], outputs: [{ templateId: 'flour', quantity: 3 }], laborHours: 9, minimumSkill: 8, description: 'Рожь превращается в тёмную муку.' },
+  { name: 'Ячменный солод', category: 'переработка', profession: 'brewer', establishmentTypes: ['пивоварня'], inputs: [{ templateId: 'barley', quantity: 3 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'ale', quantity: 30 }], laborHours: 20, minimumSkill: 14, description: 'Ячмень проращивают, сушат и варят в эль.' },
+  { name: 'Распиловка досок', category: 'переработка', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская'], inputs: [{ templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'planks', quantity: 3 }], laborHours: 12, minimumSkill: 14, description: 'Брёвна распускают на строительные доски.' },
+  { name: 'Обжиг кирпича', category: 'переработка', profession: 'carpenter', establishmentTypes: ['кирпичная мастерская'], inputs: [{ templateId: 'clay', quantity: 3 }, { templateId: 'firewood', quantity: 2 }], outputs: [{ templateId: 'bricks', quantity: 3 }], laborHours: 18, minimumSkill: 12, description: 'Глину формуют и обжигают в печи.' },
+  { name: 'Обжиг извести', category: 'переработка', profession: 'miner', establishmentTypes: ['кирпичная мастерская'], inputs: [{ templateId: 'stone', quantity: 3 }, { templateId: 'firewood', quantity: 2 }], outputs: [{ templateId: 'lime', quantity: 2 }], laborHours: 20, minimumSkill: 16, description: 'Известняк обжигают для строительного раствора.' },
+  { name: 'Ковка гвоздей', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'charcoal', quantity: 1 }], outputs: [{ templateId: 'nails', quantity: 4 }], laborHours: 12, minimumSkill: 18, description: 'Кузнец делает крепёж для стройки и кораблей.' },
+  { name: 'Витьё верёвки', category: 'ремесло', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax', quantity: 2 }], outputs: [{ templateId: 'rope', quantity: 2 }], laborHours: 12, minimumSkill: 14, description: 'Льняное волокно превращается в прочную верёвку.' },
+  { name: 'Добыча глины и камня', category: 'добыча', profession: 'miner', establishmentTypes: ['каменоломня'], inputs: [], outputs: [{ templateId: 'clay', quantity: 5 }, { templateId: 'stone', quantity: 4 }], laborHours: 24, minimumSkill: 10, description: 'Рабочие снимают глину и добывают строительный камень.' },
 ];
 
 const professionForEstablishment: Record<EstablishmentType, string[]> = {
   'таверна': ['brewer', 'merchant'], 'постоялый двор': ['merchant', 'brewer'], 'пекарня': ['miller', 'brewer'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
-  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'рынок': ['merchant'], 'лавка': ['merchant'],
+  'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'], 'рынок': ['merchant'], 'лавка': ['merchant'],
   'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'], 'склад': ['merchant'],
   'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
 };
 
 const establishmentForBuilding: Partial<Record<BuildingType, EstablishmentType>> = {
   tavern: 'таверна', inn: 'постоялый двор', bakery: 'пекарня', brewery: 'пивоварня', winery: 'винодельня', blacksmith: 'кузница', carpenter: 'плотницкая мастерская',
-  weaver: 'ткацкая мастерская', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
+  weaver: 'ткацкая мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
   warehouse: 'склад', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
@@ -204,7 +227,7 @@ const buildingMapping: Record<string, BuildingType> = {
   'жилой дом': 'house', 'доходный дом': 'tenement', 'большой семейный дом': 'manor', 'казарма': 'barracks', 'казармы': 'barracks', 'монастырь': 'monastery',
   'зерновой сарай': 'warehouse', 'амбар': 'warehouse', 'склад': 'warehouse', 'поля и пастбища': 'farm', 'ферма': 'farm', 'мельница': 'mill',
   'пекарня': 'bakery', 'трактир': 'tavern', 'таверна': 'tavern', 'постоялый двор': 'inn', 'пивоварня': 'brewery', 'винодельня': 'winery',
-  'кузница': 'blacksmith', 'плотницкая мастерская': 'carpenter', 'ткацкая мастерская': 'weaver', 'торговая площадь': 'market', 'большой рынок': 'market',
+  'кузница': 'blacksmith', 'плотницкая мастерская': 'carpenter', 'ткацкая мастерская': 'weaver', 'кирпичная мастерская': 'kiln', 'обжиговая печь': 'kiln', 'каменоломня': 'quarry', 'карьер': 'quarry', 'торговая площадь': 'market', 'большой рынок': 'market',
   'рыбный рынок': 'market', 'дом гильдии': 'guildhall', 'лечебница': 'healer', 'храм': 'temple', 'собор': 'temple', 'часовня': 'temple',
   'конюшня': 'stable', 'доки': 'fishery', 'шахта': 'mine', 'рудник': 'mine', 'баня': 'bathhouse', 'лавка': 'shop',
 };
@@ -251,6 +274,7 @@ function buildingCapacity(type: BuildingType, rng: RNG): number {
   if (type === 'monastery') return rng.int(18, 75);
   if (type === 'tavern' || type === 'inn') return rng.int(24, 70);
   if (type === 'warehouse' || type === 'market') return rng.int(80, 220);
+  if (type === 'kiln' || type === 'quarry') return rng.int(18, 46);
   return rng.int(8, 34);
 }
 
@@ -258,7 +282,7 @@ function roomsFor(type: BuildingType): string[] {
   const rooms: Partial<Record<BuildingType, string[]>> = {
     house: ['общая комната', 'спальное место', 'кладовая'], tenement: ['общий коридор', 'жилые комнаты', 'общая кухня'], manor: ['зал', 'спальни', 'кухня', 'кладовая'],
     tavern: ['общий зал', 'кухня', 'кладовая', 'подвал'], inn: ['общий зал', 'кухня', 'комнаты постояльцев', 'конюшенный двор'], bakery: ['пекарня', 'склад муки', 'лавка'],
-    blacksmith: ['горн', 'рабочий двор', 'склад металла'], warehouse: ['главный склад', 'погрузочный двор'], market: ['торговые ряды', 'весовая'],
+    blacksmith: ['горн', 'рабочий двор', 'склад металла'], kiln: ['обжиговая печь', 'сушильный двор', 'склад глины'], quarry: ['карьер', 'навес инструментов', 'погрузочная площадка'], warehouse: ['главный склад', 'погрузочный двор'], market: ['торговые ряды', 'весовая'],
   };
   return rooms[type] ?? ['рабочее помещение', 'кладовая'];
 }
@@ -313,6 +337,29 @@ function seedItem(world: WorldState, templateId: string, quantity: number, settl
     settlementId, ...owner, createdYear: world.year, source,
   });
 }
+
+export function addMaterialItem(world: WorldState, templateId: string, quantity: number, settlementId: number, owner: { householdId?: number; establishmentId?: number; buildingId?: number; ownerCharacterId?: number }, source: string, quality = 55): WorldItem | undefined {
+  if (quantity <= .0001) return undefined;
+  const template = ITEM_BY_ID.get(templateId);
+  if (!template) return undefined;
+  return addItem(world, { templateId, name: template.name, category: template.category, material: template.material, quantity, unit: template.unit, weightPerUnit: template.weight,
+    quality, condition: 100, freshness: 100, perishabilityMonths: template.perishability, baseValue: template.value, settlementId, ...owner, createdYear: world.year, source });
+}
+
+export function consumeSettlementMaterial(world: WorldState, settlementId: number, templateId: string, quantity: number): number {
+  let remaining = Math.max(0, quantity);
+  const candidates = world.items.filter(item => item.settlementId === settlementId && item.templateId === templateId && item.quantity > .0001 && item.condition > 0)
+    .sort((a, b) => Number(Boolean(a.householdId)) - Number(Boolean(b.householdId)) || a.id - b.id);
+  for (const item of candidates) {
+    if (remaining <= .0001) break;
+    const used = Math.min(item.quantity, remaining);
+    item.quantity -= used;
+    remaining -= used;
+  }
+  return quantity - remaining;
+}
+
+export function materialTemplateExists(templateId: string): boolean { return ITEM_BY_ID.has(templateId); }
 
 function ensureBuilding(world: WorldState, settlement: Settlement, type: BuildingType, label: string, index: number, rng: RNG): Building {
   const district = settlement.districts[index % Math.max(1, settlement.districts.length)] ?? settlement.districts[0]!;
@@ -452,14 +499,16 @@ function ensureRequiredBuildings(world: WorldState, settlement: Settlement, rng:
     required.set('brewery', Math.max(1, Math.ceil(population / 1400)));
     required.set('weaver', Math.max(1, Math.ceil(population / 900)));
     required.set('guildhall', Math.max(1, Math.ceil(population / 1800)));
+    required.set('kiln', Math.max(1, Math.ceil(population / 1800)));
     required.set('bathhouse', Math.max(1, Math.ceil(population / 1600)));
   }
   if (settlement.type === 'port' || settlement.resource === 'рыба') required.set('fishery', Math.max(1, Math.ceil(population / 260)));
-  if (settlement.resource === 'железо' || settlement.resource === 'серебро' || settlement.resource === 'камень') required.set('mine', Math.max(1, Math.ceil(population / 420)));
+  if (settlement.resource === 'железо' || settlement.resource === 'серебро') required.set('mine', Math.max(1, Math.ceil(population / 420)));
+  if (settlement.resource === 'камень' || settlement.resource === 'глина' || ['hills', 'mountains', 'plains'].includes(world.tiles[settlement.y * world.config.width + settlement.x]?.terrain ?? '')) required.set('quarry', Math.max(1, Math.ceil(population / 900)));
   for (const [type, target] of required) {
     let existing = existingCounts.get(type) ?? 0;
     while (existing < target) {
-      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'public' ? 'колодец и водоразбор' : type;
+      const label = type === 'tavern' ? 'таверна' : type === 'inn' ? 'постоялый двор' : type === 'market' ? 'рынок' : type === 'guildhall' ? 'дом гильдии' : type === 'kiln' ? 'кирпичная мастерская' : type === 'quarry' ? 'каменоломня' : type === 'public' ? 'колодец и водоразбор' : type;
       const building = ensureBuilding(world, settlement, type, label, settlement.buildingIds.length, rng);
       if (type === 'public') building.hasWater = true;
       existing += 1;
@@ -592,6 +641,8 @@ function seedEstablishmentInventory(world: WorldState, establishment: Establishm
   if (establishment.type === 'кузница') { add('iron_ore', rng.int(4, 16)); add('iron', rng.int(3, 12)); add('charcoal', rng.int(8, 25)); add('tools', rng.int(1, 6)); add('weapon', rng.int(0, 4)); }
   if (establishment.type === 'плотницкая мастерская') { add('timber', rng.int(10, 35)); add('tools', rng.int(1, 4)); add('furniture', rng.int(1, 7)); }
   if (establishment.type === 'ткацкая мастерская') { add('wool', rng.int(8, 24)); add('cloth', rng.int(5, 16)); add('clothes', rng.int(1, 8)); }
+  if (establishment.type === 'кирпичная мастерская') { add('clay', rng.int(12, 35)); add('firewood', rng.int(8, 24)); add('bricks', rng.int(4, 16)); add('lime', rng.int(2, 10)); }
+  if (establishment.type === 'каменоломня') { add('clay', rng.int(10, 40)); add('stone', rng.int(12, 45)); add('tools', rng.int(1, 4)); }
   if (establishment.type === 'рынок' || establishment.type === 'лавка' || establishment.type === 'склад') {
     for (const [id, min, max] of [['grain', 8, 35], ['bread', 10, 45], ['vegetables', 5, 24], ['water', 12, 50], ['firewood', 6, 30], ['cloth', 2, 12], ['tools', 1, 6]] as const) add(id, rng.int(min, max));
   }
@@ -613,8 +664,10 @@ export function generatePhysicalEconomy(world: WorldState, rng: RNG, report?: (p
   world.nextIds.productionRecipe ??= 1;
   world.nextIds.employment ??= 1;
   world.nextIds.shipment ??= 1;
-  if (world.productionRecipes.length === 0) world.productionRecipes = recipeSeeds.map((recipe, index) => ({ id: index + 1, ...recipe }));
-  world.nextIds.productionRecipe = Math.max(world.nextIds.productionRecipe, world.productionRecipes.length + 1);
+  world.productionRecipes = world.productionRecipes.filter(recipe => !['Сбор урожая зерна', 'Сбор овощей и кореньев'].includes(recipe.name));
+  const knownRecipeNames = new Set(world.productionRecipes.map(recipe => recipe.name));
+  for (const recipe of recipeSeeds) if (!knownRecipeNames.has(recipe.name)) world.productionRecipes.push({ id: world.nextIds.productionRecipe++, ...recipe });
+  world.nextIds.productionRecipe = Math.max(world.nextIds.productionRecipe, Math.max(0, ...world.productionRecipes.map(recipe => recipe.id)) + 1);
   if (world.buildings.length || world.households.length || world.establishments.length) return;
   report?.('Физические здания и имущество', 12, 'размещаем дома, склады и мастерские');
   createBuildings(world, rng);
@@ -935,9 +988,8 @@ function produceHouseholdSubsistence(world: WorldState, settlement: Settlement, 
       householdId: household.id, buildingId: household.homeBuildingId, createdYear: world.year, source,
     });
   };
-  if (rural) add('vegetables', members.length * .045 * elapsedMonths, 'семейный огород');
-  else if (semiRural) add('vegetables', members.length * .015 * elapsedMonths, 'небольшой городской огород');
-  if (members.some(member => member.profession === 'farmer')) add('grain', members.length * .055 * elapsedMonths, 'доля урожая и собственный участок');
+  if (rural) add('vegetables', members.length * .008 * elapsedMonths, 'малый семейный огород');
+  else if (semiRural) add('vegetables', members.length * .003 * elapsedMonths, 'дворовый огород');
   if (members.some(member => member.profession === 'hunter')) add('meat', members.length * .018 * elapsedMonths, 'мелкая охотничья добыча');
   if (members.some(member => member.profession === 'fisher')) add('fish', members.length * .025 * elapsedMonths, 'часть рыбацкого улова');
   const tile = world.tiles[settlement.y * world.config.width + settlement.x];
@@ -1140,9 +1192,25 @@ function createShipments(world: WorldState, settlementIds: ReadonlySet<number>):
   }
 }
 
+export function ensureEstablishmentOwners(world: WorldState, indexes: WorldIndexes): void {
+  for (const establishment of world.establishments) {
+    const current = indexes.characterById.get(establishment.ownerCharacterId);
+    if (current?.alive) continue;
+    const successor = establishment.workerIds.map(id => indexes.characterById.get(id)).find(character => character?.alive)
+      ?? (indexes.residentsBySettlement.get(establishment.settlementId) ?? []).find(character => character.alive && character.age >= 18);
+    if (!successor) { establishment.active = false; continue; }
+    establishment.ownerCharacterId = successor.id;
+    const building = indexes.buildingById.get(establishment.buildingId);
+    if (building) building.ownerCharacterId = successor.id;
+    if (!establishment.workerIds.includes(successor.id)) establishment.workerIds.unshift(successor.id);
+    establishment.history.push(`После смерти или ухода прежнего владельца дело перешло к ${successor.name}.`);
+  }
+}
+
 export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>): void {
   if (!world.buildings?.length || !world.households?.length || !world.establishments?.length) generatePhysicalEconomy(world, rng);
   activeRuntime = createMaterialRuntime(world, indexes);
+  ensureEstablishmentOwners(world, indexes);
   try {
     const tick = worldTick(world);
     arriveShipments(world, tick);
@@ -1158,7 +1226,7 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         if (establishment) { establishment.monthlyRevenue = 0; establishment.monthlyExpenses = 0; }
       }
       const elapsedMonths = economyElapsedMonths;
-      const productionPriority: Partial<Record<EstablishmentType, number>> = { 'ферма': 1, 'рыбный промысел': 1, 'рудник': 1, 'плотницкая мастерская': 2, 'склад': 2, 'мельница': 3, 'пекарня': 4, 'пивоварня': 4, 'винодельня': 4, 'ткацкая мастерская': 4, 'кузница': 4, 'рынок': 5, 'лавка': 5, 'таверна': 6, 'постоялый двор': 6 };
+      const productionPriority: Partial<Record<EstablishmentType, number>> = { 'ферма': 1, 'рыбный промысел': 1, 'рудник': 1, 'плотницкая мастерская': 2, 'каменоломня': 2, 'кирпичная мастерская': 3, 'склад': 2, 'мельница': 3, 'пекарня': 4, 'пивоварня': 4, 'винодельня': 4, 'ткацкая мастерская': 4, 'кузница': 4, 'рынок': 5, 'лавка': 5, 'таверна': 6, 'постоялый двор': 6 };
       const localEstablishments = settlement.establishmentIds
         .map(id => indexes.establishmentById.get(id))
         .filter((item): item is Establishment => Boolean(item))
@@ -1208,7 +1276,6 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   }
   for (const building of world.buildings) {
     if (!settlementIds.has(building.settlementId)) issues.push(`${building.name}: нет поселения`);
-    if (building.residentIds.length > building.capacity) issues.push(`${building.name}: жителей ${building.residentIds.length}, вместимость ${building.capacity}`);
     if (building.ownerCharacterId && !characterIds.has(building.ownerCharacterId)) issues.push(`${building.name}: не существует владелец`);
     countLocation(building.inventoryItemIds);
   }
@@ -1220,7 +1287,7 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   }
   for (const establishment of world.establishments) {
     if (!buildingIds.has(establishment.buildingId)) issues.push(`${establishment.name}: нет здания`);
-    if (!characterIds.has(establishment.ownerCharacterId)) issues.push(`${establishment.name}: нет владельца`);
+    if (establishment.active && !characterIds.has(establishment.ownerCharacterId)) issues.push(`${establishment.name}: нет владельца`);
     countLocation(establishment.inventoryItemIds);
   }
   for (const character of world.characters) countLocation(character.inventoryItemIds ?? []);
@@ -1257,18 +1324,14 @@ export function ensureHouseholdPhysicalCapacity(world: WorldState, household: Ho
     .filter(building => building.residentIds.filter(id => !memberSet.has(id)).length + aliveMembers.length <= building.capacity)
     .sort((a, b) => (a.residentIds.length - b.residentIds.length) || a.id - b.id)[0];
   if (!destination) {
-    const homeType: BuildingType = aliveMembers.length > 8 ? 'manor' : 'house';
-    destination = ensureBuilding(world, settlement, homeType, homeType === 'manor' ? 'большой семейный дом' : 'жилой дом', settlement.buildingIds.length, rng);
-    destination.capacity = Math.max(destination.capacity, aliveMembers.length);
-    indexes?.buildingById.set(destination.id, destination);
-    if (indexes) {
-      const list = indexes.buildingsBySettlement.get(settlement.id) ?? [];
-      list.push(destination);
-      indexes.buildingsBySettlement.set(settlement.id, list);
+    // Новое жильё больше не возникает мгновенно. Семья временно остаётся в прежнем доме
+    // или без закреплённого адреса, а планировщик поселения создаёт реальный строительный проект.
+    if (current) {
+      current.residentIds = [...current.residentIds.filter(id => !memberSet.has(id)), ...aliveMembers.map(member => member.id)];
+      for (const member of aliveMembers) { member.homeBuildingId = current.id; member.homeDistrict = current.districtName; }
+      return current;
     }
-    const physicalCapacity = (indexes?.buildingsBySettlement.get(settlement.id) ?? world.buildings.filter(building => building.settlementId === settlement.id))
-      .filter(building => residentialTypes.has(building.type)).reduce((sum, building) => sum + building.capacity, 0);
-    settlement.residentialCapacity = Math.max(settlement.residentialCapacity, physicalCapacity);
+    return undefined;
   }
   if (current) current.residentIds = current.residentIds.filter(id => !memberSet.has(id));
   destination.householdId ??= household.id;

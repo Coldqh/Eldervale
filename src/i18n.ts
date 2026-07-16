@@ -17,7 +17,7 @@ const professions: Record<string, string> = {
 const buildingTypes: Record<BuildingType, string> = {
   house: 'жилой дом', tenement: 'доходный дом', manor: 'большой семейный дом', barracks: 'казарма', monastery: 'монастырь', warehouse: 'склад',
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
-  blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', market: 'рынок', shop: 'лавка', bathhouse: 'баня',
+  blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня',
   healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник', cemetery: 'кладбищенская постройка', public: 'общественное здание',
 };
 

@@ -10,16 +10,17 @@ import { generatePhysicalEconomy } from './materialEconomy';
 import { rebuildTerritoryHistoryFromCurrent } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { ensureAllBuildingFootprints } from './spatial';
+import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-10`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-11`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 10;
+  localized.version = 11;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -37,6 +38,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.buildings ??= [];
   localized.households ??= [];
   localized.establishments ??= [];
+  localized.fields ??= [];
+  localized.constructionProjects ??= [];
   localized.items ??= [];
   localized.productionRecipes ??= [];
   localized.employments ??= [];
@@ -162,6 +165,7 @@ export function migrateWorld(input: unknown): WorldState {
 
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
   ensureAllBuildingFootprints(localized as WorldState);
+  initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));
   ensureCemeteries(localized as WorldState, rng);
   compactDeadEntities(localized as WorldState, rng);
   synchronizeMortalityIds(localized as WorldState);

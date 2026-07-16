@@ -21,6 +21,8 @@ function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', s
   if (kind === 'burial' || kind === 'corpse') return <><circle cx="10" cy="17" r="4"/><path d="M14 18h12v5H14zM5 25h22"/><path className="texture-cut" d="M8 16h1m2 0h1"/></>;
   if (kind === 'dungeon') return <><path d="M5 28V11l5-6 6 6 6-6 5 6v17z"/><path className="texture-cut" d="M12 28V17h8v11M8 13h3m10 0h3"/></>;
   if (kind === 'book' || kind === 'recipe' || kind === 'productionRecipe') return <><path d="M5 6h10c2 0 3 1 3 3v18c-1-2-3-3-6-3H5z"/><path d="M27 6H17c-2 0-3 1-3 3v18c1-2 3-3 6-3h7z"/><path className="texture-cut" d="M8 11h6m-6 4h6m4-4h6m-6 4h6"/></>;
+  if (kind === 'field') return <><path d="M5 27V8m7 19V8m7 19V8m7 19V8"/><path className="texture-cut" d="M3 14h26M3 21h26"/></>;
+  if (kind === 'constructionProject') return <><path d="M5 27V9h22v18M9 9l7-5 7 5"/><path className="texture-cut" d="M8 15h16M8 21h16M11 9v18m10-18v18"/></>;
   if (kind === 'animalPopulation') return <><circle cx="9" cy="11" r="3"/><circle cx="16" cy="8" r="3"/><circle cx="23" cy="11" r="3"/><circle cx="16" cy="20" r="7"/></>;
   if (kind === 'ingredient') return <><path d="M16 28V12M16 17c-7 0-10-4-10-9 7 0 10 4 10 9Zm0 4c7 0 10-4 10-9-7 0-10 4-10 9Z"/></>;
   if (kind === 'kingdom' || kind === 'dynasty') return <><path d="m5 10 6 5 5-10 5 10 6-5-3 17H8z"/><path className="texture-cut" d="M9 22h14"/></>;

@@ -1,16 +1,16 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'cemetery' | 'burial';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 
-export type ItemCategory = 'еда' | 'напиток' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'оружие' | 'мебель' | 'лекарство' | 'предмет быта';
-export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'public';
-export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'рынок' | 'лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
+export type ItemCategory = 'еда' | 'напиток' | 'семена' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'оружие' | 'мебель' | 'лекарство' | 'предмет быта';
+export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'public';
+export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'кирпичная мастерская' | 'каменоломня' | 'рынок' | 'лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник';
 export type HouseholdStatus = 'нищие' | 'бедные' | 'обычные' | 'зажиточные' | 'богатые' | 'знатные' | 'служебное общежитие';
 export type RecipeCategory = 'добыча' | 'переработка' | 'готовка' | 'ремесло';
 
@@ -76,6 +76,67 @@ export interface Building {
   rooms: string[];
   hasWater: boolean;
   hasHearth: boolean;
+  history: string[];
+}
+
+
+export type CropKind = 'пшеница' | 'ячмень' | 'рожь' | 'лён' | 'овощи';
+export type FieldState = 'пар' | 'подготовка' | 'посеяно' | 'всходы' | 'рост' | 'созревание' | 'готово к жатве' | 'убрано' | 'погибло';
+
+export interface FieldCell { x: number; y: number; }
+
+export interface FieldPlot {
+  id: number;
+  settlementId: number;
+  farmBuildingId: number;
+  establishmentId?: number;
+  globalX: number;
+  globalY: number;
+  cells: FieldCell[];
+  crop: CropKind;
+  state: FieldState;
+  fertility: number;
+  moisture: number;
+  weeds: number;
+  pests: number;
+  plantedYear?: number;
+  plantedMonth?: number;
+  harvestedYear?: number;
+  expectedYield: number;
+  laborRequired: number;
+  laborDone: number;
+  lastWorkedTick: number;
+  history: string[];
+}
+
+export type ConstructionStage = 'планирование' | 'доставка материалов' | 'фундамент' | 'каркас' | 'стены' | 'крыша' | 'отделка' | 'завершено' | 'заброшено';
+
+export interface ConstructionProject {
+  id: number;
+  settlementId: number;
+  requestedByKingdomId?: number;
+  buildingType: BuildingType;
+  name: string;
+  reason: string;
+  globalX: number;
+  globalY: number;
+  localX: number;
+  localY: number;
+  localWidth: number;
+  localHeight: number;
+  entranceX: number;
+  entranceY: number;
+  requiredMaterials: Record<string, number>;
+  deliveredMaterials: Record<string, number>;
+  laborRequired: number;
+  laborDone: number;
+  builderIds: number[];
+  stage: ConstructionStage;
+  startedYear: number;
+  startedMonth: number;
+  completedYear?: number;
+  completedMonth?: number;
+  buildingId?: number;
   history: string[];
 }
 
@@ -770,6 +831,8 @@ export interface LocalCell {
   building?: string;
   buildingId?: number;
   establishmentId?: number;
+  fieldId?: number;
+  constructionProjectId?: number;
   resourceIngredientId?: number;
   resourceUnitIndex?: number;
   blocked: boolean;
@@ -779,7 +842,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'cemetery' | 'grave' | 'item' | 'corpse';
+  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -811,7 +874,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 10;
+  version: 11;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -839,6 +902,8 @@ export interface WorldState {
   buildings: Building[];
   households: Household[];
   establishments: Establishment[];
+  fields: FieldPlot[];
+  constructionProjects: ConstructionProject[];
   items: WorldItem[];
   productionRecipes: ProductionRecipe[];
   employments: EmploymentContract[];

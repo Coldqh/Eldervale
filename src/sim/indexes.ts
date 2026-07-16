@@ -1,5 +1,5 @@
 import type {
-  AnimalPopulation, Building, Character, EmploymentContract, Establishment, Household, Kingdom, NaturalIngredient, ProductionRecipe, Relationship, Settlement, Tile, WorldEvent, WorldItem, WorldState,
+  AnimalPopulation, Building, Character, ConstructionProject, EmploymentContract, Establishment, FieldPlot, Household, Kingdom, NaturalIngredient, ProductionRecipe, Relationship, Settlement, Tile, WorldEvent, WorldItem, WorldState,
 } from '../types';
 
 export const coordinateKey = (x: number, y: number) => `${x}:${y}`;
@@ -24,6 +24,8 @@ export interface WorldIndexes {
   itemById: Map<number, WorldItem>;
   productionRecipeById: Map<number, ProductionRecipe>;
   employmentById: Map<number, EmploymentContract>;
+  fieldById: Map<number, FieldPlot>;
+  constructionProjectById: Map<number, ConstructionProject>;
   buildingsBySettlement: Map<number, Building[]>;
   householdsBySettlement: Map<number, Household[]>;
   establishmentsBySettlement: Map<number, Establishment[]>;
@@ -49,6 +51,8 @@ export function buildWorldIndexes(world: WorldState): WorldIndexes {
     itemById: new Map((world.items ?? []).map(item => [item.id, item])),
     productionRecipeById: new Map((world.productionRecipes ?? []).map(item => [item.id, item])),
     employmentById: new Map((world.employments ?? []).map(item => [item.id, item])),
+    fieldById: new Map((world.fields ?? []).map(item => [item.id, item])),
+    constructionProjectById: new Map((world.constructionProjects ?? []).map(item => [item.id, item])),
     buildingsBySettlement: new Map(), householdsBySettlement: new Map(), establishmentsBySettlement: new Map(),
   };
 
@@ -163,5 +167,5 @@ export function nearbyTileKeys(x: number, y: number, radius: number): string[] {
 export function countIndexedEntities(indexes: WorldIndexes): number {
   return indexes.characterById.size + indexes.settlementById.size + indexes.kingdomById.size + indexes.tileByCoordinate.size
     + indexes.animalPopulationByTileAndSpecies.size + indexes.ingredientById.size + indexes.relationshipKeys.size
-    + indexes.buildingById.size + indexes.householdById.size + indexes.establishmentById.size + indexes.itemById.size + indexes.employmentById.size;
+    + indexes.buildingById.size + indexes.householdById.size + indexes.establishmentById.size + indexes.itemById.size + indexes.employmentById.size + indexes.fieldById.size + indexes.constructionProjectById.size;
 }

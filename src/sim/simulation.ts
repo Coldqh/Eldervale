@@ -3,8 +3,8 @@ import { RNG } from './rng';
 import { personName, placeName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
-import { advanceMaterialEconomy, ensureHouseholdPhysicalCapacity, materializeNewHousing } from './materialEconomy';
-import { expandHousing } from './settlements';
+import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity } from './materialEconomy';
+import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
 import type { WorldIndexes } from './indexes';
 import {
   addResidentToIndexes, buildWorldIndexes, changeProfessionInIndexes, indexRelationship,
@@ -707,28 +707,14 @@ function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): voi
     if (shortage <= 0 && !nearCapacity) continue;
     const peopleNeeded = shortage > 0 ? shortage : Math.max(4, Math.ceil(settlement.population * .04));
 
-    const wood = settlement.stockpile['древесина'] ?? 0;
-    const stone = settlement.stockpile['камень'] ?? 0;
-    const canBuild = settlement.prosperity >= 25 && (wood >= 8 || stone >= 8);
-    if (canBuild) {
-      const result = expandHousing(settlement, peopleNeeded, rng);
-      materializeNewHousing(world, settlement, result.houses, rng, indexes);
-      settlement.stockpile['древесина'] = Math.max(0, wood - Math.ceil(result.houses * 1.5));
-      settlement.stockpile['камень'] = Math.max(0, stone - Math.ceil(result.houses * .6));
-      settlement.history.push(`В ${world.year} году построено ${result.houses} жилых домов.`);
-      addEvent(world, {
-        kind: 'construction', title: `${settlement.name} расширил жилые кварталы`,
-        description: `Построено ${result.houses} домов, вместимость выросла на ${result.capacityAdded} мест.`,
-        cause: `население ${settlement.population} превысило прежнюю вместимость ${settlement.residentialCapacity - result.capacityAdded}`,
-        conditions: [`в запасах были древесина или камень`, `благосостояние ${settlement.prosperity}% позволило организовать стройку`],
-        decision: 'община и местная власть направили материалы на новое жильё', outcome: `жилищная вместимость достигла ${settlement.residentialCapacity}`,
-        consequences: ['перенаселение уменьшилось', 'запасы строительных материалов сократились', 'поселение физически расширилось'],
-        entityRefs: [{ kind: 'settlement', id: settlement.id }], importance: 2,
-      });
+    const activeHousing = world.constructionProjects.some(project => project.settlementId === settlement.id && ['house', 'tenement', 'manor'].includes(project.buildingType) && !['завершено', 'заброшено'].includes(project.stage));
+    if (!activeHousing && settlement.prosperity >= 18) {
+      const type = peopleNeeded >= 18 || settlement.type === 'city' ? 'tenement' : 'house';
+      requestConstructionProject(world, settlement, type, `необходимо ${peopleNeeded} новых жилых мест`, rng);
       continue;
     }
 
-    if (shortage <= 0) continue;
+    if (shortage <= Math.max(3, Math.ceil(settlement.population * .02))) continue;
     let destination: Settlement | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const candidate of world.settlements) {
@@ -783,8 +769,12 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
   const schedule = prepareMonthSchedule(world, indexes);
 
+  onPhase?.('Поля, посевы и уход за урожаем');
+  advanceAgriculture(world, rng, indexes, schedule.economySettlementIds);
   onPhase?.('Домохозяйства, заведения и физическая экономика');
   advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
+  onPhase?.('Стройплощадки, материалы и работа строителей');
+  advanceConstruction(world, rng, indexes, schedule.economySettlementIds);
   onPhase?.('Поселения и торговые пути');
   advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
 
@@ -820,6 +810,9 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
 
   if (schedule.runBooks) writeBooks(world, rng);
   if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);
+
+  // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
+  ensureEstablishmentOwners(world, indexes);
 
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;

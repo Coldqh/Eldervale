@@ -9,7 +9,7 @@ const labels: Record<EntityKind, string> = {
   kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', monster: 'Существо',
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
-  building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт',
+  building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
   cemetery: 'Кладбище', burial: 'Кладбищенская запись',
 };
 
@@ -39,7 +39,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
-    building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes,
+    building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
     cemetery: world.cemeteries ?? [], burial: world.burials ?? [],
   };
   const direct = map[ref.kind].find(item => item.id === ref.id);
@@ -99,6 +99,30 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+  if (ref.kind === 'field') {
+    const farm = world.buildings.find(item => item.id === entity.farmBuildingId);
+    const establishment = entity.establishmentId ? world.establishments.find(item => item.id === entity.establishmentId) : undefined;
+    return <>
+      {row('Культура', entity.crop)}{row('Состояние', entity.state)}{row('Площадь', `${entity.cells.length} клеток`)}
+      {row('Плодородие', `${Math.round(entity.fertility)}%`)}{row('Влажность', `${Math.round(entity.moisture)}%`)}{row('Сорняки', `${Math.round(entity.weeds)}%`)}{row('Вредители', `${Math.round(entity.pests)}%`)}
+      {row('Работы', `${Math.round(entity.laborDone)} / ${Math.round(entity.laborRequired)}`)}{row('Ожидаемый урожай', entity.expectedYield)}
+      {row('Ферма', farm ? link(farm.name, { kind: 'building', id: farm.id }, onSelect) : 'не найдена')}
+      {row('Хозяйство', establishment ? link(establishment.name, { kind: 'establishment', id: establishment.id }, onSelect) : 'нет отдельного заведения')}
+      {row('Расположение', `квадрат ${entity.globalX}:${entity.globalY}`)}{row('История', entity.history.join(' '))}
+    </>;
+  }
+  if (ref.kind === 'constructionProject') {
+    const building = entity.buildingId ? world.buildings.find(item => item.id === entity.buildingId) : undefined;
+    const materialLines = Object.entries(entity.requiredMaterials).map(([id, amount]) => `${itemTemplateName(world, id)} ${formatNumber(entity.deliveredMaterials[id] ?? 0)}/${formatNumber(amount as number)}`);
+    return <>
+      {row('Этап', entity.stage)}{row('Причина', entity.reason)}{row('Площадка', `квадрат ${entity.globalX}:${entity.globalY}, область ${entity.localX}:${entity.localY} — ${entity.localWidth}×${entity.localHeight}`)}
+      {row('Материалы', materialLines.join('; '))}{row('Труд', `${Math.round(entity.laborDone)} / ${Math.round(entity.laborRequired)}`)}
+      {row('Строители', links(world, entity.builderIds.slice(0, 18).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}
+      {row('Начато', `${entity.startedYear}.${String(entity.startedMonth).padStart(2, '0')}`)}
+      {building && row('Готовое здание', link(building.name, { kind: 'building', id: building.id }, onSelect))}
+      {row('История', entity.history.join(' '))}
+    </>;
+  }
   if (ref.kind === 'cemetery') {
     const cemetery = entity as Cemetery;
     const burialRefs = cemetery.burialIds.slice(-80).reverse().map(id => ({ kind: 'burial' as const, id }));

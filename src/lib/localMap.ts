@@ -44,6 +44,7 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
 
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
   if (settlement) buildSettlement(world, cells, width, height, settlement, tile, exits, rng);
+  placeAgricultureAndConstruction(world, tile, cells, width, height);
   placeCemeteries(world, tile, cells, width, height);
   const dungeon = tile.dungeonId ? world.dungeons.find(item => item.id === tile.dungeonId) : world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
   if (dungeon) placeDungeonEntrance(cells, width, height, rng);
@@ -403,6 +404,36 @@ function drawBuilding(
   });
 }
 
+
+function placeAgricultureAndConstruction(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number): void {
+  for (const field of (world.fields ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const feature: LocalFeature = field.state === 'подготовка' || field.state === 'пар' || field.state === 'убрано' || field.state === 'погибло' ? 'tilled-soil'
+      : field.state === 'посеяно' || field.state === 'всходы' ? 'seedlings'
+        : field.state === 'готово к жатве' ? 'ripe-crop' : 'crop';
+    for (const point of field.cells) {
+      if (!inside(point.x, point.y, width, height)) continue;
+      const cell = cells[point.y * width + point.x];
+      if (!cell || cell.buildingId || cell.constructionProjectId) continue;
+      cell.ground = 'dirt'; cell.feature = feature; cell.blocked = false; cell.fieldId = field.id;
+    }
+  }
+  for (const project of (world.constructionProjects ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y && item.stage !== 'завершено' && item.stage !== 'заброшено')) {
+    const feature: LocalFeature = project.stage === 'планирование' || project.stage === 'доставка материалов' || project.stage === 'фундамент' ? 'construction-foundation'
+      : project.stage === 'каркас' ? 'construction-frame'
+        : project.stage === 'стены' || project.stage === 'крыша' ? 'construction-wall' : 'scaffold';
+    for (let y = project.localY; y < project.localY + project.localHeight; y += 1) for (let x = project.localX; x < project.localX + project.localWidth; x += 1) {
+      if (!inside(x, y, width, height)) continue;
+      const cell = cells[y * width + x];
+      if (!cell || cell.buildingId) continue;
+      cell.ground = project.stage === 'фундамент' ? 'stone' : 'dirt';
+      cell.feature = feature;
+      cell.blocked = !['планирование', 'доставка материалов', 'фундамент'].includes(project.stage);
+      cell.constructionProjectId = project.id;
+      cell.building = project.name;
+    }
+  }
+}
+
 function placeDungeonEntrance(cells: LocalCell[], width: number, height: number, rng: RNG): void {
   const point = randomWalkable(cells, width, height, rng, 7);
   setCell(cells, width, point.x, point.y, { ground: 'stone', feature: 'stairs-down', blocked: false, building: 'вход в подземелье' });
@@ -502,6 +533,14 @@ function buildSurfaceMarkers(
       label: group.refs.length > 1 ? `${group.refs.length} жителей` : group.names[0]!, refs: group.refs, count: group.refs.length,
       detail: group.refs.length > 1 ? group.names.slice(0, 4).join(', ') : group.professions[0],
     });
+  }
+
+  for (const field of (world.fields ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const center = field.cells[Math.floor(field.cells.length / 2)] ?? { x: 0, y: 0 };
+    markers.push({ id: `field-${field.id}`, x: center.x, y: center.y, kind: 'field', label: `Поле: ${field.crop}`, refs: [{ kind: 'field', id: field.id }], count: field.cells.length, detail: `${field.state} · ${field.cells.length} клеток · плодородие ${Math.round(field.fertility)}%` });
+  }
+  for (const project of (world.constructionProjects ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y && item.stage !== 'завершено' && item.stage !== 'заброшено')) {
+    markers.push({ id: `construction-${project.id}`, x: project.localX, y: project.localY, kind: 'construction', label: project.name, refs: [{ kind: 'constructionProject', id: project.id }], detail: `${project.stage} · труд ${Math.round(project.laborDone)}/${project.laborRequired}`, footprintWidth: project.localWidth, footprintHeight: project.localHeight });
   }
 
   for (const building of (world.buildings ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
@@ -605,7 +644,7 @@ function placeNaturalResources(world: WorldState, tile: Tile, cells: LocalCell[]
 }
 
 function resourceCellAvailable(cell: LocalCell): boolean {
-  if (cell.blocked || cell.building || cell.buildingId || cell.resourceIngredientId) return false;
+  if (cell.blocked || cell.building || cell.buildingId || cell.fieldId || cell.constructionProjectId || cell.resourceIngredientId) return false;
   if (cell.ground === 'water' || cell.ground === 'road' || cell.ground === 'floor') return false;
   return !cell.feature || ['bush', 'reeds', 'rock'].includes(cell.feature);
 }
@@ -703,12 +742,14 @@ export function localCellSummary(map: LocalMapData, x: number, y: number): { tit
   if (!cell) return { title: 'За пределами карты', lines: [], markers: [] };
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
-    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', bones: 'кости', grave: 'могила', cemetery: 'ограда кладбища', chest: 'сундук или предметы',
+    tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', 'tilled-soil': 'вспаханная земля', seedlings: 'всходы', crop: 'растущая культура', 'ripe-crop': 'созревший урожай', 'construction-foundation': 'фундамент стройки', 'construction-frame': 'каркас стройки', 'construction-wall': 'незавершённые стены', scaffold: 'строительные леса', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', bones: 'кости', grave: 'могила', cemetery: 'ограда кладбища', chest: 'сундук или предметы',
     'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа',
   };
   const lines = [`Основа: ${groundNames[cell.ground]}`];
   if (cell.feature) lines.push(`Объект: ${featureNames[cell.feature] ?? cell.feature}`);
   if (cell.building) lines.push(`Место: ${cell.building}`);
+  if (cell.fieldId) lines.push(`Поле №${cell.fieldId}`);
+  if (cell.constructionProjectId) lines.push(`Стройплощадка №${cell.constructionProjectId}`);
   if (markers.length) lines.push(`Здесь находятся: ${markers.map(marker => marker.label).join(', ')}`);
   return { title: `${map.globalX}:${map.globalY} · ${x}:${y}`, lines, markers };
 }

@@ -5,7 +5,7 @@ import { getTitle } from './EntityPanel';
 import { TextureIcon } from './TextureIcon';
 
 const groups: { kind: EntityKind; label: string }[] = [
-  { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
+  { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'field', label: 'Поля' }, { kind: 'constructionProject', label: 'Стройки' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
   { kind: 'monster', label: 'Живые существа' }, { kind: 'burial', label: 'Умершие и павшие' }, { kind: 'cemetery', label: 'Кладбища' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
   { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Животные' }, { kind: 'ingredient', label: 'Ресурсы' }, { kind: 'recipe', label: 'Алхимия' },
   { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'army', label: 'Армии' }, { kind: 'war', label: 'Войны' },
@@ -15,7 +15,7 @@ function listFor(world: WorldState, kind: EntityKind): any[] {
   const lists: Record<EntityKind, any[]> = {
     character: world.characters, settlement: world.settlements, kingdom: world.kingdoms, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, war: world.wars,
-    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, cemetery: world.cemeteries, burial: world.burials,
+    dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials,
   };
   return lists[kind];
 }
@@ -41,7 +41,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
 }
 
 function rune(kind: EntityKind): string {
-  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', cemetery: '†', burial: '✝' } as Record<EntityKind, string>)[kind];
+  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', field: '▥', constructionProject: '▧', cemetery: '†', burial: '✝' } as Record<EntityKind, string>)[kind];
 }
 
 function subtitle(kind: EntityKind, item: any): string {
@@ -50,6 +50,8 @@ function subtitle(kind: EntityKind, item: any): string {
   if (kind === 'establishment') return `${item.type} · ${item.workerIds.length} работников · репутация ${item.reputation}%`;
   if (kind === 'item') return `${item.category} · ${Number(item.quantity).toFixed(item.quantity < 10 ? 1 : 0)} ${item.unit} · качество ${item.quality}%`;
   if (kind === 'productionRecipe') return `${item.category} · ${professionLabel(item.profession)} · ${item.outputs.length} результата`;
+  if (kind === 'field') return `${item.crop} · ${item.state} · ${item.cells.length} клеток`;
+  if (kind === 'constructionProject') return `${item.stage} · труд ${Math.round(item.laborDone)}/${Math.round(item.laborRequired)}`;
   if (kind === 'character') return `${speciesLabel(item.species)} · ${professionLabel(item.profession)} · ${item.alive ? `${item.age} лет` : 'мёртв'}`;
   if (kind === 'settlement') return `${settlementTypeLabel(item.type)} · ${item.population} жителей · ${item.resource}`;
   if (kind === 'kingdom') return `${speciesLabel(item.species)} · ${item.culture} · стабильность ${item.stability}%`;

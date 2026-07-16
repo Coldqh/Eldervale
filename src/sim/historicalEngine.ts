@@ -8,6 +8,7 @@ import { inspectWorldIntegrity } from './integrity';
 import { personName, placeName } from './names';
 import { RNG } from './rng';
 import { generatePhysicalEconomy } from './materialEconomy';
+import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { advanceHistoricalTerritories, captureTerritoryAroundSettlement, initializeTerritorialHistory } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 
@@ -73,8 +74,10 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   onProgress?.('Связывание книг, артефактов и руин', 89, 100, 'Источники получают реальные события и владельцев');
   linkKnowledgeAndArtifacts(world, rng);
   generatePhysicalEconomy(world, new RNG(`${config.seed}:повседневная-жизнь-v1`), (phase, percent, detail) => {
-    onProgress?.(phase, 90 + Math.round(percent * .07), 100, detail);
+    onProgress?.(phase, 90 + Math.round(percent * .055), 100, detail);
   });
+  onProgress?.('Поля и строительные цепочки', 96, 100, 'размечаем пашни, семенные запасы и реальные стройматериалы');
+  initializeAgricultureAndConstruction(world, new RNG(`${config.seed}:земледелие-и-стройка-v1`));
   onProgress?.('Кладбища и архив павших', 98, 100, 'переносим умерших и убитых существ из активной симуляции');
   ensureCemeteries(world, rng);
   compactDeadEntities(world, rng);
@@ -99,7 +102,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 10;
+  world.version = 11;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

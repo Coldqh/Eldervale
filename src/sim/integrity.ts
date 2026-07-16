@@ -5,7 +5,8 @@ import { housingIntegrity } from './settlements';
 import { materialEconomyIntegrityIssues } from './materialEconomy';
 import { territoryIntegrityIssues } from './territory';
 import { worldTick } from './scheduler';
-import { buildingRect } from './spatial';
+import { buildingRect, constructionRect } from './spatial';
+import { agricultureConstructionIntegrityIssues } from './agricultureConstruction';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -15,9 +16,9 @@ export interface WorldIntegrityReport {
 
 export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
   const territory = territoryIntegrityIssues(world);
-  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...territory.errors];
+  const errors = [...causalIntegrityIssues(world), ...ecologyIntegrityIssues(world), ...materialEconomyIntegrityIssues(world), ...agricultureConstructionIntegrityIssues(world), ...territory.errors];
   const warnings: string[] = [...territory.warnings];
-  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0);
+  let checks = world.events.length * 6 + world.settlements.length * 4 + world.characters.length + world.animalPopulations.length + world.alchemyRecipes.length + (world.buildings?.length ?? 0) + (world.households?.length ?? 0) + (world.establishments?.length ?? 0) + (world.items?.length ?? 0) + (world.cemeteries?.length ?? 0) + (world.burials?.length ?? 0) + (world.fields?.length ?? 0) + (world.constructionProjects?.length ?? 0);
 
   for (const settlement of world.settlements) {
     const housing = housingIntegrity(settlement);
@@ -52,6 +53,7 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
     if (rect.width < 4 || rect.height < 4) errors.push(`${building.name}: неверный размер области ${rect.width}×${rect.height}`);
     if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > localSize || rect.y + rect.height > localSize) errors.push(`${building.name}: область выходит за пределы локальной карты`);
     if (building.entranceX < rect.x || building.entranceY < rect.y || building.entranceX >= rect.x + rect.width || building.entranceY >= rect.y + rect.height) errors.push(`${building.name}: вход находится вне здания`);
+    if (building.residentIds.length > building.capacity) warnings.push(`${building.name}: временное перенаселение ${building.residentIds.length}/${building.capacity}, требуется новое жильё`);
     const key = `${building.globalX}:${building.globalY}`;
     const peers = buildingsByTile.get(key) ?? [];
     for (const peer of peers) {
@@ -61,6 +63,16 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
     }
     peers.push(building);
     buildingsByTile.set(key, peers);
+  }
+
+  for (const project of world.constructionProjects ?? []) {
+    if (project.stage === 'завершено' || project.stage === 'заброшено') continue;
+    const rect = constructionRect(project);
+    const peers = buildingsByTile.get(`${project.globalX}:${project.globalY}`) ?? [];
+    for (const building of peers) {
+      const other = buildingRect(building);
+      if (rect.x < other.x + other.width && rect.x + rect.width > other.x && rect.y < other.y + other.height && rect.y + rect.height > other.y) errors.push(`${project.name}: стройплощадка пересекает ${building.name}`);
+    }
   }
 
   for (const artifact of world.artifacts) if (artifact.ownerId && !characterIds.has(artifact.ownerId)) errors.push(`${artifact.name}: не существует владелец`);
