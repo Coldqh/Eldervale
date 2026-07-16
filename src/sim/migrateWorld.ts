@@ -14,6 +14,7 @@ import { initializeAgricultureAndConstruction } from './agricultureConstruction'
 import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { emptyCharacterKnowledge, initializeKnowledgeSystem } from './knowledgeSystem';
+import { initializeSettlementLife } from './settlementLife';
 import { normalizeKingdomCapitals } from './kingdomState';
 
 export function migrateWorld(input: unknown): WorldState {
@@ -21,11 +22,11 @@ export function migrateWorld(input: unknown): WorldState {
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-14`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-15`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 14;
+  localized.version = 15;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -56,6 +57,12 @@ export function migrateWorld(input: unknown): WorldState {
   localized.rumors ??= [];
   localized.messages ??= [];
   localized.settlementKnowledge ??= [];
+  localized.settlementGovernments ??= [];
+  localized.districtCivicStates ??= [];
+  localized.civicPatrols ??= [];
+  localized.crimes ??= [];
+  localized.courtCases ??= [];
+  localized.fireIncidents ??= [];
   localized.militaryUnits ??= [];
   localized.supplyWagons ??= [];
   localized.territoryHistory ??= [];
@@ -190,6 +197,12 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.memory = Math.max(0, ...localized.memories.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.rumor = Math.max(0, ...localized.rumors.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.message = Math.max(0, ...localized.messages.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.settlementGovernment = Math.max(0, ...localized.settlementGovernments.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.districtCivic = Math.max(0, ...localized.districtCivicStates.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.patrol = Math.max(0, ...localized.civicPatrols.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.crime = Math.max(0, ...localized.crimes.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.courtCase = Math.max(0, ...localized.courtCases.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.fireIncident = Math.max(0, ...localized.fireIncidents.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.militaryUnit = Math.max(0, ...localized.militaryUnits.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.supplyWagon = Math.max(0, ...localized.supplyWagons.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
@@ -208,6 +221,7 @@ export function migrateWorld(input: unknown): WorldState {
   compactDeadEntities(localized as WorldState, rng);
   synchronizeMortalityIds(localized as WorldState);
   initializeKnowledgeSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-память-и-знания-v1`));
+  initializeSettlementLife(localized as WorldState, new RNG(`${localized.config.seed}:переход-жизнь-поселений-v1`));
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }

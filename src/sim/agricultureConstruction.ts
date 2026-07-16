@@ -45,14 +45,14 @@ function equippedToolFactor(world: WorldState, workers: Array<WorldState['charac
 const ESTABLISHMENT_FOR_BUILDING: Partial<Record<BuildingType, EstablishmentType>> = {
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
   blacksmith: 'кузница', carpenter: 'плотницкая мастерская', weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня',
-  market: 'рынок', shop: 'лавка', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', warehouse: 'склад', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник',
+  market: 'рынок', shop: 'лавка', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', townHall: 'городская управа', courthouse: 'суд', prison: 'тюрьма', fireStation: 'пожарная команда', school: 'школа', shelter: 'приют', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом', warehouse: 'склад', stable: 'конюшня', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
 const PROFESSION_FOR_ESTABLISHMENT: Record<EstablishmentType, string[]> = {
   'таверна': ['brewer', 'merchant'], 'постоялый двор': ['merchant', 'brewer'], 'пекарня': ['miller', 'brewer'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
   'кузница': ['blacksmith'], 'плотницкая мастерская': ['carpenter'], 'ткацкая мастерская': ['weaver'], 'портная мастерская': ['tailor', 'weaver'], 'красильня': ['dyer', 'weaver'], 'кожевенная мастерская': ['tanner'], 'сапожная мастерская': ['cobbler', 'tanner'], 'бронная мастерская': ['armorer', 'blacksmith'], 'инструментальная мастерская': ['toolmaker', 'blacksmith'], 'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'],
   'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'], 'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'],
-  'склад': ['merchant'], 'казарма': ['soldier', 'guard', 'cook'], 'арсенал': ['armorer', 'blacksmith', 'guard'], 'замковое хозяйство': ['soldier', 'guard', 'cook', 'scribe'], 'осадная мастерская': ['carpenter', 'blacksmith', 'toolmaker'], 'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
+  'склад': ['merchant'], 'городская управа': ['scribe', 'merchant'], 'суд': ['scribe', 'priest'], 'тюрьма': ['guard'], 'пожарная команда': ['carpenter', 'guard', 'farmer'], 'школа': ['scribe', 'priest'], 'приют': ['healer', 'priest', 'cook'], 'казарма': ['soldier', 'guard', 'cook'], 'арсенал': ['armorer', 'blacksmith', 'guard'], 'замковое хозяйство': ['soldier', 'guard', 'cook', 'scribe'], 'осадная мастерская': ['carpenter', 'blacksmith', 'toolmaker'], 'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
 };
 
 export function initializeAgricultureAndConstruction(world: WorldState, rng: RNG): void {
@@ -326,7 +326,7 @@ function chooseConstructionDistrict(settlement: Settlement, type: BuildingType) 
 }
 
 function constructionName(type: BuildingType, settlement: Settlement, serial: number): string {
-  const labels: Partial<Record<BuildingType, string>> = { house: 'жилой дом', tenement: 'доходный дом', manor: 'усадьба', warehouse: 'склад', mill: 'мельница', bakery: 'пекарня', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', farm: 'ферма', barracks: 'казарма', arsenal: 'арсенал', castle: 'замок', watchtower: 'сторожевая башня', siegeWorkshop: 'осадная мастерская', temple: 'храм' };
+  const labels: Partial<Record<BuildingType, string>> = { house: 'жилой дом', tenement: 'доходный дом', manor: 'усадьба', warehouse: 'склад', mill: 'мельница', bakery: 'пекарня', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', farm: 'ферма', barracks: 'казарма', arsenal: 'арсенал', castle: 'замок', watchtower: 'сторожевая башня', siegeWorkshop: 'осадная мастерская', townHall: 'городская управа', courthouse: 'суд', prison: 'тюрьма', fireStation: 'пожарный двор', school: 'школа', shelter: 'приют', temple: 'храм' };
   return `${labels[type] ?? type} «${settlement.name.split(' ')[0]}-${serial}»`;
 }
 
@@ -427,6 +427,9 @@ function completedBuildingCapacity(type: BuildingType, width: number, height: nu
   if (type === 'house') return Math.max(4, Math.round(area / 5));
   if (type === 'tenement') return Math.max(18, Math.round(area * .65));
   if (type === 'manor') return Math.max(10, Math.round(area * .35));
+  if (type === 'townHall' || type === 'courthouse') return Math.max(30, Math.round(area * .9));
+  if (type === 'prison') return Math.max(24, Math.round(area * .75));
+  if (type === 'fireStation' || type === 'school' || type === 'shelter') return Math.max(18, Math.round(area * .85));
   if (type === 'castle') return Math.max(120, Math.round(area * 1.15));
   if (type === 'arsenal') return Math.round(area * 3.2);
   if (type === 'watchtower') return Math.max(8, Math.round(area * .8));
@@ -438,7 +441,7 @@ function completedBuildingRooms(type: BuildingType): string[] {
   const map: Partial<Record<BuildingType, string[]>> = {
     house: ['общая комната', 'спальные места', 'кладовая'], tenement: ['коридор', 'жилые комнаты', 'общая кухня'], warehouse: ['склад', 'погрузочный двор'],
     mill: ['мельничный зал', 'склад зерна'], bakery: ['печи', 'склад муки', 'лавка'], kiln: ['обжиговая печь', 'сушильный двор', 'склад'], quarry: ['карьер', 'навес инструментов'],
-    farm: ['жилой двор', 'сарай', 'склад семян'], market: ['торговые ряды', 'весовая'], barracks: ['спальные залы', 'оружейная комната', 'кухня', 'тренировочный двор'], arsenal: ['оружейный склад', 'бронная кладовая', 'ремонтная мастерская', 'караульная'], castle: ['донжон', 'тронный зал', 'внутренний двор', 'казармы', 'конюшни', 'кухня', 'темница', 'башни'], watchtower: ['караульная', 'лестница', 'сигнальная площадка'], siegeWorkshop: ['сборочный двор', 'склад материалов', 'кузнечный навес'],
+    farm: ['жилой двор', 'сарай', 'склад семян'], market: ['торговые ряды', 'весовая'], barracks: ['спальные залы', 'оружейная комната', 'кухня', 'тренировочный двор'], arsenal: ['оружейный склад', 'бронная кладовая', 'ремонтная мастерская', 'караульная'], castle: ['донжон', 'тронный зал', 'внутренний двор', 'казармы', 'конюшни', 'кухня', 'темница', 'башни'], watchtower: ['караульная', 'лестница', 'сигнальная площадка'], siegeWorkshop: ['сборочный двор', 'склад материалов', 'кузнечный навес'], townHall: ['зал совета', 'канцелярия', 'казначейская'], courthouse: ['зал суда', 'архив дел', 'комната судьи'], prison: ['камеры', 'караульная', 'двор'], fireStation: ['сарай вёдер', 'водяные бочки', 'помещение команды'], school: ['учебная комната', 'кладовая книг'], shelter: ['общий зал', 'спальные места', 'кухня'],
   };
   return map[type] ?? ['рабочее помещение', 'кладовая'];
 }

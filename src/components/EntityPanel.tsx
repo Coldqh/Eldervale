@@ -10,7 +10,7 @@ const labels: Record<EntityKind, string> = {
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
-  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец', militaryUnit: 'Военное подразделение', supplyWagon: 'Военный обоз', knowledgeFact: 'Знание', rumor: 'Слух', message: 'Сообщение',
+  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец', militaryUnit: 'Военное подразделение', supplyWagon: 'Военный обоз', knowledgeFact: 'Знание', rumor: 'Слух', message: 'Сообщение', settlementGovernment: 'Местная власть', districtCivic: 'Состояние района', patrol: 'Патруль', crime: 'Преступление', courtCase: 'Судебное дело', fireIncident: 'Пожар',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
@@ -40,7 +40,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
-    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [], knowledgeFact: world.knowledgeFacts ?? [], rumor: world.rumors ?? [], message: world.messages ?? [],
+    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [], knowledgeFact: world.knowledgeFacts ?? [], rumor: world.rumors ?? [], message: world.messages ?? [], settlementGovernment: world.settlementGovernments ?? [], districtCivic: world.districtCivicStates ?? [], patrol: world.civicPatrols ?? [], crime: world.crimes ?? [], courtCase: world.courtCases ?? [], fireIncident: world.fireIncidents ?? [],
   };
   const direct = map[ref.kind].find(item => item.id === ref.id);
   if (direct) return direct;
@@ -59,6 +59,12 @@ export function getTitle(world: WorldState, ref: EntityRef): string {
   if (ref.kind === 'knowledgeFact') return entity.statement ?? `Знание №${entity.id}`;
   if (ref.kind === 'rumor') return entity.text ?? `Слух №${entity.id}`;
   if (ref.kind === 'message') return `${entity.kind} №${entity.id}`;
+  if (ref.kind === 'settlementGovernment') return `Власть ${getTitle(world, { kind: 'settlement', id: entity.settlementId })}`;
+  if (ref.kind === 'districtCivic') return `${entity.districtName}`;
+  if (ref.kind === 'patrol') return `${entity.shift} патруль: ${entity.districtName}`;
+  if (ref.kind === 'crime') return `${entity.type} №${entity.id}`;
+  if (ref.kind === 'courtCase') return `Дело №${entity.id}`;
+  if (ref.kind === 'fireIncident') return `Пожар №${entity.id}`;
   return entity.name ?? entity.title ?? `Объект №${entity.id}`;
 }
 
@@ -102,6 +108,16 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+
+
+  if (ref.kind === 'settlementGovernment') {
+    return <>{row('Поселение', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}{row('Глава', link(getTitle(world, { kind: 'character', id: entity.leaderCharacterId }), { kind: 'character', id: entity.leaderCharacterId }, onSelect))}{row('Совет', links(world, entity.councilCharacterIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Казна', `${entity.treasury.toFixed(1)} крон`)}{row('Налоги за месяц', `${entity.monthlyTaxIncome.toFixed(1)} крон`)}{row('Расходы за месяц', `${entity.monthlyExpenses.toFixed(1)} крон`)}{row('Коррупция', `${Math.round(entity.corruption)}%`)}{row('Стража', links(world, entity.guardIds.slice(0, 24).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Судьи', links(world, entity.judgeIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Пожарные', links(world, entity.firefighterIds.slice(0, 20).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Заключённые', links(world, entity.prisonerIds.slice(0, 24).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Текущее решение', entity.activeDecision)}{row('Законы', entity.laws.join('; '))}{row('История', entity.history.join(' '))}</>;
+  }
+  if (ref.kind === 'districtCivic') return <>{row('Поселение', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}{row('Район', entity.districtName)}{row('Безопасность', `${Math.round(entity.safety)}%`)}{row('Чистота', `${Math.round(entity.cleanliness)}%`)}{row('Пожарный риск', `${Math.round(entity.fireRisk)}%`)}{row('Доступ к воде', `${Math.round(entity.waterAccess)}%`)}{row('Преступность', `${Math.round(entity.crimeRate)}%`)}{row('Бездомные', entity.homelessCount)}{row('Аренда', `×${entity.rentMultiplier.toFixed(2)}`)}{row('Патрули', links(world, entity.patrolIds.map((id: number) => ({ kind: 'patrol' as const, id })), onSelect))}</>;
+  if (ref.kind === 'patrol') return <>{row('Поселение', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}{row('Район', entity.districtName)}{row('Смена', entity.shift)}{row('Статус', entity.status)}{row('Стражники', links(world, entity.guardIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Аресты', entity.arrests)}{row('История', entity.history.join(' ') || 'Обычная служба.')}</>;
+  if (ref.kind === 'crime') return <>{row('Тип', entity.type)}{row('Статус', entity.status)}{row('Поселение', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}{row('Район', entity.districtName)}{row('Подозреваемый', entity.perpetratorId ? link(getTitle(world, { kind: 'character', id: entity.perpetratorId }), { kind: 'character', id: entity.perpetratorId }, onSelect) : 'не установлен')}{row('Жертва', entity.victimCharacterId ? link(getTitle(world, { kind: 'character', id: entity.victimCharacterId }), { kind: 'character', id: entity.victimCharacterId }, onSelect) : 'нет')}{row('Свидетели', links(world, entity.witnessIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Улики', `${Math.round(entity.evidence)}%`)}{row('Тяжесть', entity.severity)}{row('История', entity.history.join(' '))}</>;
+  if (ref.kind === 'courtCase') return <>{row('Преступление', link(getTitle(world, { kind: 'crime', id: entity.crimeId }), { kind: 'crime', id: entity.crimeId }, onSelect))}{row('Статус', entity.status)}{row('Судья', entity.judgeId ? link(getTitle(world, { kind: 'character', id: entity.judgeId }), { kind: 'character', id: entity.judgeId }, onSelect) : 'не назначен')}{row('Подсудимый', entity.defendantId ? link(getTitle(world, { kind: 'character', id: entity.defendantId }), { kind: 'character', id: entity.defendantId }, onSelect) : 'не установлен')}{row('Приговор', entity.verdict ?? 'нет')}{row('Срок', `${entity.sentenceMonths} месяцев`)}{row('Штраф', `${entity.fine} крон`)}{row('История', entity.history.join(' '))}</>;
+  if (ref.kind === 'fireIncident') return <>{row('Поселение', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}{row('Статус', entity.status)}{row('Интенсивность', `${Math.round(entity.intensity)}%`)}{row('Риск распространения', `${Math.round(entity.spreadRisk)}%`)}{row('Затронутые здания', links(world, entity.affectedBuildingIds.map((id: number) => ({ kind: 'building' as const, id })), onSelect))}{row('Пожарные', links(world, entity.firefighterIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Погибшие', entity.deaths)}{row('Уничтожено зданий', entity.destroyedBuildingIds.length)}{row('История', entity.history.join(' '))}</>;
 
   if (ref.kind === 'knowledgeFact') {
     const sourceEvent = entity.eventId ? world.events.find(item => item.id === entity.eventId) : undefined;

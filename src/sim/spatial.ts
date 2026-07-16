@@ -16,6 +16,10 @@ export function buildingDimensions(type: BuildingType, floors: number): { width:
   if (type === 'castle') return { width: Math.min(24, 17 + floors * 2), height: Math.min(20, 14 + floors) };
   if (type === 'arsenal' || type === 'siegeWorkshop') return { width: 11, height: 8 };
   if (type === 'watchtower') return { width: 5, height: 5 };
+  if (type === 'townHall' || type === 'courthouse') return { width: 10, height: 8 };
+  if (type === 'prison') return { width: 11, height: 8 };
+  if (type === 'fireStation') return { width: 9, height: 7 };
+  if (type === 'school' || type === 'shelter') return { width: 9, height: 6 };
   if (type === 'warehouse' || type === 'barracks' || type === 'market') return { width: 9, height: 7 };
   if (type === 'tavern' || type === 'inn' || type === 'temple' || type === 'monastery') return { width: 8, height: 6 };
   if (type === 'farm' || type === 'stable' || type === 'fishery') return { width: 8, height: 5 };

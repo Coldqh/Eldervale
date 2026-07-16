@@ -17,6 +17,7 @@ import { prepareMonthSchedule, worldTick } from './scheduler';
 import { advanceModernTerritories, captureTerritoryAroundSettlement } from './territory';
 import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
 import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
+import { advanceSettlementLife } from './settlementLife';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -808,6 +809,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   recoverArmies(world);
   monsterActions(world, rng, indexes, schedule.dueMonsterIds);
   normalizeKingdomCapitals(world);
+  onPhase?.('Городские службы, патрули, преступления, суды и пожары');
+  advanceSettlementLife(world, rng, indexes, schedule.activeSettlementIds, schedule.economySettlementIds);
   onPhase?.('Память, слухи, письма и донесения');
   const knowledge = advanceKnowledgeSystem(world, rng, indexes, detailed);
   for (const threat of knowledge.confirmedMonsterThreats) {

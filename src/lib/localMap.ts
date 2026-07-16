@@ -540,6 +540,18 @@ function buildSurfaceMarkers(
     });
   }
 
+
+  if (settlement) {
+    const district = settlement.districts.find(item => item.x === tile.x && item.y === tile.y);
+    if (district) {
+      for (const patrol of (world.civicPatrols ?? []).filter(item => item.settlementId === settlement.id && item.districtName === district.name && item.status === 'патрулирует' && item.guardIds.length)) {
+        const refs: EntityRef[] = [{ kind: 'patrol', id: patrol.id }, ...patrol.guardIds.slice(0, 8).map(id => ({ kind: 'character' as const, id }))];
+        const point = characterPosition(patrol.id + 800000, walkable, `${world.config.seed}:патруль:${patrol.id}:${world.month}`, tile.x, tile.y);
+        markers.push({ id: `patrol-${patrol.id}`, x: point.x, y: point.y, kind: 'patrol', label: `${patrol.shift} патруль`, refs, count: patrol.guardIds.length, detail: `${patrol.guardIds.length} стражников · район ${patrol.districtName}`, visualRole: 'guard' });
+      }
+    }
+  }
+
   for (const merchant of presentMerchants) {
     const character = world.characters.find(item => item.id === merchant.characterId);
     if (!character?.alive) continue;

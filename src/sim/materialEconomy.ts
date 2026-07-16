@@ -317,13 +317,14 @@ const professionForEstablishment: Record<EstablishmentType, string[]> = {
   'кирпичная мастерская': ['carpenter', 'miner'], 'каменоломня': ['miner'], 'рынок': ['merchant'], 'лавка': ['merchant'], 'продовольственная лавка': ['merchant'], 'одежная лавка': ['merchant', 'tailor'], 'оружейная лавка': ['merchant', 'blacksmith'],
   'баня': ['healer', 'merchant'], 'лечебница': ['healer', 'herbalist'], 'храм': ['priest'], 'гильдейский дом': ['merchant', 'scribe'], 'склад': ['merchant'],
   'конюшня': ['farmer', 'guard'], 'мельница': ['miller'], 'ферма': ['farmer'], 'рыбный промысел': ['fisher'], 'рудник': ['miner'],
+  'городская управа': ['scribe', 'merchant'], 'суд': ['scribe', 'priest'], 'тюрьма': ['guard'], 'пожарная команда': ['carpenter', 'guard', 'farmer'], 'школа': ['scribe', 'priest'], 'приют': ['healer', 'priest', 'cook'],
   'казарма': ['soldier', 'guard'], 'арсенал': ['armorer', 'blacksmith', 'guard'], 'замковое хозяйство': ['guard', 'soldier', 'scribe', 'cook'], 'осадная мастерская': ['carpenter', 'blacksmith', 'toolmaker'],
 };
 
 const establishmentForBuilding: Partial<Record<BuildingType, EstablishmentType>> = {
   tavern: 'таверна', inn: 'постоялый двор', bakery: 'пекарня', brewery: 'пивоварня', winery: 'винодельня', blacksmith: 'кузница', carpenter: 'плотницкая мастерская',
   weaver: 'ткацкая мастерская', tailor: 'портная мастерская', dyehouse: 'красильня', tannery: 'кожевенная мастерская', cobbler: 'сапожная мастерская', armorer: 'бронная мастерская', toolmaker: 'инструментальная мастерская', kiln: 'кирпичная мастерская', quarry: 'каменоломня', market: 'рынок', shop: 'лавка', bathhouse: 'баня', healer: 'лечебница', temple: 'храм', guildhall: 'гильдейский дом',
-  warehouse: 'склад', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
+  warehouse: 'склад', townHall: 'городская управа', courthouse: 'суд', prison: 'тюрьма', fireStation: 'пожарная команда', school: 'школа', shelter: 'приют', barracks: 'казарма', arsenal: 'арсенал', castle: 'замковое хозяйство', siegeWorkshop: 'осадная мастерская', stable: 'конюшня', mill: 'мельница', farm: 'ферма', fishery: 'рыбный промысел', mine: 'рудник',
 };
 
 const buildingMapping: Record<string, BuildingType> = {
@@ -333,7 +334,7 @@ const buildingMapping: Record<string, BuildingType> = {
   'пекарня': 'bakery', 'трактир': 'tavern', 'таверна': 'tavern', 'постоялый двор': 'inn', 'пивоварня': 'brewery', 'винодельня': 'winery',
   'кузница': 'blacksmith', 'плотницкая мастерская': 'carpenter', 'ткацкая мастерская': 'weaver', 'портная мастерская': 'tailor', 'красильня': 'dyehouse', 'кожевенная мастерская': 'tannery', 'сапожная мастерская': 'cobbler', 'бронная мастерская': 'armorer', 'инструментальная мастерская': 'toolmaker', 'кирпичная мастерская': 'kiln', 'обжиговая печь': 'kiln', 'каменоломня': 'quarry', 'карьер': 'quarry', 'торговая площадь': 'market', 'большой рынок': 'market',
   'рыбный рынок': 'market', 'дом гильдии': 'guildhall', 'лечебница': 'healer', 'храм': 'temple', 'собор': 'temple', 'часовня': 'temple',
-  'конюшня': 'stable', 'доки': 'fishery', 'шахта': 'mine', 'рудник': 'mine', 'баня': 'bathhouse', 'лавка': 'shop',
+  'городская управа': 'townHall', 'суд': 'courthouse', 'тюрьма': 'prison', 'пожарный двор': 'fireStation', 'школа': 'school', 'приют': 'shelter', 'конюшня': 'stable', 'доки': 'fishery', 'шахта': 'mine', 'рудник': 'mine', 'баня': 'bathhouse', 'лавка': 'shop',
 };
 
 const residentialTypes = new Set<BuildingType>(['house', 'tenement', 'manor', 'barracks', 'monastery']);

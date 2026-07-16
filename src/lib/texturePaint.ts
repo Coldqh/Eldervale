@@ -79,6 +79,7 @@ export function paintFeature(ctx: CanvasRenderingContext2D, feature: LocalFeatur
   else if (feature === 'cemetery') { ctx.strokeStyle = '#0b0b0b'; ctx.lineWidth = Math.max(1, size * .08); ctx.strokeRect(x + size * .08, y + size * .08, size * .84, size * .84); paintFeature(ctx, 'grave', x, y, size); }
   else if (feature === 'body' || feature === 'bones') { ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(1.5, size * .12); ctx.beginPath(); ctx.moveTo(x + size * .2, cy); ctx.lineTo(x + size * .8, cy); ctx.moveTo(x + size * .35, y + size * .25); ctx.lineTo(x + size * .65, y + size * .75); ctx.moveTo(x + size * .65, y + size * .25); ctx.lineTo(x + size * .35, y + size * .75); ctx.stroke(); }
   else if (feature === 'blood') { ctx.fillStyle = '#3d0f12'; ctx.beginPath(); ctx.ellipse(cx, cy, size * .32, size * .2, .3, 0, Math.PI * 2); ctx.fill(); }
+  else if (feature === 'trash') { ctx.fillStyle = '#17110b'; for (let i = 0; i < 5; i += 1) ctx.fillRect(x + size * (.12 + (i * .17) % .7), y + size * (.2 + (i % 3) * .22), size * .12, size * .1); }
   else if (feature === 'rubble' || feature === 'looted') { ctx.fillStyle = '#050505'; for (let i = 0; i < 4; i += 1) ctx.fillRect(x + size * (.14 + i * .18), y + size * (.2 + (i % 2) * .34), size * .18, size * .18); }
   else if (feature === 'fire') { ctx.fillStyle = '#e87842'; ctx.beginPath(); ctx.moveTo(cx, y + size * .08); ctx.quadraticCurveTo(x + size * .84, y + size * .62, cx, y + size * .9); ctx.quadraticCurveTo(x + size * .16, y + size * .62, cx, y + size * .08); ctx.fill(); }
   else if (feature === 'herb' || feature === 'berry' || feature === 'mushroom') { ctx.strokeStyle = feature === 'berry' ? '#9b4f6b' : '#75a95f'; ctx.fillStyle = feature === 'mushroom' ? '#b49a73' : ctx.strokeStyle; ctx.lineWidth = Math.max(1, size * .08); ctx.beginPath(); ctx.moveTo(cx, y + size * .85); ctx.lineTo(cx, y + size * .3); ctx.stroke(); ctx.beginPath(); ctx.arc(x + size * .4, y + size * .45, size * .16, 0, Math.PI * 2); ctx.arc(x + size * .62, y + size * .35, size * .15, 0, Math.PI * 2); ctx.fill(); }
@@ -93,10 +94,10 @@ export function paintMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, 
   const h = Math.max(1, marker.footprintHeight ?? 1) * size;
   const cx = x0 + w / 2; const cy = y0 + h / 2; const r = Math.max(2.5, Math.min(9, Math.min(w, h) * .3));
   ctx.save(); ctx.lineWidth = Math.max(1, size * .08); ctx.strokeStyle = '#0d120e';
-  if (marker.kind === 'person' || marker.kind === 'group' || marker.kind === 'merchant') {
+  if (marker.kind === 'person' || marker.kind === 'patrol' || marker.kind === 'group' || marker.kind === 'merchant') {
     const role = marker.visualRole ?? '';
     const military = ['soldier', 'militia', 'archer', 'cavalry', 'knight', 'officer', 'commander', 'military-group'].includes(role);
-    ctx.fillStyle = marker.kind === 'merchant' ? '#d9ad58' : role === 'king' ? '#d9b95e' : military ? '#c9c5b4' : '#f2dfae';
+    ctx.fillStyle = marker.kind === 'patrol' ? '#a9b9ae' : marker.kind === 'merchant' ? '#d9ad58' : role === 'king' ? '#d9b95e' : military ? '#c9c5b4' : '#f2dfae';
     ctx.beginPath(); ctx.arc(cx, cy - r * .35, r * .45, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(cx, cy + r * .55, r * .65, Math.PI, 0); ctx.fill();
     if (role === 'king') {

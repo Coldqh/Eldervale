@@ -1,16 +1,16 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 
 export type ItemCategory = 'еда' | 'напиток' | 'семена' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'броня' | 'оружие' | 'краситель' | 'мебель' | 'лекарство' | 'предмет быта';
-export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'tailor' | 'dyehouse' | 'tannery' | 'cobbler' | 'armorer' | 'toolmaker' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'castle' | 'arsenal' | 'watchtower' | 'siegeWorkshop' | 'public';
-export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'портная мастерская' | 'красильня' | 'кожевенная мастерская' | 'сапожная мастерская' | 'бронная мастерская' | 'инструментальная мастерская' | 'кирпичная мастерская' | 'каменоломня' | 'рынок' | 'лавка' | 'продовольственная лавка' | 'одежная лавка' | 'оружейная лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник' | 'казарма' | 'арсенал' | 'замковое хозяйство' | 'осадная мастерская';
+export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'tailor' | 'dyehouse' | 'tannery' | 'cobbler' | 'armorer' | 'toolmaker' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'castle' | 'arsenal' | 'watchtower' | 'siegeWorkshop' | 'townHall' | 'courthouse' | 'prison' | 'fireStation' | 'school' | 'shelter' | 'public';
+export type EstablishmentType = 'таверна' | 'постоялый двор' | 'пекарня' | 'пивоварня' | 'винодельня' | 'кузница' | 'плотницкая мастерская' | 'ткацкая мастерская' | 'портная мастерская' | 'красильня' | 'кожевенная мастерская' | 'сапожная мастерская' | 'бронная мастерская' | 'инструментальная мастерская' | 'кирпичная мастерская' | 'каменоломня' | 'рынок' | 'лавка' | 'продовольственная лавка' | 'одежная лавка' | 'оружейная лавка' | 'баня' | 'лечебница' | 'храм' | 'гильдейский дом' | 'склад' | 'конюшня' | 'мельница' | 'ферма' | 'рыбный промысел' | 'рудник' | 'казарма' | 'арсенал' | 'замковое хозяйство' | 'осадная мастерская' | 'городская управа' | 'суд' | 'тюрьма' | 'пожарная команда' | 'школа' | 'приют';
 export type HouseholdStatus = 'нищие' | 'бедные' | 'обычные' | 'зажиточные' | 'богатые' | 'знатные' | 'служебное общежитие';
 export type RecipeCategory = 'добыча' | 'переработка' | 'готовка' | 'ремесло';
 
@@ -158,6 +158,109 @@ export interface SettlementKnowledge {
   verifiedFactIds: number[];
   rumorIds: number[];
   lastUpdatedTick: number;
+}
+
+
+
+export type CrimeType = 'кража' | 'грабёж' | 'нападение' | 'убийство' | 'поджог' | 'контрабанда' | 'мошенничество' | 'взлом' | 'браконьерство';
+export type CrimeStatus = 'совершено' | 'расследуется' | 'подозреваемый найден' | 'передано в суд' | 'раскрыто' | 'не раскрыто';
+export type LegalStatus = 'свободен' | 'разыскивается' | 'под стражей' | 'заключён' | 'сбежал';
+export type SentenceKind = 'оправдание' | 'штраф' | 'общественные работы' | 'заключение' | 'изгнание' | 'смертная казнь';
+
+export interface DistrictCivicState {
+  id: number;
+  settlementId: number;
+  districtName: string;
+  safety: number;
+  cleanliness: number;
+  fireRisk: number;
+  waterAccess: number;
+  rentMultiplier: number;
+  crimeRate: number;
+  homelessCount: number;
+  patrolIds: number[];
+  history: string[];
+}
+
+export interface SettlementGovernment {
+  id: number;
+  settlementId: number;
+  leaderCharacterId: number;
+  councilCharacterIds: number[];
+  treasury: number;
+  monthlyTaxIncome: number;
+  monthlyExpenses: number;
+  corruption: number;
+  guardIds: number[];
+  judgeIds: number[];
+  firefighterIds: number[];
+  teacherIds: number[];
+  gravediggerIds: number[];
+  prisonerIds: number[];
+  laws: string[];
+  activeDecision: string;
+  history: string[];
+}
+
+export interface CivicPatrol {
+  id: number;
+  settlementId: number;
+  districtName: string;
+  guardIds: number[];
+  shift: 'дневная' | 'ночная';
+  status: 'патрулирует' | 'отдыхает' | 'реагирует' | 'разбита';
+  arrests: number;
+  lastPatrolTick: number;
+  history: string[];
+}
+
+export interface CrimeIncident {
+  id: number;
+  type: CrimeType;
+  settlementId: number;
+  districtName: string;
+  perpetratorId?: number;
+  victimCharacterId?: number;
+  victimEstablishmentId?: number;
+  witnessIds: number[];
+  evidence: number;
+  severity: number;
+  stolenItemIds: number[];
+  status: CrimeStatus;
+  createdTick: number;
+  resolvedTick?: number;
+  history: string[];
+}
+
+export interface CourtCase {
+  id: number;
+  crimeId: number;
+  settlementId: number;
+  judgeId?: number;
+  defendantId?: number;
+  status: 'ожидает суда' | 'слушается' | 'завершено' | 'прекращено';
+  verdict?: SentenceKind;
+  sentenceMonths: number;
+  fine: number;
+  openedTick: number;
+  closedTick?: number;
+  history: string[];
+}
+
+export interface FireIncident {
+  id: number;
+  settlementId: number;
+  originBuildingId?: number;
+  affectedBuildingIds: number[];
+  firefighterIds: number[];
+  intensity: number;
+  spreadRisk: number;
+  status: 'горит' | 'локализован' | 'потушен' | 'выгорел';
+  startedTick: number;
+  endedTick?: number;
+  deaths: number;
+  destroyedBuildingIds: number[];
+  history: string[];
 }
 
 export interface NeedState {
@@ -542,6 +645,7 @@ export interface SimulationRuntimeState {
   livingEconomyVersion?: 1;
   militaryInfrastructureVersion?: 1;
   knowledgeSystemVersion?: 1;
+  settlementLifeVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -677,6 +781,10 @@ export interface Character {
   servicePayArrears?: number;
   visualRole?: string;
   knowledge: CharacterKnowledgeState;
+  legalStatus?: LegalStatus;
+  wantedForCrimeIds?: number[];
+  sentenceUntilTick?: number;
+  homeless?: boolean;
 }
 
 export interface Relationship {
@@ -1076,7 +1184,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse' | 'merchant';
+  kind: 'person' | 'patrol' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse' | 'merchant';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -1109,7 +1217,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 14;
+  version: 15;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1152,6 +1260,12 @@ export interface WorldState {
   rumors: Rumor[];
   messages: Message[];
   settlementKnowledge: SettlementKnowledge[];
+  settlementGovernments: SettlementGovernment[];
+  districtCivicStates: DistrictCivicState[];
+  civicPatrols: CivicPatrol[];
+  crimes: CrimeIncident[];
+  courtCases: CourtCase[];
+  fireIncidents: FireIncident[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];
