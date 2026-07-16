@@ -57,6 +57,10 @@ export interface Building {
   globalY: number;
   localX: number;
   localY: number;
+  localWidth: number;
+  localHeight: number;
+  entranceX: number;
+  entranceY: number;
   name: string;
   type: BuildingType;
   floors: number;
@@ -764,6 +768,10 @@ export interface LocalCell {
   ground: LocalGround;
   feature?: LocalFeature;
   building?: string;
+  buildingId?: number;
+  establishmentId?: number;
+  resourceIngredientId?: number;
+  resourceUnitIndex?: number;
   blocked: boolean;
 }
 
@@ -803,7 +811,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 9;
+  version: 10;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

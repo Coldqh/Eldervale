@@ -564,7 +564,7 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
 
   report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
   const world: WorldState = {
-    version: 9, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    version: 10, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
     tiles, kingdoms, settlements, characters, relationships, dynasties, armies, monsters, cemeteries: [], burials: [], animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], items: [], productionRecipes: [], employments: [], shipments: [], territoryHistory: [], events, localMapChanges: [],
     simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
     history: { engineVersion: 1, generatedYears: config.historyYears, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },

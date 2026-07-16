@@ -7,6 +7,7 @@ import type { WorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
+import { assignBuildingFootprint, buildingDimensions } from './spatial';
 
 interface ItemTemplate {
   id: string;
@@ -316,15 +317,19 @@ function seedItem(world: WorldState, templateId: string, quantity: number, settl
 function ensureBuilding(world: WorldState, settlement: Settlement, type: BuildingType, label: string, index: number, rng: RNG): Building {
   const district = settlement.districts[index % Math.max(1, settlement.districts.length)] ?? settlement.districts[0]!;
   const localSize = world.config.localMapSize ?? 128;
+  const floors = type === 'tenement' || type === 'manor' ? rng.int(2, 3) : 1;
+  const dimensions = buildingDimensions(type, floors);
   const building: Building = {
     id: world.nextIds.building++, settlementId: settlement.id, districtName: district.name, globalX: district.x, globalY: district.y,
     localX: 6 + hashSeed(`${world.config.seed}:здание:${settlement.id}:${index}:x`) % Math.max(8, localSize - 18),
     localY: 6 + hashSeed(`${world.config.seed}:здание:${settlement.id}:${index}:y`) % Math.max(8, localSize - 18),
+    localWidth: dimensions.width, localHeight: dimensions.height, entranceX: 0, entranceY: 0,
     name: type === 'house' || type === 'tenement' || type === 'manor' ? `${label} №${index + 1}` : `${label} «${settlement.name.split(' ')[0]}-${index + 1}»`,
-    type, floors: type === 'tenement' || type === 'manor' ? rng.int(2, 3) : 1, capacity: buildingCapacity(type, rng), condition: rng.int(58, 100),
+    type, floors, capacity: buildingCapacity(type, rng), condition: rng.int(58, 100),
     builtYear: rng.int(Math.max(1, settlement.foundedYear), world.year), residentIds: [], workerIds: [], inventoryItemIds: [], rooms: roomsFor(type),
     hasWater: rng.chance(type === 'house' ? .55 : .82), hasHearth: !['warehouse', 'market', 'mine'].includes(type), history: [`Построено не позднее ${world.year} года.`],
   };
+  assignBuildingFootprint(world, building);
   world.buildings.push(building);
   activeRuntime?.buildingById.set(building.id, building);
   settlement.buildingIds.push(building.id);

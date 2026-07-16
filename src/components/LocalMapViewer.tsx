@@ -30,15 +30,15 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
   const [level, setLevel] = useState(initialLevel);
   const [zoom, setZoom] = useState(1);
   const [camera, setCamera] = useState({ x: 0, y: 0 });
-  const [selectedCell, setSelectedCell] = useState({ x: 0, y: 0 });
+  const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | undefined>(undefined);
   const map = useMemo(() => generateLocalMap(world, globalX, globalY, level), [world, globalX, globalY, level]);
-  const summary = useMemo(() => localCellSummary(map, selectedCell.x, selectedCell.y), [map, selectedCell]);
+  const summary = useMemo(() => selectedCell ? localCellSummary(map, selectedCell.x, selectedCell.y) : { title: 'Выбери клетку', lines: ['Первое нажатие показывает содержимое клетки. Повторное открывает главную сущность.'], markers: [] }, [map, selectedCell]);
 
   useEffect(() => {
     if (!map.availableLevels.includes(level)) setLevel(0);
     setCamera({ x: 0, y: 0 });
     setZoom(1);
-    setSelectedCell({ x: Math.floor(map.width / 2), y: Math.floor(map.height / 2) });
+    setSelectedCell(undefined);
   }, [map.key]);
 
   const move = (dx: number, dy: number) => {
@@ -47,6 +47,16 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
     if (x < 0 || y < 0 || x >= world.config.width || y >= world.config.height) return;
     setLevel(0);
     onMove(x, y, 0);
+  };
+
+  const handleCellTap = (cell: { x: number; y: number }) => {
+    const repeated = Boolean(selectedCell && selectedCell.x === cell.x && selectedCell.y === cell.y);
+    if (!repeated) {
+      setSelectedCell(cell);
+      return;
+    }
+    const ref = preferredEntityRef(localCellSummary(map, cell.x, cell.y).markers);
+    if (ref) onSelect(ref);
   };
 
   return <section className="workspace-view local-map-workspace">
@@ -74,12 +84,14 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
           </div>
           <div className="local-zoom-controls"><button onClick={() => setZoom(value => Math.max(LOCAL_MIN_ZOOM, value / 1.35))}>−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => setZoom(value => Math.min(LOCAL_MAX_ZOOM, value * 1.35))}>＋</button><button onClick={() => { setZoom(1); setCamera({ x: 0, y: 0 }); }}>Центр</button></div>
         </div>
-        <LocalCanvas map={map} zoom={zoom} camera={camera} onViewport={value => { setZoom(value.zoom); setCamera(value.camera); }} selected={selectedCell} onSelectCell={setSelectedCell} />
+        <LocalCanvas map={map} zoom={zoom} camera={camera} onViewport={value => { setZoom(value.zoom); setCamera(value.camera); }} selected={selectedCell} onSelectCell={handleCellTap} />
         <div className="local-map-footnote"><span>Перетаскивай карту одним пальцем, растягивай двумя. Максимальный масштаб показывает клетки почти вплотную.</span><span>База восстанавливается из seed, история хранится отдельными изменениями: {world.localMapChanges.filter(effect => effect.globalX === globalX && effect.globalY === globalY).length}</span></div>
       </div>
 
-      <aside className="window-card local-inspector">
-        <div className="local-inspector-heading"><span className="eyebrow">Клетка {selectedCell.x}:{selectedCell.y}</span><h2>{summary.title}</h2></div>
+      <aside className={`window-card local-inspector ${selectedCell ? 'is-open' : ''}`}>
+        <div className="local-inspector-grip" aria-hidden="true" />
+        <button className="local-inspector-close" onClick={() => setSelectedCell(undefined)} aria-label="Закрыть информацию о клетке">×</button>
+        <div className="local-inspector-heading"><span className="eyebrow">{selectedCell ? `Клетка ${selectedCell.x}:${selectedCell.y}` : 'Локальная карта'}</span><h2>{summary.title}</h2></div>
         <div className="local-inspector-lines">{summary.lines.map(line => <p key={line}>{line}</p>)}</div>
         {summary.markers.length > 0 && <div className="local-marker-list">
           <h3>Существа и объекты</h3>
@@ -99,7 +111,7 @@ function LocalCanvas({ map, zoom, camera, onViewport, selected, onSelectCell }: 
   zoom: number;
   camera: { x: number; y: number };
   onViewport: (value: { zoom: number; camera: { x: number; y: number } }) => void;
-  selected: { x: number; y: number };
+  selected?: { x: number; y: number };
   onSelectCell: (value: { x: number; y: number }) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -252,12 +264,11 @@ function LocalCanvas({ map, zoom, camera, onViewport, selected, onSelectCell }: 
     onPointerUp={pointerUp}
     onPointerCancel={pointerCancel}
     onWheel={wheel}
-    onDoubleClick={event => zoomAt(event.clientX, event.clientY, viewportRef.current.zoom * 1.7)}
     aria-label={`Локальная карта квадрата ${map.globalX}:${map.globalY}`}
   />;
 }
 
-function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number, camera: { x: number; y: number }, selected: { x: number; y: number }) {
+function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number, camera: { x: number; y: number }, selected?: { x: number; y: number }) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const box = canvas.getBoundingClientRect();
@@ -298,15 +309,46 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
     const footprintWidth = marker.footprintWidth ?? 1;
     const footprintHeight = marker.footprintHeight ?? 1;
     if (marker.x + footprintWidth < startX || marker.x > endX || marker.y + footprintHeight < startY || marker.y > endY) continue;
-    drawMarker(ctx, marker, ox + marker.x * cellSize, oy + marker.y * cellSize, cellSize);
+    if (marker.kind === 'building' || marker.kind === 'establishment') continue;
+    const visualSize = markerVisualSize(marker, cellSize);
+    const x = ox + marker.x * cellSize + (footprintWidth * cellSize - footprintWidth * visualSize) / 2;
+    const y = oy + marker.y * cellSize + (footprintHeight * cellSize - footprintHeight * visualSize) / 2;
+    drawMarker(ctx, marker, x, y, visualSize);
   }
-  ctx.strokeStyle = '#f4d889';
-  ctx.lineWidth = Math.max(1.5, cellSize * .13);
-  ctx.strokeRect(ox + selected.x * cellSize + 1, oy + selected.y * cellSize + 1, Math.max(1, cellSize - 2), Math.max(1, cellSize - 2));
+  if (selected) {
+    ctx.strokeStyle = '#f4d889';
+    ctx.lineWidth = Math.max(1.5, cellSize * .13);
+    ctx.strokeRect(ox + selected.x * cellSize + 1, oy + selected.y * cellSize + 1, Math.max(1, cellSize - 2), Math.max(1, cellSize - 2));
+  }
 }
 
 function drawFeature(ctx: CanvasRenderingContext2D, feature: LocalFeature, x: number, y: number, size: number) {
   paintTextureFeature(ctx, feature, x, y, size);
+}
+
+function markerVisualSize(marker: LocalMarker, cellSize: number): number {
+  const important = ['person', 'group', 'monster', 'army', 'item', 'artifact', 'resource'].includes(marker.kind);
+  if (!important || cellSize >= 11) return cellSize;
+  const boost = marker.kind === 'resource' ? .38 : .58;
+  return Math.min(12, cellSize + (11 - cellSize) * boost);
+}
+
+function preferredEntityRef(markers: LocalMarker[]): EntityRef | undefined {
+  const priority: Record<LocalMarker['kind'], number> = {
+    person: 100, group: 100, monster: 90, army: 80, corpse: 76, item: 72, artifact: 70,
+    establishment: 62, building: 55, cemetery: 50, grave: 48, dungeon: 45, fauna: 40,
+    resource: 35, settlement: 30, effect: 20,
+  };
+  const marker = [...markers].sort((a, b) => priority[b.kind] - priority[a.kind] || a.id.localeCompare(b.id))[0];
+  if (!marker) return undefined;
+  if (marker.kind === 'person' || marker.kind === 'group') return marker.refs.find(ref => ref.kind === 'character');
+  if (marker.kind === 'establishment' || marker.kind === 'building') {
+    return marker.refs.find(ref => ref.kind === 'character')
+      ?? marker.refs.find(ref => ref.kind === 'establishment')
+      ?? marker.refs.find(ref => ref.kind === 'building')
+      ?? marker.refs[0];
+  }
+  return marker.refs[0];
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x0: number, y0: number, size: number) {

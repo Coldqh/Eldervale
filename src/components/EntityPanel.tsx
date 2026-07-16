@@ -140,7 +140,8 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     return <>
       {row('Поселение', link(getTitle(world, settlementRef), settlementRef, onSelect))}
       {row('Тип', buildingTypeLabel(entity.type))}{row('Район', entity.districtName)}
-      {row('Положение', `квадрат ${entity.globalX}:${entity.globalY}, клетка ${entity.localX}:${entity.localY}`)}
+      {row('Положение', `квадрат ${entity.globalX}:${entity.globalY}, область ${entity.localX}:${entity.localY} — ${entity.localWidth}×${entity.localHeight} клеток`)}
+      {row('Вход', `клетка ${entity.entranceX}:${entity.entranceY}`)}
       {row('Этажи', entity.floors)}{row('Вместимость', entity.capacity)}{row('Состояние', `${entity.condition}%`)}{row('Построено', `${entity.builtYear} год`)}
       {row('Вода', entity.hasWater ? 'есть' : 'нет')}{row('Очаг', entity.hasHearth ? 'есть' : 'нет')}
       {row('Владелец', entity.ownerCharacterId ? link(getTitle(world, { kind: 'character', id: entity.ownerCharacterId }), { kind: 'character', id: entity.ownerCharacterId }, onSelect) : 'община или власть')}

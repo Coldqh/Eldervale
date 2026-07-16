@@ -5,6 +5,7 @@ import { housingIntegrity } from './settlements';
 import { materialEconomyIntegrityIssues } from './materialEconomy';
 import { territoryIntegrityIssues } from './territory';
 import { worldTick } from './scheduler';
+import { buildingRect } from './spatial';
 
 export interface WorldIntegrityReport {
   errors: string[];
@@ -44,6 +45,24 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
     if (army.status === 'hunting' && (!army.targetMonsterId || !monsterIds.has(army.targetMonsterId))) errors.push(`${army.name}: охота не имеет живой цели`);
     if (army.targetMonsterId && army.status !== 'hunting') warnings.push(`${army.name}: указана цель-чудовище без статуса охоты`);
   }
+  const buildingsByTile = new Map<string, WorldState['buildings']>();
+  for (const building of world.buildings ?? []) {
+    const rect = buildingRect(building);
+    const localSize = world.config.localMapSize ?? 128;
+    if (rect.width < 4 || rect.height < 4) errors.push(`${building.name}: неверный размер области ${rect.width}×${rect.height}`);
+    if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > localSize || rect.y + rect.height > localSize) errors.push(`${building.name}: область выходит за пределы локальной карты`);
+    if (building.entranceX < rect.x || building.entranceY < rect.y || building.entranceX >= rect.x + rect.width || building.entranceY >= rect.y + rect.height) errors.push(`${building.name}: вход находится вне здания`);
+    const key = `${building.globalX}:${building.globalY}`;
+    const peers = buildingsByTile.get(key) ?? [];
+    for (const peer of peers) {
+      const other = buildingRect(peer);
+      const overlaps = rect.x < other.x + other.width && rect.x + rect.width > other.x && rect.y < other.y + other.height && rect.y + rect.height > other.y;
+      if (overlaps) errors.push(`${building.name}: область пересекается со зданием ${peer.name}`);
+    }
+    peers.push(building);
+    buildingsByTile.set(key, peers);
+  }
+
   for (const artifact of world.artifacts) if (artifact.ownerId && !characterIds.has(artifact.ownerId)) errors.push(`${artifact.name}: не существует владелец`);
   for (const recipe of world.alchemyRecipes) {
     if (recipe.ingredientIds.some(id => !ingredientIds.has(id))) errors.push(`${recipe.name}: отсутствует ингредиент`);

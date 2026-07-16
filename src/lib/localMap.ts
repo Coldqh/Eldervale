@@ -3,6 +3,7 @@ import type {
 } from '../types';
 import { professionLabel, settlementTypeLabel } from '../i18n';
 import { hashSeed, RNG } from '../sim/rng';
+import { buildingInteriorPoint, buildingRect } from '../sim/spatial';
 
 export const DEFAULT_LOCAL_MAP_SIZE = 128;
 
@@ -304,10 +305,13 @@ function buildSettlement(
   const physicalBuildings = (world.buildings ?? []).filter(building => building.globalX === tile.x && building.globalY === tile.y);
   if (physicalBuildings.length) {
     for (const building of physicalBuildings) {
-      const dimensions = physicalBuildingDimensions(building.type, building.floors);
-      const slot = findBuildSlot(cells, width, height, building.localX, building.localY, dimensions.w, dimensions.h);
-      if (!slot) continue;
-      drawBuilding(cells, width, slot.x, slot.y, dimensions.w, dimensions.h, building.name, new RNG(`${world.config.seed}:физическое-здание:${building.id}`));
+      const rect = buildingRect(building);
+      drawBuilding(cells, width, rect.x, rect.y, rect.width, rect.height, building.name, new RNG(`${world.config.seed}:физическое-здание:${building.id}`), {
+        buildingId: building.id,
+        establishmentId: building.establishmentId,
+        entranceX: building.entranceX,
+        entranceY: building.entranceY,
+      });
     }
     return;
   }
@@ -326,27 +330,6 @@ function buildSettlement(
     drawBuilding(cells, width, slot.x, slot.y, w, h, label, rng);
     built += 1;
   }
-}
-
-function physicalBuildingDimensions(type: WorldState['buildings'][number]['type'], floors: number): { w: number; h: number } {
-  if (type === 'tenement' || type === 'manor' || type === 'guildhall') return { w: Math.min(11, 7 + floors), h: Math.min(9, 6 + Math.floor(floors / 2)) };
-  if (type === 'warehouse' || type === 'barracks' || type === 'market') return { w: 9, h: 7 };
-  if (type === 'tavern' || type === 'inn' || type === 'temple') return { w: 8, h: 6 };
-  if (type === 'farm' || type === 'stable') return { w: 8, h: 5 };
-  return { w: 6, h: 5 };
-}
-
-function findBuildSlot(cells: LocalCell[], width: number, height: number, desiredX: number, desiredY: number, w: number, h: number): Point | undefined {
-  const baseX = Math.max(2, Math.min(width - w - 2, desiredX));
-  const baseY = Math.max(2, Math.min(height - h - 2, desiredY));
-  for (let radius = 0; radius <= 18; radius += 2) {
-    for (let dy = -radius; dy <= radius; dy += 2) for (let dx = -radius; dx <= radius; dx += 2) {
-      const x = Math.max(2, Math.min(width - w - 2, baseX + dx));
-      const y = Math.max(2, Math.min(height - h - 2, baseY + dy));
-      if (canBuild(cells, width, height, x, y, w, h)) return { x, y };
-    }
-  }
-  return undefined;
 }
 
 function drawSettlementWall(cells: LocalCell[], width: number, height: number, exits: LocalExit[]): void {
@@ -395,17 +378,29 @@ function canBuild(cells: LocalCell[], width: number, height: number, x0: number,
   return unsuitable === 0;
 }
 
-function drawBuilding(cells: LocalCell[], width: number, x0: number, y0: number, w: number, h: number, label: string, rng: RNG): void {
+function drawBuilding(
+  cells: LocalCell[], width: number, x0: number, y0: number, w: number, h: number, label: string, rng: RNG,
+  spatial?: { buildingId: number; establishmentId?: number; entranceX: number; entranceY: number },
+): void {
   for (let y = y0; y < y0 + h; y += 1) for (let x = x0; x < x0 + w; x += 1) {
     const wall = x === x0 || y === y0 || x === x0 + w - 1 || y === y0 + h - 1;
-    setCell(cells, width, x, y, { ground: wall ? 'stone' : 'floor', feature: wall ? 'wall' : undefined, blocked: wall, building: label });
+    setCell(cells, width, x, y, {
+      ground: wall ? 'stone' : 'floor', feature: wall ? 'wall' : undefined, blocked: wall, building: label,
+      buildingId: spatial?.buildingId, establishmentId: spatial?.establishmentId,
+    });
   }
-  const doorSide = rng.pick(['north', 'south', 'east', 'west'] as const);
-  const door = doorSide === 'north' ? { x: x0 + Math.floor(w / 2), y: y0 }
-    : doorSide === 'south' ? { x: x0 + Math.floor(w / 2), y: y0 + h - 1 }
-      : doorSide === 'west' ? { x: x0, y: y0 + Math.floor(h / 2) }
+  const fallbackSide = rng.pick(['north', 'south', 'east', 'west'] as const);
+  const fallbackDoor = fallbackSide === 'north' ? { x: x0 + Math.floor(w / 2), y: y0 }
+    : fallbackSide === 'south' ? { x: x0 + Math.floor(w / 2), y: y0 + h - 1 }
+      : fallbackSide === 'west' ? { x: x0, y: y0 + Math.floor(h / 2) }
         : { x: x0 + w - 1, y: y0 + Math.floor(h / 2) };
-  setCell(cells, width, door.x, door.y, { ground: 'floor', feature: 'door', blocked: false, building: label });
+  const door = spatial && spatial.entranceX >= x0 && spatial.entranceX < x0 + w && spatial.entranceY >= y0 && spatial.entranceY < y0 + h
+    ? { x: spatial.entranceX, y: spatial.entranceY }
+    : fallbackDoor;
+  setCell(cells, width, door.x, door.y, {
+    ground: 'floor', feature: 'door', blocked: false, building: label,
+    buildingId: spatial?.buildingId, establishmentId: spatial?.establishmentId,
+  });
 }
 
 function placeDungeonEntrance(cells: LocalCell[], width: number, height: number, rng: RNG): void {
@@ -480,6 +475,8 @@ function buildSurfaceMarkers(
 
   const liveCharacters = settlement ? world.characters.filter(character => {
     if (!character.alive || character.settlementId !== settlement.id) return false;
+    const anchor = characterAnchorBuilding(world, character);
+    if (anchor) return anchor.globalX === tile.x && anchor.globalY === tile.y;
     const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения' }];
     const assigned = districts[hashSeed(`${world.config.seed}:район-жителя:${character.id}`) % districts.length]!;
     return assigned.x === tile.x && assigned.y === tile.y;
@@ -487,7 +484,10 @@ function buildSurfaceMarkers(
   const walkable = cells.filter(cell => !cell.blocked && cell.ground !== 'water');
   const groups = new Map<string, { point: Point; refs: EntityRef[]; names: string[]; professions: string[] }>();
   for (const character of liveCharacters) {
-    const point = characterPosition(character.id, walkable, world.config.seed, tile.x, tile.y);
+    const anchor = characterAnchorBuilding(world, character);
+    const point = anchor && anchor.globalX === tile.x && anchor.globalY === tile.y
+      ? buildingInteriorPoint(anchor, `${world.config.seed}:житель-в-здании:${character.id}:${world.month}`)
+      : characterPosition(character.id, walkable, world.config.seed, tile.x, tile.y);
     const key = `${point.x}:${point.y}`;
     const group = groups.get(key) ?? { point, refs: [], names: [], professions: [] };
     group.refs.push({ kind: 'character', id: character.id });
@@ -495,6 +495,7 @@ function buildSurfaceMarkers(
     group.professions.push(professionLabel(character.profession));
     groups.set(key, group);
   }
+
   for (const [key, group] of groups) {
     markers.push({
       id: `people-${key}`, x: group.point.x, y: group.point.y, kind: group.refs.length > 1 ? 'group' : 'person',
@@ -506,11 +507,17 @@ function buildSurfaceMarkers(
   for (const building of (world.buildings ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
     const establishment = building.establishmentId ? world.establishments.find(item => item.id === building.establishmentId) : undefined;
     const markerKind: LocalMarker['kind'] = establishment ? 'establishment' : 'building';
-    const refs: EntityRef[] = [{ kind: 'building', id: building.id }, ...(establishment ? [{ kind: 'establishment' as const, id: establishment.id }] : [])];
+    const occupantRefs: EntityRef[] = liveCharacters
+      .filter(character => characterAnchorBuilding(world, character)?.id === building.id)
+      .slice(0, 12)
+      .map(character => ({ kind: 'character' as const, id: character.id }));
+    const refs: EntityRef[] = [...occupantRefs, ...(establishment ? [{ kind: 'establishment' as const, id: establishment.id }] : []), { kind: 'building', id: building.id }];
+    const rect = buildingRect(building);
     markers.push({
-      id: `building-${building.id}`, x: Math.max(1, Math.min(width - 2, building.localX)), y: Math.max(1, Math.min(height - 2, building.localY)),
+      id: `building-${building.id}`, x: rect.x, y: rect.y,
       kind: markerKind, label: establishment?.name ?? building.name, refs,
-      detail: establishment ? `${establishment.type} · работников ${establishment.workerIds.length}` : `${building.rooms.length} помещений · состояние ${building.condition}%`,
+      detail: establishment ? `${establishment.type} · работников ${establishment.workerIds.length} · область ${rect.width}×${rect.height}` : `${building.rooms.length} помещений · состояние ${building.condition}% · область ${rect.width}×${rect.height}`,
+      footprintWidth: rect.width, footprintHeight: rect.height,
     });
   }
 
@@ -533,44 +540,12 @@ function buildSurfaceMarkers(
     const trail = cells[point.y * width + point.x];
     if (trail && !trail.feature) trail.feature = 'animal-trail';
   }
-  for (const ingredient of world.ingredients.filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y)) {
-    const spreadRng = new RNG(`${world.config.seed}:ареал-ингредиента:${ingredient.id}:${tile.x}:${tile.y}`);
-    const total = Math.max(1, Math.round(ingredient.abundance));
-    const patchCount = Math.max(3, Math.min(18, Math.round(Math.sqrt(total) * 1.35)));
-    let remaining = total;
-    for (let patchIndex = 0; patchIndex < patchCount && remaining > 0; patchIndex += 1) {
-      const center = randomWalkable(cells, width, height, spreadRng, 5);
-      const patchesLeft = patchCount - patchIndex;
-      const amount = patchIndex === patchCount - 1
-        ? remaining
-        : Math.max(1, Math.min(remaining - (patchesLeft - 1), Math.round(remaining / patchesLeft * spreadRng.int(65, 135) / 100)));
-      remaining -= amount;
-      const radius = ingredient.kind === 'минерал' ? spreadRng.int(1, 3) : spreadRng.int(2, 5);
-      let painted = 0;
-      const targetCells = Math.max(2, Math.min(amount, ingredient.kind === 'минерал' ? spreadRng.int(3, 8) : spreadRng.int(4, 12)));
-      for (let attempt = 0; attempt < targetCells * 5 && painted < targetCells; attempt += 1) {
-        const x = center.x + spreadRng.int(-radius, radius);
-        const y = center.y + spreadRng.int(-radius, radius);
-        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
-        const cell = cells[y * width + x];
-        if (!cell || cell.blocked || cell.ground === 'water' || cell.building) continue;
-        if (!cell.feature || ['bush', 'reeds', 'rock'].includes(cell.feature)) {
-          cell.feature = ingredient.kind === 'гриб' ? 'mushroom' : ingredient.kind === 'растение' ? 'herb' : 'rock';
-          painted += 1;
-        }
-      }
-      markers.push({
-        id: `resource-${ingredient.id}-${patchIndex}`, x: center.x, y: center.y, kind: 'resource', label: ingredient.name,
-        refs: [{ kind: 'ingredient', id: ingredient.id }], count: amount,
-        detail: `${ingredient.kind} · участок ${patchIndex + 1}/${patchCount} · запас ${amount}`,
-      });
-    }
-  }
+  markers.push(...placeNaturalResources(world, tile, cells, width, height));
 
   for (const item of world.items.filter(entry => entry.settlementId === settlement?.id && !entry.ownerCharacterId && !entry.householdId && !entry.establishmentId).slice(0, 24)) {
     const building = item.buildingId ? world.buildings.find(entry => entry.id === item.buildingId) : undefined;
     const point = building && building.globalX === tile.x && building.globalY === tile.y
-      ? { x: Math.max(1, Math.min(width - 2, building.localX + 1)), y: Math.max(1, Math.min(height - 2, building.localY + 1)) }
+      ? buildingInteriorPoint(building, `${world.config.seed}:предмет-в-здании:${item.id}`)
       : randomWalkable(cells, width, height, new RNG(`${world.config.seed}:предмет:${item.id}:${tile.x}:${tile.y}`));
     markers.push({ id: `item-${item.id}`, x: point.x, y: point.y, kind: 'item', label: item.name, refs: [{ kind: 'item', id: item.id }], count: Math.round(item.quantity), detail: `${item.category} · ${item.quantity} ${item.unit}` });
   }
@@ -585,6 +560,61 @@ function buildSurfaceMarkers(
     markers.push({ id: `effect-${effect.id}`, x: effect.localX, y: effect.localY, kind: markerKind, label: effect.label, refs, detail: `${effect.year}.${String(effect.month ?? 1).padStart(2, '0')} · ${effect.kind}` });
   }
   return markers;
+}
+
+
+function characterAnchorBuilding(world: WorldState, character: WorldState['characters'][number]): WorldState['buildings'][number] | undefined {
+  const working = character.age >= 14 && character.profession !== 'child';
+  const preferredId = working ? character.workplaceBuildingId ?? character.homeBuildingId : character.homeBuildingId;
+  return preferredId ? world.buildings.find(building => building.id === preferredId) : undefined;
+}
+
+function placeNaturalResources(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number): LocalMarker[] {
+  const markers: LocalMarker[] = [];
+  const occupied = new Set<string>();
+  const ingredients = world.ingredients
+    .filter(item => item.abundance > 0 && item.x === tile.x && item.y === tile.y)
+    .sort((a, b) => a.id - b.id);
+
+  for (const ingredient of ingredients) {
+    const desired = Math.max(1, Math.round(ingredient.abundance));
+    const candidates = cells.filter(cell => resourceCellAvailable(cell) && !occupied.has(`${cell.x}:${cell.y}`));
+    if (!candidates.length) continue;
+    const center = candidates[hashSeed(`${world.config.seed}:центр-ресурса:${ingredient.id}`) % candidates.length]!;
+    candidates.sort((a, b) => {
+      const distanceA = Math.hypot(a.x - center.x, a.y - center.y);
+      const distanceB = Math.hypot(b.x - center.x, b.y - center.y);
+      if (distanceA !== distanceB) return distanceA - distanceB;
+      return hashSeed(`${ingredient.id}:${a.x}:${a.y}`) - hashSeed(`${ingredient.id}:${b.x}:${b.y}`);
+    });
+    const selected = candidates.slice(0, Math.min(desired, candidates.length));
+    selected.forEach((cell, unitIndex) => {
+      const key = `${cell.x}:${cell.y}`;
+      occupied.add(key);
+      cell.feature = resourceFeature(ingredient.kind, ingredient.name);
+      cell.resourceIngredientId = ingredient.id;
+      cell.resourceUnitIndex = unitIndex;
+      markers.push({
+        id: `resource-${ingredient.id}-${unitIndex}`, x: cell.x, y: cell.y, kind: 'resource', label: ingredient.name,
+        refs: [{ kind: 'ingredient', id: ingredient.id }], count: 1,
+        detail: `${ingredient.kind} · единица ${unitIndex + 1}/${desired}`,
+      });
+    });
+  }
+  return markers;
+}
+
+function resourceCellAvailable(cell: LocalCell): boolean {
+  if (cell.blocked || cell.building || cell.buildingId || cell.resourceIngredientId) return false;
+  if (cell.ground === 'water' || cell.ground === 'road' || cell.ground === 'floor') return false;
+  return !cell.feature || ['bush', 'reeds', 'rock'].includes(cell.feature);
+}
+
+function resourceFeature(kind: WorldState['ingredients'][number]['kind'], name: string): LocalFeature {
+  if (kind === 'минерал') return 'rock';
+  if (kind === 'гриб') return 'mushroom';
+  if (/ягод|плод|виноград/i.test(name)) return 'berry';
+  return 'herb';
 }
 
 function characterPosition(id: number, walkable: LocalCell[], seed: string, x: number, y: number): Point {
