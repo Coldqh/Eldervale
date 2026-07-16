@@ -22,6 +22,7 @@ import { advanceStateMachine } from './stateMachine';
 import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
+import { advancePhysicalArmySystem, ensureArmyOutsideSettlements, nextArmyFieldStep } from './physicalArmy';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -366,17 +367,19 @@ function moveArmies(world: WorldState, rng: RNG, indexes: WorldIndexes, dueArmyI
     if (army.status === 'hunting') {
       const monster = army.targetMonsterId ? world.monsters.find(item => item.id === army.targetMonsterId) : undefined;
       if (!monster) { army.status = 'recovering'; army.targetMonsterId = undefined; continue; }
-      army.x += Math.sign(monster.x - army.x);
-      army.y += Math.sign(monster.y - army.y);
+      if (Math.hypot(monster.x - army.x, monster.y - army.y) <= 1) { resolveMonsterBattle(world, army, monster, rng, indexes); continue; }
+      const step = nextArmyFieldStep(world, army, monster.x, monster.y);
+      army.x = step.x; army.y = step.y;
       if (Math.hypot(monster.x - army.x, monster.y - army.y) <= 1) resolveMonsterBattle(world, army, monster, rng, indexes);
       continue;
     }
 
     const target = army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined;
     if (!target) { army.status = 'recovering'; continue; }
-    army.x += Math.sign(target.x - army.x);
-    army.y += Math.sign(target.y - army.y);
-    if (army.x === target.x && army.y === target.y) resolveBattle(world, army.id, target.id, rng, indexes);
+    if (Math.hypot(target.x - army.x, target.y - army.y) <= 1) { resolveBattle(world, army.id, target.id, rng, indexes); continue; }
+    const step = nextArmyFieldStep(world, army, target.x, target.y);
+    army.x = step.x; army.y = step.y;
+    if (Math.hypot(target.x - army.x, target.y - army.y) <= 1) resolveBattle(world, army.id, target.id, rng, indexes);
   }
 }
 
@@ -426,8 +429,8 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
   const defensePower = (defenderArmy.strength * (defenderArmy.morale / 100) + target.defense * 3.2) * rng.int(80, 125) / 100;
   const attackLoss = Math.max(8, Math.round(defensePower / 14));
   const defenseLoss = Math.max(8, Math.round(attackPower / 15));
-  const actualAttackLoss = applyArmyCasualties(world, indexes, army, attackLoss, `погибли в сражении за ${target.name}`, rng, target.x, target.y, target.id);
-  const actualDefenseLoss = applyArmyCasualties(world, indexes, defenderArmy, defenseLoss, `погибли при обороне ${target.name}`, rng, target.x, target.y, target.id);
+  const actualAttackLoss = applyArmyCasualties(world, indexes, army, attackLoss, `погибли в сражении за ${target.name}`, rng, army.x, army.y);
+  const actualDefenseLoss = applyArmyCasualties(world, indexes, defenderArmy, defenseLoss, `погибли при обороне ${target.name}`, rng, army.x, army.y);
   synchronizeArmyStrength(world, army);
   synchronizeArmyStrength(world, defenderArmy);
   war.attackerLosses += actualAttackLoss;
@@ -467,7 +470,7 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
       entityRefs: [{ kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'war', id: war.id }], importance: 4,
     });
   }
-  addBattlefieldEffects(world, target.x, target.y, actualAttackLoss + actualDefenseLoss, rng, army.id, target.id);
+  addBattlefieldEffects(world, army.x, army.y, actualAttackLoss + actualDefenseLoss, rng, army.id, target.id);
   army.status = 'recovering';
   army.targetSettlementId = undefined;
   army.targetKingdomId = undefined;
@@ -504,6 +507,7 @@ function recoverArmies(world: WorldState): void {
     if (!kingdom || !capital) continue;
     army.x = capital.x;
     army.y = capital.y;
+    ensureArmyOutsideSettlements(world, army);
     army.morale = Math.min(92, army.morale + 2);
     army.supplies = Math.min(100, army.supplies + 8);
 
@@ -898,6 +902,8 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   succession(world, rng);
   onPhase?.('Дворы, вассалы, налоги, приказы и внутренняя политика');
   advanceStateMachine(world, rng, indexes);
+  onPhase?.('Полевые лагеря, отдельные солдаты и походные колонны');
+  advancePhysicalArmySystem(world, rng);
 
   if (schedule.runBooks) writeBooks(world, rng);
   if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);

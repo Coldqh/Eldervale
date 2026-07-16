@@ -15,7 +15,7 @@ const LOCAL_MIN_ZOOM = .65;
 const LOCAL_MAX_ZOOM = 12;
 
 const markerColors: Record<LocalMarker['kind'], string> = {
-  person: '#f2dfae', patrol: '#9fb5a7', group: '#d9c28d', army: '#ded8c5', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#080808', fauna: '#86a76a', resource: '#80b89a', building: '#8e8068', establishment: '#d7a95b', field: '#a9b85c', construction: '#c28b54', cemetery: '#171917', grave: '#050505', item: '#d8bd65', corpse: '#000000', merchant: '#d6a75d',
+  person: '#f2dfae', patrol: '#9fb5a7', group: '#d9c28d', army: '#ded8c5', camp: '#9a825d', monster: '#f07b59', settlement: '#e2bb68', dungeon: '#aa92c2', artifact: '#e6d46d', effect: '#080808', fauna: '#86a76a', resource: '#80b89a', building: '#8e8068', establishment: '#d7a95b', field: '#a9b85c', construction: '#c28b54', cemetery: '#171917', grave: '#050505', item: '#d8bd65', corpse: '#000000', merchant: '#d6a75d',
 };
 
 export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMove, onBack, onSelect }: {
@@ -335,7 +335,7 @@ function markerVisualSize(marker: LocalMarker, cellSize: number): number {
 
 function preferredEntityRef(markers: LocalMarker[]): EntityRef | undefined {
   const priority: Record<LocalMarker['kind'], number> = {
-    person: 100, patrol: 97, group: 100, merchant: 95, monster: 90, army: 80, corpse: 76, item: 72, artifact: 70,
+    person: 100, patrol: 97, group: 100, merchant: 95, monster: 90, army: 80, camp: 64, corpse: 76, item: 72, artifact: 70,
     establishment: 62, construction: 58, building: 55, field: 42, cemetery: 50, grave: 48, dungeon: 45, fauna: 40,
     resource: 35, settlement: 30, effect: 20,
   };
@@ -356,7 +356,7 @@ function drawMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, x0: numb
 }
 
 function MarkerCard({ marker, world, onSelect }: { marker: LocalMarker; world: WorldState; onSelect: (ref: EntityRef) => void }) {
-  const iconKind = marker.kind === 'corpse' ? 'corpse' : marker.kind === 'grave' ? 'grave' : marker.kind === 'cemetery' ? 'cemetery' : marker.kind === 'item' ? 'item' : marker.kind === 'merchant' ? 'travelingMerchant' : marker.kind === 'person' || marker.kind === 'group' ? 'character' : marker.kind === 'patrol' ? 'patrol' : marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'settlement' ? 'building' : marker.kind === 'field' ? 'field' : marker.kind === 'construction' ? 'constructionProject' : marker.kind === 'monster' ? 'monster' : marker.kind === 'army' ? 'army' : marker.kind === 'artifact' ? 'artifact' : marker.kind === 'resource' ? 'ingredient' : marker.kind === 'dungeon' ? 'dungeon' : 'terrain';
+  const iconKind = marker.kind === 'corpse' ? 'corpse' : marker.kind === 'grave' ? 'grave' : marker.kind === 'cemetery' ? 'cemetery' : marker.kind === 'item' ? 'item' : marker.kind === 'merchant' ? 'travelingMerchant' : marker.kind === 'person' || marker.kind === 'group' ? 'character' : marker.kind === 'patrol' ? 'patrol' : marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'settlement' ? 'building' : marker.kind === 'field' ? 'field' : marker.kind === 'construction' ? 'constructionProject' : marker.kind === 'monster' ? 'monster' : marker.kind === 'army' || marker.kind === 'camp' ? 'army' : marker.kind === 'artifact' ? 'artifact' : marker.kind === 'resource' ? 'ingredient' : marker.kind === 'dungeon' ? 'dungeon' : 'terrain';
   return <div className="local-marker-card">
     <div><TextureIcon kind={iconKind} subtype={marker.visualRole} /><span><strong>{marker.label}</strong>{marker.detail && <small>{marker.detail}</small>}</span></div>
     {marker.refs.length > 0 && <div className="local-marker-actions">
@@ -387,5 +387,5 @@ function entityName(world: WorldState, ref: EntityRef): string {
 }
 
 function markerLabel(kind: LocalMarker['kind']): string {
-  return ({ person: 'житель', patrol: 'патруль стражи', group: 'группа жителей', army: 'армия', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'артефакт', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение', field: 'поле', construction: 'стройплощадка', cemetery: 'кладбище', grave: 'могила', item: 'предмет', corpse: 'тело', merchant: 'странствующий торговец' } as const)[kind];
+  return ({ person: 'житель', patrol: 'патруль стражи', group: 'группа жителей', army: 'армия', camp: 'полевое сооружение', monster: 'чудовище', settlement: 'центр поселения', dungeon: 'подземелье', artifact: 'артефакт', effect: 'след события', fauna: 'популяция животных', resource: 'природный ресурс', building: 'здание', establishment: 'заведение', field: 'поле', construction: 'стройплощадка', cemetery: 'кладбище', grave: 'могила', item: 'предмет', corpse: 'тело', merchant: 'странствующий торговец' } as const)[kind];
 }

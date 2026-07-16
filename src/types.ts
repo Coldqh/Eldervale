@@ -6,7 +6,7 @@ export type RelationKind = 'родство' | 'дружба' | 'любовь' | 
 export type SocialContextKind = 'family' | 'household' | 'neighbors' | 'work' | 'market' | 'faith' | 'army' | 'court' | 'travel' | 'crime';
 export type RelationshipStatus = 'distant' | 'stable' | 'close' | 'strained' | 'hostile' | 'broken';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
-export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
+export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail' | 'tent' | 'campfire' | 'latrine' | 'palisade' | 'hitching-post';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
 
@@ -937,6 +937,7 @@ export interface SimulationRuntimeState {
   settlementLifeVersion?: 1;
   stateMachineVersion?: 1;
   socialSystemVersion?: 1;
+  physicalArmyVersion?: 1;
   lastSocialBurialId?: number;
   decisionCoreVersion?: 1;
   mindSystemVersion?: 1;
@@ -1142,6 +1143,57 @@ export interface MilitaryUnit {
   horseCount: number;
   experience: number;
   history: string[];
+}
+
+
+
+export type ArmyCampMode = 'camp' | 'column' | 'battle';
+export type ArmyCampStructureKind = 'soldierTent' | 'officerTent' | 'commandTent' | 'fieldKitchen' | 'infirmary' | 'supplyDepot' | 'workshop' | 'horseLine' | 'wagonPark' | 'latrine' | 'guardPost' | 'campfire';
+export type ArmyActivity = 'отдыхает' | 'тренируется' | 'несёт караул' | 'готовит пищу' | 'лечится' | 'чинит снаряжение' | 'ухаживает за лошадьми' | 'разгружает обоз' | 'идёт в колонне' | 'держит строй';
+
+export interface ArmyCampStructure {
+  id: number;
+  campId: number;
+  armyId: number;
+  kind: ArmyCampStructureKind;
+  localX: number;
+  localY: number;
+  width: number;
+  height: number;
+  capacity: number;
+  condition: number;
+  assignedCharacterIds: number[];
+  inventoryItemIds: number[];
+  history: string[];
+}
+
+export interface ArmyCamp {
+  id: number;
+  armyId: number;
+  kingdomId: number;
+  globalX: number;
+  globalY: number;
+  centerX: number;
+  centerY: number;
+  perimeterRadius: number;
+  mode: ArmyCampMode;
+  structureIds: number[];
+  establishedTick: number;
+  lastUpdatedTick: number;
+  layoutSignature: string;
+  history: string[];
+}
+
+export interface ArmyLocalPosition {
+  armyId: number;
+  characterId: number;
+  globalX: number;
+  globalY: number;
+  localX: number;
+  localY: number;
+  activity: ArmyActivity;
+  formationIndex: number;
+  lastUpdatedTick: number;
 }
 
 export interface SupplyWagon {
@@ -1490,6 +1542,7 @@ export interface LocalCell {
   establishmentId?: number;
   fieldId?: number;
   constructionProjectId?: number;
+  armyCampStructureId?: number;
   resourceIngredientId?: number;
   resourceUnitIndex?: number;
   blocked: boolean;
@@ -1499,7 +1552,7 @@ export interface LocalMarker {
   id: string;
   x: number;
   y: number;
-  kind: 'person' | 'patrol' | 'army' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse' | 'merchant';
+  kind: 'person' | 'patrol' | 'army' | 'camp' | 'monster' | 'settlement' | 'dungeon' | 'artifact' | 'effect' | 'group' | 'fauna' | 'resource' | 'building' | 'establishment' | 'field' | 'construction' | 'cemetery' | 'grave' | 'item' | 'corpse' | 'merchant';
   label: string;
   refs: EntityRef[];
   count?: number;
@@ -1532,7 +1585,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 18;
+  version: 19;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1548,6 +1601,9 @@ export interface WorldState {
   armies: Army[];
   militaryUnits: MilitaryUnit[];
   supplyWagons: SupplyWagon[];
+  armyCamps: ArmyCamp[];
+  armyCampStructures: ArmyCampStructure[];
+  armyLocalPositions: ArmyLocalPosition[];
   monsters: Monster[];
   cemeteries: Cemetery[];
   burials: BurialRecord[];

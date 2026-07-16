@@ -51,6 +51,7 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
 
   applyHistoricalScars(world, tile, cells, width, height, rng);
   applyStoredEffects(world, tile.x, tile.y, 0, cells, width, height);
+  placeArmyCampStructures(world, tile, cells, width, height);
 
   const markers = buildSurfaceMarkers(world, tile, cells, width, height, rng, settlement, dungeon);
   const kingdom = tile.kingdomId ? world.kingdoms.find(item => item.id === tile.kingdomId) : undefined;
@@ -486,6 +487,30 @@ function applyStoredEffects(world: WorldState, globalX: number, globalY: number,
   }
 }
 
+function placeArmyCampStructures(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number): void {
+  const camps = (world.armyCamps ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y && item.mode === 'camp');
+  for (const camp of camps) {
+    const structures = camp.structureIds.map(id => world.armyCampStructures.find(item => item.id === id)).filter((item): item is WorldState['armyCampStructures'][number] => Boolean(item));
+    for (const structure of structures) {
+      const feature: LocalFeature = structure.kind === 'campfire' || structure.kind === 'fieldKitchen' ? 'campfire'
+        : structure.kind === 'latrine' ? 'latrine'
+          : structure.kind === 'horseLine' ? 'hitching-post'
+            : 'tent';
+      for (let dy = 0; dy < structure.height; dy += 1) {
+        for (let dx = 0; dx < structure.width; dx += 1) {
+          const x = structure.localX + dx, y = structure.localY + dy;
+          if (x < 0 || y < 0 || x >= width || y >= height) continue;
+          setCell(cells, width, x, y, {
+            ground: 'dirt', feature: dx === 0 && dy === 0 ? feature : undefined,
+            blocked: structure.kind !== 'campfire' && structure.kind !== 'latrine' && structure.kind !== 'guardPost',
+            armyCampStructureId: structure.id,
+          });
+        }
+      }
+    }
+  }
+}
+
 function buildSurfaceMarkers(
   world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number, rng: RNG,
   settlement?: WorldState['settlements'][number], dungeon?: WorldState['dungeons'][number],
@@ -506,8 +531,9 @@ function buildSurfaceMarkers(
 
   const presentMerchants = settlement ? (world.travelingMerchants ?? []).filter(merchant => merchant.currentSettlementId === settlement.id && merchant.status !== 'в пути') : [];
   const merchantCharacterIds = new Set(presentMerchants.map(merchant => merchant.characterId));
+  const armyCharacterIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
   const liveCharacters = settlement ? world.characters.filter(character => {
-    if (!character.alive || character.settlementId !== settlement.id || merchantCharacterIds.has(character.id)) return false;
+    if (!character.alive || character.settlementId !== settlement.id || merchantCharacterIds.has(character.id) || armyCharacterIds.has(character.id)) return false;
     const anchor = characterAnchorBuilding(world, character);
     if (anchor) return anchor.globalX === tile.x && anchor.globalY === tile.y;
     const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения' }];
@@ -589,17 +615,51 @@ function buildSurfaceMarkers(
     });
   }
 
-  for (const army of world.armies.filter(item => item.x === tile.x && item.y === tile.y)) {
-    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:армия:${army.id}:${tile.x}:${tile.y}`), 5);
-    markers.push({ id: `army-${army.id}`, x: point.x, y: point.y, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], count: army.soldierIds?.length ?? army.strength, detail: `${army.soldierIds?.length ?? 0} именных бойцов · готовность ${Math.round(army.readiness ?? 0)}% · снабжение ${army.supplies}% · ${army.status}`, visualRole: 'army' });
+  for (const camp of (world.armyCamps ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const army = world.armies.find(item => item.id === camp.armyId);
+    if (!army) continue;
+    if (camp.mode === 'camp') {
+      const structures = camp.structureIds.map(id => world.armyCampStructures.find(item => item.id === id)).filter((item): item is WorldState['armyCampStructures'][number] => Boolean(item));
+      for (const structure of structures) {
+        const assignedRefs = structure.assignedCharacterIds.slice(0, 8).map(id => ({ kind: 'character' as const, id }));
+        markers.push({
+          id: `camp-structure-${structure.id}`, x: structure.localX, y: structure.localY, kind: 'camp',
+          label: campStructureLabel(structure.kind), refs: [{ kind: 'army', id: army.id }, ...assignedRefs],
+          count: structure.assignedCharacterIds.length || undefined,
+          detail: `${campStructureLabel(structure.kind)} · вместимость ${structure.capacity} · состояние ${Math.round(structure.condition)}%`,
+          footprintWidth: structure.width, footprintHeight: structure.height, visualRole: structure.kind,
+        });
+      }
+      markers.push({ id: `army-headquarters-${army.id}`, x: camp.centerX, y: camp.centerY, kind: 'army', label: `Штаб: ${army.name}`, refs: [{ kind: 'army', id: army.id }], detail: `${army.soldierIds.length} именных бойцов · полевой лагерь вне поселения · готовность ${Math.round(army.readiness)}%`, visualRole: 'headquarters' });
+    } else {
+      markers.push({ id: `army-formation-${army.id}`, x: camp.centerX, y: camp.centerY, kind: 'army', label: army.name, refs: [{ kind: 'army', id: army.id }], detail: `${army.soldierIds.length} бойцов · ${camp.mode === 'battle' ? 'боевое построение' : 'походная колонна'} · готовность ${Math.round(army.readiness)}%`, visualRole: camp.mode });
+    }
   }
-  for (const wagon of (world.supplyWagons ?? []).filter(item => item.x === tile.x && item.y === tile.y && item.status !== 'уничтожен')) {
-    const point = randomWalkable(cells, width, height, new RNG(`${world.config.seed}:военный-обоз:${wagon.id}:${tile.x}:${tile.y}`), 5);
-    const army = world.armies.find(item => item.id === wagon.armyId);
+
+  for (const position of (world.armyLocalPositions ?? []).filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
+    const character = world.characters.find(item => item.id === position.characterId && item.alive);
+    const army = world.armies.find(item => item.id === position.armyId);
+    if (!character || !army) continue;
+    const unit = character.militaryUnitId ? world.militaryUnits.find(item => item.id === character.militaryUnitId) : undefined;
     markers.push({
-      id: `supply-wagon-${wagon.id}`, x: point.x, y: point.y, kind: 'army', label: `Обоз ${army?.name ?? `№${wagon.id}`}`,
-      refs: [{ kind: 'supplyWagon', id: wagon.id }, ...(army ? [{ kind: 'army' as const, id: army.id }] : [])], count: wagon.wagonCount,
-      detail: `${wagon.wagonCount} повозок · ${wagon.horseCount} лошадей · состояние ${Math.round(wagon.condition)}% · ${wagon.status}`, visualRole: 'wagon',
+      id: `army-soldier-${army.id}-${character.id}`, x: position.localX, y: position.localY, kind: 'person', label: character.name,
+      refs: [{ kind: 'character', id: character.id }, { kind: 'army', id: army.id }, ...(unit ? [{ kind: 'militaryUnit' as const, id: unit.id }] : [])],
+      detail: `${character.militaryRole ?? 'солдат'} · ${position.activity}${unit ? ` · ${unit.name}` : ''}`,
+      visualRole: character.visualRole ?? 'soldier',
+    });
+  }
+
+  for (const wagon of (world.supplyWagons ?? []).filter(item => item.x === tile.x && item.y === tile.y && item.status !== 'уничтожен')) {
+    const army = world.armies.find(item => item.id === wagon.armyId);
+    const camp = world.armyCamps.find(item => item.armyId === wagon.armyId);
+    const park = camp?.structureIds.map(id => world.armyCampStructures.find(item => item.id === id)).find(item => item?.kind === 'wagonPark');
+    const ordinal = Math.max(0, army?.supplyWagonIds.indexOf(wagon.id) ?? 0);
+    const point = park ? { x: park.localX + ordinal % Math.max(1, park.width), y: park.localY + park.height + Math.floor(ordinal / Math.max(1, park.width)) }
+      : { x: (camp?.centerX ?? Math.floor(width / 2)) + 4 + ordinal, y: (camp?.centerY ?? Math.floor(height / 2)) + 5 };
+    markers.push({
+      id: `supply-wagon-${wagon.id}`, x: point.x, y: point.y, kind: 'army', label: `Повозка обоза ${army?.name ?? `№${wagon.id}`}`,
+      refs: [{ kind: 'supplyWagon', id: wagon.id }, ...(army ? [{ kind: 'army' as const, id: army.id }] : [])],
+      detail: `${wagon.horseCount} лошадей · состояние ${Math.round(wagon.condition)}% · ${wagon.status}`, visualRole: 'wagon',
     });
   }
 
@@ -640,6 +700,14 @@ function buildSurfaceMarkers(
   return markers;
 }
 
+
+function campStructureLabel(kind: WorldState['armyCampStructures'][number]['kind']): string {
+  return ({
+    soldierTent: 'Солдатская палатка', officerTent: 'Офицерская палатка', commandTent: 'Командирская палатка',
+    fieldKitchen: 'Полевая кухня', infirmary: 'Лазарет', supplyDepot: 'Склад припасов', workshop: 'Ремонтная палатка',
+    horseLine: 'Коновязь', wagonPark: 'Стоянка обоза', latrine: 'Отхожее место', guardPost: 'Караульный пост', campfire: 'Костёр',
+  } as const)[kind];
+}
 
 function characterAnchorBuilding(world: WorldState, character: WorldState['characters'][number]): WorldState['buildings'][number] | undefined {
   const working = character.age >= 14 && character.profession !== 'child';
@@ -782,7 +850,7 @@ export function localCellSummary(map: LocalMapData, x: number, y: number): { tit
   const groundNames: Record<LocalGround, string> = { grass: 'трава', dirt: 'земля', sand: 'песок', water: 'вода', mud: 'грязь', snow: 'снег', stone: 'камень', road: 'дорога', floor: 'пол', ash: 'пепел' };
   const featureNames: Partial<Record<LocalFeature, string>> = {
     tree: 'дерево', bush: 'кустарник', rock: 'скала', reeds: 'камыш', wall: 'стена', door: 'дверь', field: 'поле', 'tilled-soil': 'вспаханная земля', seedlings: 'всходы', crop: 'растущая культура', 'ripe-crop': 'созревший урожай', 'construction-foundation': 'фундамент стройки', 'construction-frame': 'каркас стройки', 'construction-wall': 'незавершённые стены', scaffold: 'строительные леса', rubble: 'развалины', looted: 'разграбленный участок', fire: 'огонь', blood: 'кровь', body: 'тело', bones: 'кости', grave: 'могила', cemetery: 'ограда кладбища', chest: 'сундук или предметы',
-    'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа',
+    'stairs-down': 'спуск вниз', 'stairs-up': 'подъём вверх', bridge: 'мост', herb: 'лекарственное растение', berry: 'ягоды', mushroom: 'грибы', 'animal-trail': 'звериная тропа', tent: 'полевая палатка', campfire: 'лагерный костёр', latrine: 'отхожее место', palisade: 'частокол', 'hitching-post': 'коновязь',
   };
   const lines = [`Основа: ${groundNames[cell.ground]}`];
   if (cell.feature) lines.push(`Объект: ${featureNames[cell.feature] ?? cell.feature}`);

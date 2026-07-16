@@ -27,4 +27,6 @@ for (let batch = 0; batch < 10; batch += 1) {
 
 assert.ok(world.history.fallenRealms.some(realm => realm.formerKingdomId !== undefined), 'вымершая держава должна перейти в исторический архив');
 assert.ok(world.relationships.every(relation => relation.trust !== undefined), 'социальные связи должны сохраняться после долгой симуляции');
+assert.ok(world.armies.every(army => !world.tiles[army.y * world.config.width + army.x]?.settlementId), 'армии не должны входить в города после долгой симуляции');
+assert.equal(world.armyLocalPositions.length, world.armies.reduce((sum, army) => sum + army.soldierIds.length, 0), 'все оставшиеся солдаты должны отображаться отдельно');
 console.log(`OK LONG: год ${world.year}, живых ${world.characters.length}, держав ${world.kingdoms.length}, решений ${world.decisions.length}.`);

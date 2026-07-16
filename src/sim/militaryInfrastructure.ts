@@ -163,8 +163,8 @@ function recruitToArmy(world: WorldState, army: Army, capital: Settlement, rng: 
     const contract = runtime.activeEmploymentByCharacter.get(character.id);
     if (contract) contract.active = false;
     character.profession = 'soldier';
-    character.workplace = army.garrisonBuildingId ? runtime.buildingById.get(army.garrisonBuildingId)?.name ?? 'казармы' : 'военный лагерь';
-    character.workplaceBuildingId = army.garrisonBuildingId;
+    character.workplace = `полевой лагерь армии ${army.name}`;
+    character.workplaceBuildingId = undefined;
     character.employerEstablishmentId = undefined;
     character.employmentContractId = undefined;
     character.serviceStatus = 'гарнизон';
@@ -173,8 +173,6 @@ function recruitToArmy(world: WorldState, army: Army, capital: Settlement, rng: 
     character.militaryRole = chooseRole(character, army, rng);
     character.visualRole = visualRole(character);
     if (!army.soldierIds.includes(character.id)) army.soldierIds.push(character.id);
-    const garrison = army.garrisonBuildingId ? runtime.buildingById.get(army.garrisonBuildingId) : undefined;
-    if (garrison && !garrison.workerIds.includes(character.id)) garrison.workerIds.push(character.id);
     indexes?.workersBySettlementAndProfession.get(character.settlementId)?.get('soldier')?.push(character);
   }
   if (selected.length && !initial) {
@@ -341,7 +339,7 @@ function ensureSupplyWagons(world: WorldState, army: Army, capital: Settlement, 
     addMaterialItem(world, 'military_rations', Math.max(40, army.soldierIds.length * 4), capital.id, { supplyWagonId: wagon.id }, 'запас обоза', 55, runtime.itemById, true);
     addMaterialItem(world, 'water', Math.max(30, army.soldierIds.length * 3), capital.id, { supplyWagonId: wagon.id }, 'запас обоза', 60, runtime.itemById, true);
     addMaterialItem(world, 'bandages', Math.max(8, Math.ceil(army.soldierIds.length / 5)), capital.id, { supplyWagonId: wagon.id }, 'медицинский запас обоза', 62, runtime.itemById, true);
-    addMaterialItem(world, 'tent', Math.max(4, Math.ceil(army.soldierIds.length / 12)), capital.id, { supplyWagonId: wagon.id }, 'походное имущество', 58, runtime.itemById, true);
+    addMaterialItem(world, 'tent', Math.max(4, Math.ceil(army.soldierIds.length / 6)), capital.id, { supplyWagonId: wagon.id }, 'походное имущество', 58, runtime.itemById, true);
     addMaterialItem(world, 'horse_feed', Math.max(20, army.soldierIds.length), capital.id, { supplyWagonId: wagon.id }, 'корм обоза', 52, runtime.itemById, true);
     addMaterialItem(world, 'wagon_parts', 2, capital.id, { supplyWagonId: wagon.id }, 'ремонтный комплект обоза', 60, runtime.itemById, true);
   }
@@ -459,7 +457,7 @@ function resupplyAtCapital(world: WorldState, army: Army, capital: Settlement, r
 function restockWagon(world: WorldState, wagon: SupplyWagon, capital: Settlement, soldierCount: number, rng: RNG): void {
   const targets: Array<[string, number]> = [
     ['military_rations', soldierCount * 4], ['water', soldierCount * 3], ['bandages', Math.ceil(soldierCount / 5)],
-    ['tent', Math.ceil(soldierCount / 12)], ['horse_feed', Math.max(20, soldierCount)], ['wagon_parts', 2],
+    ['tent', Math.ceil(soldierCount / 6)], ['horse_feed', Math.max(20, soldierCount)], ['wagon_parts', 2],
   ];
   for (const [templateId, target] of targets) {
     const current = quantityInInventory(world, wagon.inventoryItemIds, [templateId]);

@@ -13,6 +13,7 @@ import { ensureAllBuildingFootprints } from './spatial';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
+import { initializePhysicalArmySystem } from './physicalArmy';
 import { emptyCharacterKnowledge, initializeKnowledgeSystem } from './knowledgeSystem';
 import { initializeSettlementLife } from './settlementLife';
 import { initializeStateMachine } from './stateMachine';
@@ -26,11 +27,11 @@ export function migrateWorld(input: unknown): WorldState {
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-18`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-19`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 18;
+  localized.version = 19;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -80,6 +81,9 @@ export function migrateWorld(input: unknown): WorldState {
   localized.stateDeltas ??= [];
   localized.militaryUnits ??= [];
   localized.supplyWagons ??= [];
+  localized.armyCamps ??= [];
+  localized.armyCampStructures ??= [];
+  localized.armyLocalPositions ??= [];
   localized.territoryHistory ??= [];
   localized.nextIds ??= {};
   localized.simulation ??= createSimulationRuntime({ year: localized.year ?? localized.config.historyYears ?? 1, month: localized.month ?? 1 });
@@ -90,6 +94,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 16) localized.simulation.stateMachineVersion = undefined;
   if (sourceVersion < 17) { localized.simulation.decisionCoreVersion = undefined; localized.simulation.mindSystemVersion = undefined; }
   if (sourceVersion < 18) { localized.simulation.socialSystemVersion = undefined; localized.simulation.lastSocialBurialId = undefined; }
+  if (sourceVersion < 19) localized.simulation.physicalArmyVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -246,6 +251,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.stateDelta = Math.max(0, ...localized.stateDeltas.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.militaryUnit = Math.max(0, ...localized.militaryUnits.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.supplyWagon = Math.max(0, ...localized.supplyWagons.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.armyCamp = Math.max(0, ...localized.armyCamps.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.armyCampStructure = Math.max(0, ...localized.armyCampStructures.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.territoryChange = Math.max(0, ...localized.territoryHistory.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
@@ -258,6 +265,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeDecisionCore(localized as WorldState);
   initializeMindSystem(localized as WorldState);
   initializeMilitaryInfrastructure(localized as WorldState, new RNG(`${localized.config.seed}:переход-военная-инфраструктура-v1`));
+  initializePhysicalArmySystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-физические-армии-v1`));
   pruneEmptyMaterialItems(localized as WorldState);
   repairMigratedItemLocations(localized as WorldState, sourceVersion);
   ensureCemeteries(localized as WorldState, rng);

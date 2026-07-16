@@ -11,6 +11,7 @@ import { generatePhysicalEconomy } from './materialEconomy';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
+import { initializePhysicalArmySystem } from './physicalArmy';
 import { initializeKnowledgeSystem } from './knowledgeSystem';
 import { initializeSettlementLife } from './settlementLife';
 import { initializeStateMachine } from './stateMachine';
@@ -99,6 +100,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeMindSystem(world);
   onProgress?.('Казармы, замки и реальные гарнизоны', 97.8, 100, 'формируем подразделения, арсеналы, обозы и снабжение');
   initializeMilitaryInfrastructure(world, new RNG(`${config.seed}:военная-инфраструктура-v1`));
+  initializePhysicalArmySystem(world, new RNG(`${config.seed}:физические-армии-v1`));
   onProgress?.('Кладбища и архив павших', 98.2, 100, 'переносим умерших и убитых существ из активной симуляции');
   ensureCemeteries(world, rng);
   compactDeadEntities(world, rng);
@@ -133,7 +135,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 18;
+  world.version = 19;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

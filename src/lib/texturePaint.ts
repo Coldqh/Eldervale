@@ -84,6 +84,11 @@ export function paintFeature(ctx: CanvasRenderingContext2D, feature: LocalFeatur
   else if (feature === 'fire') { ctx.fillStyle = '#e87842'; ctx.beginPath(); ctx.moveTo(cx, y + size * .08); ctx.quadraticCurveTo(x + size * .84, y + size * .62, cx, y + size * .9); ctx.quadraticCurveTo(x + size * .16, y + size * .62, cx, y + size * .08); ctx.fill(); }
   else if (feature === 'herb' || feature === 'berry' || feature === 'mushroom') { ctx.strokeStyle = feature === 'berry' ? '#9b4f6b' : '#75a95f'; ctx.fillStyle = feature === 'mushroom' ? '#b49a73' : ctx.strokeStyle; ctx.lineWidth = Math.max(1, size * .08); ctx.beginPath(); ctx.moveTo(cx, y + size * .85); ctx.lineTo(cx, y + size * .3); ctx.stroke(); ctx.beginPath(); ctx.arc(x + size * .4, y + size * .45, size * .16, 0, Math.PI * 2); ctx.arc(x + size * .62, y + size * .35, size * .15, 0, Math.PI * 2); ctx.fill(); }
   else if (feature === 'rock') { ctx.fillStyle = '#3e4140'; ctx.beginPath(); ctx.moveTo(x + size * .15, y + size * .78); ctx.lineTo(x + size * .35, y + size * .25); ctx.lineTo(x + size * .72, y + size * .18); ctx.lineTo(x + size * .88, y + size * .78); ctx.closePath(); ctx.fill(); }
+  else if (feature === 'tent') { ctx.fillStyle = '#8f7653'; ctx.strokeStyle = '#3d3326'; ctx.lineWidth = Math.max(1, size * .08); ctx.beginPath(); ctx.moveTo(x + size * .08, y + size * .84); ctx.lineTo(cx, y + size * .14); ctx.lineTo(x + size * .92, y + size * .84); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx, y + size * .14); ctx.lineTo(cx, y + size * .84); ctx.stroke(); }
+  else if (feature === 'campfire') { ctx.fillStyle = '#5c3b24'; ctx.fillRect(x + size * .18, y + size * .68, size * .64, size * .1); ctx.fillStyle = '#e87842'; ctx.beginPath(); ctx.moveTo(cx, y + size * .14); ctx.quadraticCurveTo(x + size * .78, y + size * .62, cx, y + size * .82); ctx.quadraticCurveTo(x + size * .22, y + size * .62, cx, y + size * .14); ctx.fill(); }
+  else if (feature === 'latrine') { ctx.strokeStyle = '#342b20'; ctx.lineWidth = Math.max(1, size * .08); ctx.strokeRect(x + size * .18, y + size * .28, size * .64, size * .5); ctx.beginPath(); ctx.moveTo(x + size * .22, y + size * .7); ctx.lineTo(x + size * .78, y + size * .36); ctx.stroke(); }
+  else if (feature === 'palisade') { ctx.strokeStyle = '#60492f'; ctx.lineWidth = Math.max(1.5, size * .12); for (let i = 0; i < 4; i += 1) { const xx = x + size * (.15 + i * .23); ctx.beginPath(); ctx.moveTo(xx, y + size * .88); ctx.lineTo(xx, y + size * .18); ctx.stroke(); } }
+  else if (feature === 'hitching-post') { ctx.strokeStyle = '#59442c'; ctx.lineWidth = Math.max(1.5, size * .12); ctx.beginPath(); ctx.moveTo(x + size * .2, y + size * .82); ctx.lineTo(x + size * .2, y + size * .28); ctx.lineTo(x + size * .8, y + size * .28); ctx.lineTo(x + size * .8, y + size * .82); ctx.stroke(); }
   else if (feature === 'stairs-down' || feature === 'stairs-up') { ctx.fillStyle = gold; for (let i = 0; i < 3; i += 1) ctx.fillRect(x + size * (.16 + i * .12), y + size * (.2 + i * .22), size * (.68 - i * .12), size * .1); }
   else { ctx.fillStyle = '#536a4a'; ctx.beginPath(); ctx.arc(cx, cy, size * .23, 0, Math.PI * 2); ctx.fill(); }
   ctx.restore();
@@ -110,6 +115,13 @@ export function paintMarker(ctx: CanvasRenderingContext2D, marker: LocalMarker, 
       else { ctx.beginPath(); ctx.moveTo(cx + r * .7, cy - r * .1); ctx.lineTo(cx + r * .7, cy + r * 1.2); ctx.stroke(); }
     }
     if (marker.kind === 'merchant') { ctx.strokeStyle = '#3d2912'; ctx.lineWidth = Math.max(1, r * .18); ctx.beginPath(); ctx.moveTo(cx - r * .85, cy + r * .2); ctx.lineTo(cx + r * .85, cy + r * .2); ctx.stroke(); }
+  }
+  else if (marker.kind === 'camp') {
+    const role = marker.visualRole ?? '';
+    ctx.strokeStyle = '#30281d'; ctx.fillStyle = role === 'campfire' || role === 'fieldKitchen' ? '#c86d3b' : role === 'horseLine' || role === 'wagonPark' ? '#6f573c' : '#9a825d'; ctx.lineWidth = Math.max(1, size * .08);
+    if (role === 'campfire' || role === 'fieldKitchen') { ctx.beginPath(); ctx.arc(cx, cy, r * .75, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    else if (role === 'guardPost') { ctx.fillRect(cx - r * .25, cy - r, r * .5, r * 2); ctx.strokeRect(cx - r * .25, cy - r, r * .5, r * 2); }
+    else { ctx.beginPath(); ctx.moveTo(x0 + size * .08, y0 + h - size * .08); ctx.lineTo(cx, y0 + size * .08); ctx.lineTo(x0 + w - size * .08, y0 + h - size * .08); ctx.closePath(); ctx.fill(); ctx.stroke(); }
   }
   else if (marker.kind === 'building' || marker.kind === 'establishment' || marker.kind === 'settlement' || marker.kind === 'construction') { ctx.fillStyle = marker.kind === 'construction' ? '#c28b54' : marker.kind === 'establishment' ? '#d7a95b' : '#8e8068'; ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx + r, cy + r); ctx.lineTo(cx - r, cy + r); ctx.closePath(); ctx.fill(); ctx.stroke(); }
   else if (marker.kind === 'field') { ctx.fillStyle = '#a9b85c'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
