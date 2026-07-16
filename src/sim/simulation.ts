@@ -16,9 +16,12 @@ import {
 import { prepareMonthSchedule, worldTick } from './scheduler';
 import { advanceModernTerritories, captureTerritoryAroundSettlement } from './territory';
 import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
+import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
-  return appendCausalEvent(world, data);
+  const event = appendCausalEvent(world, data);
+  registerWorldEventKnowledge(world, event);
+  return event;
 }
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -211,7 +214,7 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
         homeBuildingId: parentA.homeBuildingId ?? parentB.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
         needs: { hunger: 8, thirst: 8, rest: 8, warmth: 8, safety: 8, social: 12, lastUpdatedTick: world.year * 12 + world.month - 1 },
         schedule: { wakeHour: 7, workStartHour: 0, workEndHour: 0, sleepHour: 21, restDay: 1 + (world.nextIds.character % 7), currentActivity: 'живёт в семье и учится' },
-        wallet: 0, equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 28, condition: 72, socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: world.year * 12 + world.month - 1 },
+        wallet: 0, equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 28, condition: 72, socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: world.year * 12 + world.month - 1 }, knowledge: { factIds: [], memoryIds: [], opinions: [], detailed: false, lastGossipTick: world.year * 12 + world.month - 1 },
       };
       parentA.childIds.push(child.id);
       parentB.childIds.push(child.id);
@@ -523,11 +526,9 @@ function monsterActions(world: WorldState, rng: RNG, indexes: WorldIndexes, dueM
       consequences: ['потеря припасов', 'гибель жителей', 'правитель отправляет героя или армию', 'опасность торговых путей выросла'],
       entityRefs: [{ kind: 'monster', id: monster.id }, { kind: 'settlement', id: target.id }, { kind: 'kingdom', id: target.kingdomId }], importance: isDragon ? 5 : monster.tier === 'boss' ? 4 : 3,
     });
-    const majorThreat = isDragon || monster.tier === 'boss' || monster.tier === 'miniboss' || monster.kills >= 5 || deaths >= 4;
-    if (majorThreat) {
-      dispatchHero(world, monster.id, target.kingdomId, rng, indexes);
-      if (world.monsters.some(item => item.id === monster.id)) dispatchArmyAgainstMonster(world, monster.id, target.kingdomId);
-    }
+    // Реакция правителя больше не происходит мгновенно. Событие создаёт
+    // свидетельства, слухи и официальное донесение. Герой или армия будут
+    // отправлены только после доставки и подтверждения сведений в столице.
   }
 }
 
@@ -807,6 +808,15 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
   recoverArmies(world);
   monsterActions(world, rng, indexes, schedule.dueMonsterIds);
   normalizeKingdomCapitals(world);
+  onPhase?.('Память, слухи, письма и донесения');
+  const knowledge = advanceKnowledgeSystem(world, rng, indexes, detailed);
+  for (const threat of knowledge.confirmedMonsterThreats) {
+    const monster = world.monsters.find(item => item.id === threat.monsterId);
+    if (!monster?.alive) { markKnowledgeDecision(world, threat.factId, 'К моменту решения угроза уже исчезла.'); continue; }
+    dispatchHero(world, threat.monsterId, threat.kingdomId, rng, indexes);
+    if (world.monsters.some(item => item.id === threat.monsterId)) dispatchArmyAgainstMonster(world, threat.monsterId, threat.kingdomId);
+    markKnowledgeDecision(world, threat.factId, `Правитель получил подтверждённое донесение и отдал приказ в ${world.year}.${String(world.month).padStart(2, '0')}.`);
+  }
   onPhase?.('Кладбища, погребения и исчезновение следов');
   advanceBurials(world, rng);
   succession(world, rng);

@@ -34,6 +34,9 @@ function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', s
   if (kind === 'ingredient') return <><path d="M16 28V12M16 17c-7 0-10-4-10-9 7 0 10 4 10 9Zm0 4c7 0 10-4 10-9-7 0-10 4-10 9Z"/></>;
   if (kind === 'kingdom' || kind === 'dynasty') return <><path d="m5 10 6 5 5-10 5 10 6-5-3 17H8z"/><path className="texture-cut" d="M9 22h14"/></>;
   if (kind === 'war') return <><path d="m7 5 18 22M25 5 7 27"/><path className="texture-cut" d="m5 9 4-4m14 0 4 4M5 23l4 4m14 0 4-4"/></>;
+  if (kind === 'knowledgeFact') return <><circle cx="16" cy="16" r="10"/><path className="texture-cut" d="M16 9v8m0 5v1M9 16h14"/></>;
+  if (kind === 'rumor') return <><path d="M4 11c5-6 9 6 14 0s8 1 10-3M4 18c5-6 9 6 14 0s8 1 10-3M4 25c5-6 9 6 14 0s8 1 10-3"/></>;
+  if (kind === 'message') return <><path d="M4 8h24v17H4z"/><path className="texture-cut" d="m5 10 11 8 11-8M5 24l8-8m14 8-8-8"/></>;
   if (kind === 'tradeRoute') return <><path d="M5 23c5-13 8 5 13-8s7 1 9-7"/><circle cx="5" cy="23" r="3"/><circle cx="27" cy="8" r="3"/></>;
   if (kind === 'household') return <><path d="M4 16 16 6l12 10v12H4z"/><circle className="texture-cut" cx="12" cy="20" r="3"/><circle className="texture-cut" cx="20" cy="20" r="3"/></>;
   if (kind === 'terrain') return <><path d="M2 23 10 11l6 7 5-9 9 14v7H2z"/><path className="texture-cut" d="M2 25c7-3 12 3 18 0s7 0 10-1"/></>;

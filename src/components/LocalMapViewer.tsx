@@ -370,10 +370,13 @@ function entityName(world: WorldState, ref: EntityRef): string {
   const collections: Record<EntityRef['kind'], readonly { id: number; name?: string; title?: string }[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
-    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants, militaryUnit: world.militaryUnits, supplyWagon: world.supplyWagons,
+    animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants, militaryUnit: world.militaryUnits, supplyWagon: world.supplyWagons, knowledgeFact: world.knowledgeFacts, rumor: world.rumors, message: world.messages,
   };
   let entity = collections[ref.kind].find(item => item.id === ref.id);
   if (!entity && (ref.kind === 'character' || ref.kind === 'monster')) entity = world.burials.find(item => item.subjectKind === ref.kind && item.subjectId === ref.id);
+  if (ref.kind === 'knowledgeFact') return world.knowledgeFacts.find(item => item.id === ref.id)?.statement ?? `знание ${ref.id}`;
+  if (ref.kind === 'rumor') return world.rumors.find(item => item.id === ref.id)?.text ?? `слух ${ref.id}`;
+  if (ref.kind === 'message') return `${world.messages.find(item => item.id === ref.id)?.kind ?? 'сообщение'} ${ref.id}`;
   return entity?.name ?? entity?.title ?? `${ref.kind} ${ref.id}`;
 }
 

@@ -360,6 +360,44 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
 
   const householdById = new Map(world.households.map(item => [item.id, item]));
   const buildingById = new Map(world.buildings.map(item => [item.id, item]));
+  const establishmentById = new Map(world.establishments.map(item => [item.id, item]));
+  const itemById = new Map(world.items.map(item => [item.id, item]));
+
+  const deadMerchants = (world.travelingMerchants ?? []).filter(merchant => deadIds.has(merchant.characterId));
+  for (const merchant of deadMerchants) {
+    const owner = deadById.get(merchant.characterId);
+    const household = owner?.householdId && !emptyHouseholdIds.has(owner.householdId) ? householdById.get(owner.householdId) : undefined;
+    const destination = world.buildings
+      .filter(building => building.settlementId === merchant.currentSettlementId && building.condition > 20)
+      .sort((a, b) => Number(['market', 'shop', 'warehouse', 'inn', 'tavern'].includes(b.type)) - Number(['market', 'shop', 'warehouse', 'inn', 'tavern'].includes(a.type)) || a.id - b.id)[0];
+    const establishment = destination?.establishmentId ? establishmentById.get(destination.establishmentId) : undefined;
+    for (const itemId of merchant.wagonInventoryItemIds) {
+      const item = itemById.get(itemId);
+      if (!item || item.quantity <= 0) continue;
+      item.ownerCharacterId = undefined;
+      item.equippedByCharacterId = undefined;
+      item.householdId = undefined;
+      item.settlementId = merchant.currentSettlementId;
+      item.buildingId = destination?.id;
+      item.establishmentId = establishment?.id;
+      if (establishment && !establishment.inventoryItemIds.includes(item.id)) establishment.inventoryItemIds.push(item.id);
+      else if (destination && !destination.inventoryItemIds.includes(item.id)) destination.inventoryItemIds.push(item.id);
+      else if (household) {
+        item.householdId = household.id;
+        item.buildingId = household.homeBuildingId;
+        if (!household.inventoryItemIds.includes(item.id)) household.inventoryItemIds.push(item.id);
+      }
+      item.history.push(`Груз остался после смерти странствующего торговца ${owner?.name ?? merchant.characterId}.`);
+    }
+    if (household && merchant.cash > 0) {
+      household.wealth += merchant.cash;
+      household.history.push(`Получено ${Math.round(merchant.cash)} крон после смерти странствующего торговца ${owner?.name ?? merchant.characterId}.`);
+    }
+  }
+  if (deadMerchants.length) {
+    const deadMerchantIds = new Set(deadMerchants.map(merchant => merchant.id));
+    world.travelingMerchants = world.travelingMerchants.filter(merchant => !deadMerchantIds.has(merchant.id));
+  }
   const armyBySoldierId = new Map<number, WorldState['armies'][number]>();
   for (const army of world.armies) for (const soldierId of army.soldierIds ?? []) armyBySoldierId.set(soldierId, army);
   for (const item of world.items) if (item.ownerCharacterId && deadIds.has(item.ownerCharacterId)) {
@@ -443,7 +481,6 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   for (const survivor of world.characters) survivor.relationshipIds = survivor.relationshipIds.filter(id => !removedRelations.has(id));
 
   if (emptyHouseholdIds.size) {
-    const itemById = new Map(world.items.map(item => [item.id, item]));
     for (const household of world.households.filter(item => emptyHouseholdIds.has(item.id))) {
       const building = household.homeBuildingId ? buildingById.get(household.homeBuildingId) : undefined;
       for (const itemId of household.inventoryItemIds) {

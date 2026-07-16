@@ -371,7 +371,7 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
         skills: { [age < 14 ? 'child' : professions[characterId % professions.length]!]: Math.max(1, Math.min(100, rng.int(6, 42) + Math.floor(age / 3))) },
         needs: { hunger: 10, thirst: 8, rest: 10, warmth: 10, safety: 12, social: 16, lastUpdatedTick: config.historyYears * 12 },
         schedule: { wakeHour: 6, workStartHour: age >= 14 ? 8 : 0, workEndHour: age >= 14 ? 17 : 0, sleepHour: 22, restDay: 1 + characterId % 7, currentActivity: age >= 14 ? 'занят обычной работой' : 'живёт в семье и учится' },
-        wallet: age < 14 ? 0 : rng.int(0, 24), equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 40, condition: rng.int(35, 82), socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: config.historyYears * 12 },
+        wallet: age < 14 ? 0 : rng.int(0, 24), equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 40, condition: rng.int(35, 82), socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: config.historyYears * 12 }, knowledge: { factIds: [], memoryIds: [], opinions: [], detailed: false, lastGossipTick: config.historyYears * 12 },
       });
     }
     const locals = characters.filter(character => character.settlementId === settlement.id);
@@ -565,11 +565,11 @@ export function generateWorld(config: WorldConfig, onProgress?: GenerationProgre
 
   report('Связывание причин и проверка мира', 94, `${events.length.toLocaleString('ru-RU')} исторических событий`);
   const world: WorldState = {
-    version: 13, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
-    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, militaryUnits: [], supplyWagons: [], monsters, cemeteries: [], burials: [], animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], fields: [], constructionProjects: [], items: [], productionRecipes: [], employments: [], shipments: [], travelingMerchants: [], marketTransactions: [], territoryHistory: [], events, localMapChanges: [],
+    version: 14, language: 'ru', appVersion: APP_VERSION, config, name: `Мир ${placeName(rng)}`, year: config.historyYears, month: 1,
+    tiles, kingdoms, settlements, characters, relationships, dynasties, armies, militaryUnits: [], supplyWagons: [], monsters, cemeteries: [], burials: [], animalPopulations, ingredients, alchemyRecipes, artifacts, books, dungeons, wars, tradeRoutes, buildings: [], households: [], establishments: [], fields: [], constructionProjects: [], items: [], productionRecipes: [], employments: [], shipments: [], travelingMerchants: [], marketTransactions: [], knowledgeFacts: [], memories: [], rumors: [], messages: [], settlementKnowledge: [], territoryHistory: [], events, localMapChanges: [],
     simulation: createSimulationRuntime({ year: config.historyYears, month: 1 }),
     history: { engineVersion: 1, generatedYears: config.historyYears, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },
-    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1, building: 1, household: 1, establishment: 1, item: 1, productionRecipe: 1, employment: 1, shipment: 1, travelingMerchant: 1, marketTransaction: 1, militaryUnit: 1, supplyWagon: 1, field: 1, constructionProject: 1, territoryChange: 1, cemetery: 1, burial: 1 },
+    nextIds: { event: eventId, character: characterId, relationship: relationships.length + 1, dynasty: dynasties.length + 1, tradeRoute: tradeRoutes.length + 1, war: wars.length + 1, artifact: artifacts.length + 1, book: books.length + 1, animalPopulation: animalPopulations.length + 1, ingredient: ingredients.length + 1, recipe: alchemyRecipes.length + 1, building: 1, household: 1, establishment: 1, item: 1, productionRecipe: 1, employment: 1, shipment: 1, travelingMerchant: 1, marketTransaction: 1, knowledgeFact: 1, memory: 1, rumor: 1, message: 1, militaryUnit: 1, supplyWagon: 1, field: 1, constructionProject: 1, territoryChange: 1, cemetery: 1, burial: 1 },
   };
   report('Мир готов', 100);
   return world;

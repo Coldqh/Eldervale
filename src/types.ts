@@ -1,7 +1,7 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon';
+export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' | 'stone' | 'road' | 'floor' | 'ash';
 export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail';
@@ -56,6 +56,109 @@ export interface MarketTransaction {
   purpose: string;
 }
 
+
+
+
+export type KnowledgeTopic = 'событие' | 'чудовище' | 'личность' | 'государство' | 'поселение' | 'дорога' | 'война' | 'торговля' | 'тайна' | 'место' | 'закон';
+export type KnowledgeSourceKind = 'свидетель' | 'слух' | 'письмо' | 'донесение' | 'указ' | 'книга' | 'торговец' | 'солдат' | 'жрец' | 'чиновник' | 'личный опыт';
+export type RumorStatus = 'местный' | 'в пути' | 'затих' | 'подтверждён' | 'опровергнут';
+export type MessageKind = 'письмо' | 'донесение' | 'королевский указ' | 'военный рапорт' | 'торговая весть' | 'тайное сообщение';
+
+export interface KnowledgeFact {
+  id: number;
+  topic: KnowledgeTopic;
+  subjectRef?: EntityRef;
+  eventId?: number;
+  statement: string;
+  canonicalStatement: string;
+  truth: number;
+  verified: boolean;
+  importance: number;
+  secrecy: number;
+  originSettlementId?: number;
+  originCharacterId?: number;
+  createdTick: number;
+  x?: number;
+  y?: number;
+  tags: string[];
+  history: string[];
+}
+
+export interface PersonalMemory {
+  id: number;
+  characterId: number;
+  factId?: number;
+  eventId?: number;
+  kind: 'встреча' | 'опасность' | 'долг' | 'спасение' | 'предательство' | 'потеря' | 'война' | 'работа' | 'семья' | 'слух';
+  summary: string;
+  learnedTick: number;
+  sourceKind: KnowledgeSourceKind;
+  sourceCharacterId?: number;
+  confidence: number;
+  emotionalWeight: number;
+  distortion: number;
+  private: boolean;
+  lastRecalledTick: number;
+}
+
+export interface CharacterOpinion {
+  target: EntityRef;
+  trust: number;
+  fear: number;
+  respect: number;
+  affinity: number;
+  reason: string;
+  updatedTick: number;
+}
+
+export interface CharacterKnowledgeState {
+  factIds: number[];
+  memoryIds: number[];
+  opinions: CharacterOpinion[];
+  detailed: boolean;
+  lastGossipTick: number;
+}
+
+export interface Rumor {
+  id: number;
+  factId: number;
+  text: string;
+  originSettlementId: number;
+  currentSettlementId: number;
+  carrierCharacterId?: number;
+  confidence: number;
+  distortion: number;
+  spreadCount: number;
+  status: RumorStatus;
+  createdTick: number;
+  lastSpreadTick: number;
+  history: string[];
+}
+
+export interface Message {
+  id: number;
+  kind: MessageKind;
+  senderCharacterId?: number;
+  recipientCharacterId?: number;
+  recipientKingdomId?: number;
+  fromSettlementId: number;
+  toSettlementId: number;
+  knowledgeFactIds: number[];
+  departedTick: number;
+  arrivalTick: number;
+  status: 'готовится' | 'в пути' | 'доставлено' | 'перехвачено' | 'утрачено';
+  reliability: number;
+  sealed: boolean;
+  history: string[];
+}
+
+export interface SettlementKnowledge {
+  settlementId: number;
+  factIds: number[];
+  verifiedFactIds: number[];
+  rumorIds: number[];
+  lastUpdatedTick: number;
+}
 
 export interface NeedState {
   hunger: number;
@@ -438,6 +541,7 @@ export interface SimulationRuntimeState {
   observerFocus?: { x: number; y: number; level: number; radius: number };
   livingEconomyVersion?: 1;
   militaryInfrastructureVersion?: 1;
+  knowledgeSystemVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -572,6 +676,7 @@ export interface Character {
   militaryExperience?: number;
   servicePayArrears?: number;
   visualRole?: string;
+  knowledge: CharacterKnowledgeState;
 }
 
 export interface Relationship {
@@ -1004,7 +1109,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 13;
+  version: 14;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1042,6 +1147,11 @@ export interface WorldState {
   shipments: TradeShipment[];
   travelingMerchants: TravelingMerchant[];
   marketTransactions: MarketTransaction[];
+  knowledgeFacts: KnowledgeFact[];
+  memories: PersonalMemory[];
+  rumors: Rumor[];
+  messages: Message[];
+  settlementKnowledge: SettlementKnowledge[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];

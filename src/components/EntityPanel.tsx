@@ -10,7 +10,7 @@ const labels: Record<EntityKind, string> = {
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
-  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец', militaryUnit: 'Военное подразделение', supplyWagon: 'Военный обоз',
+  cemetery: 'Кладбище', burial: 'Кладбищенская запись', travelingMerchant: 'Странствующий торговец', militaryUnit: 'Военное подразделение', supplyWagon: 'Военный обоз', knowledgeFact: 'Знание', rumor: 'Слух', message: 'Сообщение',
 };
 
 export function EntityPanel({ world, selected, onSelect }: { world: WorldState; selected?: EntityRef; onSelect: (ref: EntityRef) => void }) {
@@ -40,7 +40,7 @@ function getEntity(world: WorldState, ref: EntityRef): any {
     artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
-    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [],
+    cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [], knowledgeFact: world.knowledgeFacts ?? [], rumor: world.rumors ?? [], message: world.messages ?? [],
   };
   const direct = map[ref.kind].find(item => item.id === ref.id);
   if (direct) return direct;
@@ -56,6 +56,9 @@ export function getTitle(world: WorldState, ref: EntityRef): string {
       ?? world.burials?.find(item => item.subjectKind === 'character' && item.subjectId === entity.headCharacterId);
     return `Домохозяйство ${head?.name ?? `№${entity.id}`}`;
   }
+  if (ref.kind === 'knowledgeFact') return entity.statement ?? `Знание №${entity.id}`;
+  if (ref.kind === 'rumor') return entity.text ?? `Слух №${entity.id}`;
+  if (ref.kind === 'message') return `${entity.kind} №${entity.id}`;
   return entity.name ?? entity.title ?? `Объект №${entity.id}`;
 }
 
@@ -99,6 +102,20 @@ function formatNumber(value: number): string {
 }
 
 function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (ref: EntityRef) => void) {
+
+  if (ref.kind === 'knowledgeFact') {
+    const sourceEvent = entity.eventId ? world.events.find(item => item.id === entity.eventId) : undefined;
+    return <>{row('Тема', entity.topic)}{row('Достоверность', `${Math.round(entity.truth)}%`)}{row('Подтверждено', entity.verified ? 'да' : 'нет')}{row('Секретность', `${entity.secrecy}%`)}{row('Важность', entity.importance)}{row('Источник', entity.originCharacterId ? link(getTitle(world, { kind: 'character', id: entity.originCharacterId }), { kind: 'character', id: entity.originCharacterId }, onSelect) : 'не установлен')}{row('Место происхождения', entity.originSettlementId ? link(getTitle(world, { kind: 'settlement', id: entity.originSettlementId }), { kind: 'settlement', id: entity.originSettlementId }, onSelect) : 'не установлено')}{row('Предмет знания', entity.subjectRef ? link(getTitle(world, entity.subjectRef), entity.subjectRef, onSelect) : 'общее знание')}{row('Исходное событие', sourceEvent ? sourceEvent.title : 'нет')}{row('Формулировка', entity.statement)}{row('Истинная формулировка', entity.canonicalStatement)}{row('Метки', entity.tags.join(', ') || 'нет')}{row('История знания', entity.history.join(' ') || 'нет')}</>;
+  }
+  if (ref.kind === 'rumor') {
+    const fact = world.knowledgeFacts.find(item => item.id === entity.factId);
+    return <>{row('Состояние', entity.status)}{row('Уверенность', `${Math.round(entity.confidence)}%`)}{row('Искажение', `${Math.round(entity.distortion)}%`)}{row('Передач', entity.spreadCount)}{row('Возник', link(getTitle(world, { kind: 'settlement', id: entity.originSettlementId }), { kind: 'settlement', id: entity.originSettlementId }, onSelect))}{row('Сейчас ходит в', link(getTitle(world, { kind: 'settlement', id: entity.currentSettlementId }), { kind: 'settlement', id: entity.currentSettlementId }, onSelect))}{row('Основан на', fact ? link(getTitle(world, { kind: 'knowledgeFact', id: fact.id }), { kind: 'knowledgeFact', id: fact.id }, onSelect) : 'утраченный факт')}{row('Текст', entity.text)}{row('История', entity.history.join(' '))}</>;
+  }
+  if (ref.kind === 'message') {
+    const sender = entity.senderCharacterId ? world.characters.find(item => item.id === entity.senderCharacterId) : undefined;
+    const recipient = entity.recipientCharacterId ? world.characters.find(item => item.id === entity.recipientCharacterId) : undefined;
+    return <>{row('Тип', entity.kind)}{row('Состояние', entity.status)}{row('Надёжность', `${Math.round(entity.reliability)}%`)}{row('Печать', entity.sealed ? 'запечатано' : 'открыто')}{row('Отправитель', sender ? link(sender.name, { kind: 'character', id: sender.id }, onSelect) : 'не указан')}{row('Получатель', recipient ? link(recipient.name, { kind: 'character', id: recipient.id }, onSelect) : entity.recipientKingdomId ? link(getTitle(world, { kind: 'kingdom', id: entity.recipientKingdomId }), { kind: 'kingdom', id: entity.recipientKingdomId }, onSelect) : 'не указан')}{row('Маршрут', <>{link(getTitle(world, { kind: 'settlement', id: entity.fromSettlementId }), { kind: 'settlement', id: entity.fromSettlementId }, onSelect)} → {link(getTitle(world, { kind: 'settlement', id: entity.toSettlementId }), { kind: 'settlement', id: entity.toSettlementId }, onSelect)}</>)}{row('Отправлено', `${Math.floor(entity.departedTick / 12)}.${String(entity.departedTick % 12 + 1).padStart(2, '0')}`)}{row('Ожидаемое прибытие', `${Math.floor(entity.arrivalTick / 12)}.${String(entity.arrivalTick % 12 + 1).padStart(2, '0')}`)}{row('Сведения', links(world, entity.knowledgeFactIds.map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect))}{row('История', entity.history.join(' '))}</>;
+  }
   if (ref.kind === 'army') {
     const kingdom = world.kingdoms.find(item => item.id === entity.kingdomId);
     const commander = world.characters.find(item => item.id === entity.commanderId);
@@ -263,6 +280,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Стабильность', `${entity.stability}%`)}{row('Казна', `${Math.round(entity.treasury)} крон`)}{row('Войско', `${entity.armyStrength} воинов`)}
       {row('Контролируемые земли', `${controlledTiles} глобальных клеток`)}{row('Освоение', controlledTiles ? 'границы растут от поселений, дорог и гарнизонов' : 'контроль ещё не закреплён')}
       {row('Законы', entity.laws.join(', '))}
+      {(() => { const ruler = world.characters.find(item => item.id === entity.rulerId); const incoming = world.messages.filter(item => item.recipientKingdomId === entity.id || item.toSettlementId === entity.capitalId); return <>{row('Сведения правителя', ruler?.knowledge ? links(world, ruler.knowledge.factIds.slice(-16).reverse().map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect) : 'нет')}{row('Донесения и письма', links(world, incoming.slice(-12).reverse().map(item => ({ kind: 'message' as const, id: item.id })), onSelect))}</>; })()}
       {row('Притязания', links(world, entity.claims.map((id: number) => ({ kind: 'settlement' as const, id })), onSelect))}
       {row('Отношения', <span className="relationship-stack">{diplomacy.map((record: any) => <span key={record.kingdomId}>{link(getTitle(world, { kind: 'kingdom', id: record.kingdomId }), { kind: 'kingdom', id: record.kingdomId }, onSelect)}<small>{record.status}, {record.score}: {record.reason}</small></span>)}</span>)}
     </>;
@@ -279,6 +297,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Заведения', links(world, (entity.establishmentIds ?? []).slice(0, 24).map((id: number) => ({ kind: 'establishment' as const, id })), onSelect))}
     {entity.economy && row('Экономика', `денежная масса ${Math.round(entity.economy.coinSupply)} ${entity.economy.currency}, цены ×${entity.economy.priceIndex.toFixed(2)}, зарплаты ×${entity.economy.wageIndex.toFixed(2)}, аренда ×${entity.economy.rentIndex.toFixed(2)}, налог ${(entity.economy.taxRate * 100).toFixed(1)}%`)}
     {entity.economy && row('Торговля за месяц', `${entity.economy.lastMonthlyTrade.toFixed(1)} крон · банкротств ${entity.economy.bankruptcies}`)}
+    {(() => { const knowledge = world.settlementKnowledge.find(item => item.settlementId === entity.id); return <>{row('Общие знания', knowledge ? links(world, knowledge.factIds.slice(-16).reverse().map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect) : 'нет')}{row('Подтверждённые сведения', knowledge?.verifiedFactIds.length ?? 0)}{row('Ходящие слухи', knowledge ? links(world, knowledge.rumorIds.slice(-12).reverse().map((id: number) => ({ kind: 'rumor' as const, id })), onSelect) : 'нет')}{row('Почта', links(world, world.messages.filter(item => item.fromSettlementId === entity.id || item.toSettlementId === entity.id).slice(-12).reverse().map(item => ({ kind: 'message' as const, id: item.id })), onSelect))}</>; })()}
     {row('Постройки по старому учёту', entity.buildings.join(', '))}{row('Склад', Object.entries(entity.stockpile).filter(([, value]) => Number(value) > 0).slice(0, 18).map(([name, value]) => `${name}: ${Math.round(Number(value))}`).join(', ') || 'пусто')}{row('Скот', Object.entries(entity.livestock).map(([name, value]) => `${name}: ${value}`).join(', ') || 'нет')}{row('История', entity.history.join(' '))}
   </>;
   if (ref.kind === 'character') {
@@ -308,6 +327,9 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {entity.skills && row('Навыки', Object.entries(entity.skills).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).slice(0, 10).map(([name, value]) => `${professionLabel(name)} ${value}`).join(', ') || 'нет развитых навыков')}
       {row('Личные вещи', links(world, (entity.inventoryItemIds ?? []).slice(0, 20).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}
       {row('Отношения', relationships.length ? <span className="relationship-stack">{relationships.map(relation => relationshipText(world, entity.id, relation, onSelect))}</span> : 'нет заметных связей')}
+      {entity.knowledge && row('Известные факты', links(world, entity.knowledge.factIds.slice(-18).reverse().map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect))}
+      {entity.knowledge && row('Важные воспоминания', entity.knowledge.memoryIds.slice(-10).reverse().map((id: number) => world.memories.find(item => item.id === id)).filter(Boolean).map((memory: any) => `${memory.summary} (${memory.confidence}%)`).join('; ') || 'нет')}
+      {entity.knowledge && row('Личные мнения', <span className="relationship-stack">{entity.knowledge.opinions.slice(-8).map((opinion: any, index: number) => <span key={`${opinion.target.kind}-${opinion.target.id}-${index}`}>{link(getTitle(world, opinion.target), opinion.target, onSelect)}<small>доверие {opinion.trust}, страх {opinion.fear}, уважение {opinion.respect}: {opinion.reason}</small></span>)}</span>)}
       {row('Биография', entity.biography.join(' '))}
     </>;
   }
