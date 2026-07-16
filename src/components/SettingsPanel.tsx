@@ -87,7 +87,12 @@ export function SettingsPanel({
         </>}
       </div>
 
-      {shownPerformance && <div className="settings-release-notes performance-report"><span className="eyebrow">Последняя операция</span><strong>{shownPerformance.operation} · {formatMs(shownPerformance.totalMs)}</strong><small>Симуляция: {formatMs(shownPerformance.simulationMs)} · обмен с Worker: {formatMs(shownPerformance.workerRoundTripMs)} · сохранение: {formatMs(shownPerformance.saveMs)} · задач: {shownPerformance.processedTasks?.toLocaleString('ru-RU') ?? '—'}</small></div>}
+      {shownPerformance && <div className="settings-release-notes performance-report">
+        <span className="eyebrow">Последняя операция</span>
+        <strong>{shownPerformance.operation} · {formatMs(shownPerformance.totalMs)}</strong>
+        <small>Симуляция: {formatMs(shownPerformance.simulationMs)} · обмен с Worker: {formatMs(shownPerformance.workerRoundTripMs)} · сохранение: {formatMs(shownPerformance.saveMs)} · задач: {shownPerformance.processedTasks?.toLocaleString('ru-RU') ?? '—'}{shownPerformance.fastForward ? ` · ускоренный режим ${shownPerformance.coarseMonths ?? 0} мес.` : ''}</small>
+        {Boolean(shownPerformance.phaseTimings?.length) && <div className="phase-profile-list">{shownPerformance.phaseTimings!.slice(0, 6).map(phase => <div key={phase.phase}><span>{phase.phase}</span><strong>{formatMs(phase.totalMs)}</strong><small>{phase.calls} запусков · максимум {formatMs(phase.maxMs)}</small></div>)}</div>}
+      </div>}
       {storage && <div className="settings-release-notes storage-report"><span className="eyebrow">Последнее сохранение</span><strong>{storage.writtenRecords} записей изменено · {formatMs(storage.totalMs)}</strong><small>{storage.skippedRecords} неизменённых записей пропущено · удалено {storage.deletedRecords} · объём {formatBytes(storage.bytesEstimated)}{storage.snapshotCreated ? ' · создан снимок' : ''}</small></div>}
       <div className="settings-release-notes">
         <span className="eyebrow">Последнее обновление</span>

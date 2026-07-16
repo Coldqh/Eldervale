@@ -1,5 +1,5 @@
 import type {
-  AnimalPopulation, Building, Character, ConstructionProject, EmploymentContract, Establishment, FieldPlot, Household, Kingdom, NaturalIngredient, ProductionRecipe, Relationship, Settlement, Tile, WorldEvent, WorldItem, WorldState,
+  AnimalPopulation, Army, Building, BurialRecord, Character, ConstructionProject, EmploymentContract, Establishment, FieldPlot, Household, Kingdom, KnowledgeFact, Message, Monster, NaturalIngredient, PersonalMemory, ProductionRecipe, Relationship, Rumor, Settlement, SettlementKnowledge, SupplyWagon, Tile, TradeRoute, WorldEvent, WorldItem, WorldState,
 } from '../types';
 
 export const coordinateKey = (x: number, y: number) => `${x}:${y}`;
@@ -17,7 +17,21 @@ export interface WorldIndexes {
   ingredientsByTile: Map<string, NaturalIngredient[]>;
   ingredientById: Map<number, NaturalIngredient>;
   relationshipKeys: Set<string>;
+  relationshipById: Map<number, Relationship>;
+  relationshipByPair: Map<string, Relationship>;
+  relationshipsByCharacter: Map<number, Relationship[]>;
   eventsByEntity: Map<string, WorldEvent[]>;
+  burialBySubject: Map<string, BurialRecord>;
+  burialsByCharacter: Map<number, BurialRecord[]>;
+  knowledgeFactById: Map<number, KnowledgeFact>;
+  memoryById: Map<number, PersonalMemory>;
+  rumorById: Map<number, Rumor>;
+  messageById: Map<number, Message>;
+  settlementKnowledgeBySettlement: Map<number, SettlementKnowledge>;
+  tradeRouteById: Map<number, TradeRoute>;
+  armyById: Map<number, Army>;
+  monsterById: Map<number, Monster>;
+  supplyWagonById: Map<number, SupplyWagon>;
   buildingById: Map<number, Building>;
   householdById: Map<number, Household>;
   establishmentById: Map<number, Establishment>;
@@ -29,6 +43,7 @@ export interface WorldIndexes {
   buildingsBySettlement: Map<number, Building[]>;
   householdsBySettlement: Map<number, Household[]>;
   establishmentsBySettlement: Map<number, Establishment[]>;
+  landTileCount: number;
 }
 
 export function buildWorldIndexes(world: WorldState): WorldIndexes {
@@ -44,7 +59,21 @@ export function buildWorldIndexes(world: WorldState): WorldIndexes {
     ingredientsByTile: new Map(),
     ingredientById: new Map(world.ingredients.map(item => [item.id, item])),
     relationshipKeys: new Set(world.relationships.map(item => relationshipKey(item.characterAId, item.characterBId))),
+    relationshipById: new Map(world.relationships.map(item => [item.id, item])),
+    relationshipByPair: new Map(world.relationships.map(item => [relationshipKey(item.characterAId, item.characterBId), item])),
+    relationshipsByCharacter: new Map(),
     eventsByEntity: new Map(),
+    burialBySubject: new Map(),
+    burialsByCharacter: new Map(),
+    knowledgeFactById: new Map((world.knowledgeFacts ?? []).map(item => [item.id, item])),
+    memoryById: new Map((world.memories ?? []).map(item => [item.id, item])),
+    rumorById: new Map((world.rumors ?? []).map(item => [item.id, item])),
+    messageById: new Map((world.messages ?? []).map(item => [item.id, item])),
+    settlementKnowledgeBySettlement: new Map((world.settlementKnowledge ?? []).map(item => [item.settlementId, item])),
+    tradeRouteById: new Map((world.tradeRoutes ?? []).map(item => [item.id, item])),
+    armyById: new Map((world.armies ?? []).map(item => [item.id, item])),
+    monsterById: new Map((world.monsters ?? []).map(item => [item.id, item])),
+    supplyWagonById: new Map((world.supplyWagons ?? []).map(item => [item.id, item])),
     buildingById: new Map((world.buildings ?? []).map(item => [item.id, item])),
     householdById: new Map((world.households ?? []).map(item => [item.id, item])),
     establishmentById: new Map((world.establishments ?? []).map(item => [item.id, item])),
@@ -54,12 +83,15 @@ export function buildWorldIndexes(world: WorldState): WorldIndexes {
     fieldById: new Map((world.fields ?? []).map(item => [item.id, item])),
     constructionProjectById: new Map((world.constructionProjects ?? []).map(item => [item.id, item])),
     buildingsBySettlement: new Map(), householdsBySettlement: new Map(), establishmentsBySettlement: new Map(),
+    landTileCount: world.tiles.reduce((sum, tile) => sum + Number(tile.terrain !== 'ocean'), 0),
   };
 
   for (const building of world.buildings ?? []) { const list = indexes.buildingsBySettlement.get(building.settlementId) ?? []; list.push(building); indexes.buildingsBySettlement.set(building.settlementId, list); }
   for (const household of world.households ?? []) { const list = indexes.householdsBySettlement.get(household.settlementId) ?? []; list.push(household); indexes.householdsBySettlement.set(household.settlementId, list); }
   for (const establishment of world.establishments ?? []) { const list = indexes.establishmentsBySettlement.get(establishment.settlementId) ?? []; list.push(establishment); indexes.establishmentsBySettlement.set(establishment.settlementId, list); }
   for (const character of world.characters) addResidentToIndexes(indexes, character);
+  for (const relationship of world.relationships) addRelationshipToIndexes(indexes, relationship);
+  for (const burial of world.burials ?? []) indexBurial(indexes, burial);
   rebuildAnimalIndexes(indexes, world.animalPopulations);
   for (const ingredient of world.ingredients) {
     const key = coordinateKey(ingredient.x, ingredient.y);
@@ -129,7 +161,44 @@ export function addAnimalPopulationToIndexes(indexes: WorldIndexes, population: 
 }
 
 export function indexRelationship(indexes: WorldIndexes, relationship: Relationship): void {
-  indexes.relationshipKeys.add(relationshipKey(relationship.characterAId, relationship.characterBId));
+  addRelationshipToIndexes(indexes, relationship);
+}
+
+export function addRelationshipToIndexes(indexes: WorldIndexes, relationship: Relationship): void {
+  const key = relationshipKey(relationship.characterAId, relationship.characterBId);
+  indexes.relationshipKeys.add(key);
+  indexes.relationshipById.set(relationship.id, relationship);
+  indexes.relationshipByPair.set(key, relationship);
+  for (const characterId of [relationship.characterAId, relationship.characterBId]) {
+    const list = indexes.relationshipsByCharacter.get(characterId) ?? [];
+    if (!list.some(item => item.id === relationship.id)) list.push(relationship);
+    indexes.relationshipsByCharacter.set(characterId, list);
+  }
+}
+
+export function rebuildRelationshipIndexes(indexes: WorldIndexes, relationships: readonly Relationship[]): void {
+  indexes.relationshipKeys.clear();
+  indexes.relationshipById.clear();
+  indexes.relationshipByPair.clear();
+  indexes.relationshipsByCharacter.clear();
+  for (const relationship of relationships) addRelationshipToIndexes(indexes, relationship);
+}
+
+export function indexBurial(indexes: WorldIndexes, burial: BurialRecord): void {
+  if (burial.subjectId !== undefined) indexes.burialBySubject.set(`${burial.subjectKind}:${burial.subjectId}`, burial);
+  for (const characterId of [...(burial.parentIds ?? []), ...(burial.childIds ?? []), ...(burial.spouseId ? [burial.spouseId] : [])]) {
+    const list = indexes.burialsByCharacter.get(characterId) ?? [];
+    list.push(burial);
+    indexes.burialsByCharacter.set(characterId, list);
+  }
+}
+
+export function refreshKnowledgeIndexes(indexes: WorldIndexes, world: WorldState): void {
+  if (indexes.knowledgeFactById.size !== world.knowledgeFacts.length || world.knowledgeFacts.some(item => indexes.knowledgeFactById.get(item.id) !== item)) indexes.knowledgeFactById = new Map(world.knowledgeFacts.map(item => [item.id, item]));
+  if (indexes.memoryById.size !== world.memories.length || world.memories.some(item => indexes.memoryById.get(item.id) !== item)) indexes.memoryById = new Map(world.memories.map(item => [item.id, item]));
+  if (indexes.rumorById.size !== world.rumors.length || world.rumors.some(item => indexes.rumorById.get(item.id) !== item)) indexes.rumorById = new Map(world.rumors.map(item => [item.id, item]));
+  if (indexes.messageById.size !== world.messages.length || world.messages.some(item => indexes.messageById.get(item.id) !== item)) indexes.messageById = new Map(world.messages.map(item => [item.id, item]));
+  if (indexes.settlementKnowledgeBySettlement.size !== world.settlementKnowledge.length) indexes.settlementKnowledgeBySettlement = new Map(world.settlementKnowledge.map(item => [item.settlementId, item]));
 }
 
 export function indexEvent(indexes: WorldIndexes, event: WorldEvent): void {
@@ -164,8 +233,52 @@ export function nearbyTileKeys(x: number, y: number, radius: number): string[] {
   return keys;
 }
 
+export function refreshDynamicWorldIndexes(indexes: WorldIndexes, world: WorldState): void {
+  indexes.characterById = new Map(world.characters.map(item => [item.id, item]));
+  indexes.settlementById = new Map(world.settlements.map(item => [item.id, item]));
+  indexes.kingdomById = new Map(world.kingdoms.map(item => [item.id, item]));
+  indexes.residentsBySettlement.clear();
+  indexes.workersBySettlementAndProfession.clear();
+  for (const character of world.characters) addResidentToIndexes(indexes, character);
+  rebuildRelationshipIndexes(indexes, world.relationships);
+  indexes.burialBySubject.clear();
+  indexes.burialsByCharacter.clear();
+  for (const burial of world.burials) indexBurial(indexes, burial);
+  refreshKnowledgeIndexes(indexes, world);
+  indexes.tradeRouteById = new Map(world.tradeRoutes.map(item => [item.id, item]));
+  indexes.armyById = new Map(world.armies.map(item => [item.id, item]));
+  indexes.monsterById = new Map(world.monsters.map(item => [item.id, item]));
+  indexes.supplyWagonById = new Map(world.supplyWagons.map(item => [item.id, item]));
+  indexes.buildingById = new Map(world.buildings.map(item => [item.id, item]));
+  indexes.householdById = new Map(world.households.map(item => [item.id, item]));
+  indexes.establishmentById = new Map(world.establishments.map(item => [item.id, item]));
+  indexes.itemById = new Map(world.items.map(item => [item.id, item]));
+  indexes.productionRecipeById = new Map(world.productionRecipes.map(item => [item.id, item]));
+  indexes.employmentById = new Map(world.employments.map(item => [item.id, item]));
+  indexes.fieldById = new Map(world.fields.map(item => [item.id, item]));
+  indexes.constructionProjectById = new Map(world.constructionProjects.map(item => [item.id, item]));
+  indexes.buildingsBySettlement.clear();
+  indexes.householdsBySettlement.clear();
+  indexes.establishmentsBySettlement.clear();
+  for (const building of world.buildings) { const list = indexes.buildingsBySettlement.get(building.settlementId) ?? []; list.push(building); indexes.buildingsBySettlement.set(building.settlementId, list); }
+  for (const household of world.households) { const list = indexes.householdsBySettlement.get(household.settlementId) ?? []; list.push(household); indexes.householdsBySettlement.set(household.settlementId, list); }
+  for (const establishment of world.establishments) { const list = indexes.establishmentsBySettlement.get(establishment.settlementId) ?? []; list.push(establishment); indexes.establishmentsBySettlement.set(establishment.settlementId, list); }
+  rebuildAnimalIndexes(indexes, world.animalPopulations);
+  indexes.ingredientsByTile.clear();
+  indexes.ingredientById = new Map(world.ingredients.map(item => [item.id, item]));
+  for (const ingredient of world.ingredients) {
+    const key = coordinateKey(ingredient.x, ingredient.y);
+    const list = indexes.ingredientsByTile.get(key) ?? [];
+    list.push(ingredient);
+    indexes.ingredientsByTile.set(key, list);
+  }
+  indexes.eventsByEntity.clear();
+  for (const event of world.events) indexEvent(indexes, event);
+}
+
 export function countIndexedEntities(indexes: WorldIndexes): number {
   return indexes.characterById.size + indexes.settlementById.size + indexes.kingdomById.size + indexes.tileByCoordinate.size
     + indexes.animalPopulationByTileAndSpecies.size + indexes.ingredientById.size + indexes.relationshipKeys.size
-    + indexes.buildingById.size + indexes.householdById.size + indexes.establishmentById.size + indexes.itemById.size + indexes.employmentById.size + indexes.fieldById.size + indexes.constructionProjectById.size;
+    + indexes.buildingById.size + indexes.householdById.size + indexes.establishmentById.size + indexes.itemById.size + indexes.employmentById.size + indexes.fieldById.size + indexes.constructionProjectById.size
+    + indexes.relationshipById.size + indexes.burialBySubject.size + indexes.knowledgeFactById.size + indexes.rumorById.size + indexes.messageById.size;
 }

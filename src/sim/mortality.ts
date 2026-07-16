@@ -1,5 +1,6 @@
 import type { BurialRecord, BurialState, Cemetery, Character, Monster, WorldState } from '../types';
 import type { WorldIndexes } from './indexes';
+import { indexBurial, rebuildRelationshipIndexes } from './indexes';
 import { RNG } from './rng';
 import { worldTick } from './scheduler';
 import { inheritanceHeir } from './socialSystem';
@@ -85,6 +86,10 @@ export function archiveCharactersBatch(world: WorldState, indexes: WorldIndexes 
   detachDeadKnowledge(world, deadIds);
   detachCharactersBatch(world, deadIds, deadById);
   world.burials.push(...burials);
+  if (indexes) {
+    rebuildRelationshipIndexes(indexes, world.relationships);
+    for (const burial of burials) indexBurial(indexes, burial);
+  }
   for (const burial of burials) finalizeInitialBurial(world, burial, unique.get(burial.subjectId!)!.context, rng);
   synchronizeMortalityIds(world);
   return burials;

@@ -29,26 +29,29 @@ export interface JudicialInfluenceResult {
 export function initializeSocialSystem(world: WorldState, indexes?: WorldIndexes): void {
   world.socialObligations ??= [];
   world.nextIds.socialObligation ??= Math.max(0, ...world.socialObligations.map(item => item.id)) + 1;
+  if (world.simulation.socialSystemVersion === 1) return;
   for (const relationship of world.relationships) normalizeRelationship(world, relationship);
   seedStructuralRelationships(world, indexes);
-  seedDebtObligations(world);
+  seedDebtObligations(world, indexes);
   world.simulation.socialSystemVersion = 1;
   world.simulation.lastSocialBurialId ??= Math.max(0, ...world.burials.map(item => item.id));
 }
 
-export function advanceSocialSystem(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
-  initializeSocialSystem(world, indexes);
-  processDeathAftermath(world);
-  advanceRelationships(world, rng);
-  if ([1, 4, 7, 10].includes(world.month)) formContextualRelationships(world, rng, indexes);
-  if ([2, 8].includes(world.month)) advanceUnions(world, rng, indexes);
-  if ([3, 9].includes(world.month)) advancePrivateAffairs(world, rng);
-  advanceObligations(world, rng);
+export function advanceSocialSystem(world: WorldState, rng: RNG, indexes: WorldIndexes, fastForward = false): void {
+  if (world.simulation.socialSystemVersion !== 1) initializeSocialSystem(world, indexes);
+  processDeathAftermath(world, indexes);
+  const relationshipTurn = fastForward ? [1, 7].includes(world.month) : [1, 4, 7, 10].includes(world.month);
+  if (relationshipTurn) advanceRelationships(world, rng, indexes);
+  if (relationshipTurn) formContextualRelationships(world, rng, indexes);
+  if (fastForward ? world.month === 2 : [2, 8].includes(world.month)) advanceUnions(world, rng, indexes);
+  if (fastForward ? world.month === 3 : [3, 9].includes(world.month)) advancePrivateAffairs(world, rng, indexes);
+  if (!fastForward || [1, 4, 7, 10].includes(world.month)) advanceObligations(world, rng, indexes);
   trimSocialCollections(world);
 }
 
-export function relationshipBetween(world: WorldState, firstId: number, secondId: number): Relationship | undefined {
+export function relationshipBetween(world: WorldState, firstId: number, secondId: number, indexes?: WorldIndexes): Relationship | undefined {
   if (firstId === secondId) return undefined;
+  if (indexes) return indexes.relationshipByPair.get(relationshipKey(firstId, secondId));
   return world.relationships.find(item =>
     (item.characterAId === firstId && item.characterBId === secondId)
     || (item.characterAId === secondId && item.characterBId === firstId));
@@ -61,10 +64,11 @@ export function witnessWillReport(
   victim: Character,
   severity: number,
   rng: RNG,
+  indexes?: WorldIndexes,
 ): WitnessChoiceResult {
   const mind = ensureCharacterMind(world, witness);
-  const perpetratorTie = relationshipBetween(world, witness.id, perpetrator.id);
-  const victimTie = relationshipBetween(world, witness.id, victim.id);
+  const perpetratorTie = relationshipBetween(world, witness.id, perpetrator.id, indexes);
+  const victimTie = relationshipBetween(world, witness.id, victim.id, indexes);
   const silenceDebt = world.socialObligations.find(item => item.status === 'active' && item.debtorCharacterId === witness.id && item.creditorCharacterId === perpetrator.id && item.kind === 'silence');
   const fear = (perpetratorTie?.fear ?? 0) + mind.emotions.fear * .4 + Math.max(0, perpetrator.renown - witness.renown) * .35;
   const loyaltyToPerpetrator = (perpetratorTie?.trust ?? 0) * .45 + (perpetratorTie?.affection ?? 0) * .3 + (silenceDebt?.strength ?? 0);
@@ -106,12 +110,13 @@ export function applyJudicialInfluence(
   victim: Character | undefined,
   severity: number,
   rng: RNG,
+  indexes?: WorldIndexes,
 ): JudicialInfluenceResult {
   if (!judge) return { bias: 0, bribe: 0, reason: 'судья не назначен' };
   const judgeMind = ensureCharacterMind(world, judge);
   const defendantMind = ensureCharacterMind(world, defendant);
-  const defendantTie = relationshipBetween(world, judge.id, defendant.id);
-  const victimTie = victim ? relationshipBetween(world, judge.id, victim.id) : undefined;
+  const defendantTie = relationshipBetween(world, judge.id, defendant.id, indexes);
+  const victimTie = victim ? relationshipBetween(world, judge.id, victim.id, indexes) : undefined;
   const kinBias = defendantTie?.contexts?.includes('family') ? -24 : 0;
   const friendshipBias = -((defendantTie?.trust ?? 0) + (defendantTie?.affection ?? 0)) * .12;
   const hostilityBias = (defendantTie?.tension ?? 0) * .13 + (victimTie?.affection ?? 0) * .1;
@@ -148,20 +153,20 @@ export function applyJudicialInfluence(
   return { bias, bribe, reason: bribe > 0 ? 'на решение повлияли взятка и личные связи' : Math.abs(bias) > 5 ? 'на решение повлияли родство и личное отношение' : 'личное влияние было слабым' };
 }
 
-export function workplaceConnectionScore(world: WorldState, character: Character, establishment: Establishment): number {
+export function workplaceConnectionScore(world: WorldState, character: Character, establishment: Establishment, indexes?: WorldIndexes): number {
   const contacts = [establishment.ownerCharacterId, ...establishment.workerIds]
-    .map(id => relationshipBetween(world, character.id, id))
+    .map(id => relationshipBetween(world, character.id, id, indexes))
     .filter((item): item is Relationship => Boolean(item));
   return contacts.reduce((sum, tie) => sum + Math.max(-18, ((tie.trust ?? 0) + (tie.respect ?? 0) - (tie.tension ?? 0) * 1.2) / 8), 0);
 }
 
-export function settlementConnectionScore(world: WorldState, character: Character, settlementId: number): number {
+export function settlementConnectionScore(world: WorldState, character: Character, settlementId: number, indexes?: WorldIndexes): number {
   let score = 0;
   for (const relationId of character.relationshipIds) {
-    const relation = world.relationships.find(item => item.id === relationId);
+    const relation = indexes?.relationshipById.get(relationId) ?? world.relationships.find(item => item.id === relationId);
     if (!relation) continue;
     const otherId = relation.characterAId === character.id ? relation.characterBId : relation.characterAId;
-    const other = world.characters.find(item => item.id === otherId);
+    const other = indexes?.characterById.get(otherId) ?? world.characters.find(item => item.id === otherId);
     if (!other || other.settlementId !== settlementId) continue;
     const family = relation.contexts?.includes('family') || relation.kind === 'родство' ? 22 : 0;
     score += family + ((relation.trust ?? 0) + (relation.affection ?? 0) - (relation.tension ?? 0)) / 12;
@@ -169,11 +174,11 @@ export function settlementConnectionScore(world: WorldState, character: Characte
   return score;
 }
 
-export function recruitFactionThroughRelationships(world: WorldState, faction: CourtFaction, leader: Character, candidates: Character[]): number[] {
+export function recruitFactionThroughRelationships(world: WorldState, faction: CourtFaction, leader: Character, candidates: Character[], indexes?: WorldIndexes): number[] {
   const recruits = candidates
     .filter(candidate => candidate.id !== leader.id && !candidate.courtFactionId)
     .map(candidate => {
-      const tie = relationshipBetween(world, leader.id, candidate.id);
+      const tie = relationshipBetween(world, leader.id, candidate.id, indexes);
       const score = (tie?.trust ?? 0) + (tie?.respect ?? 0) + (tie?.affection ?? 0) * .5 - (tie?.tension ?? 0) + candidate.loyalty * .25;
       return { candidate, score };
     })
@@ -309,7 +314,7 @@ function connectSmallGroup(world: WorldState, members: Character[], kind: Relati
 
 function ensureRelationship(world: WorldState, a: Character, b: Character, kind: Relationship['kind'], strength: number, reason: string, contexts: SocialContextKind[], indexes?: WorldIndexes): Relationship | undefined {
   if (a.id === b.id) return undefined;
-  const existing = relationshipBetween(world, a.id, b.id);
+  const existing = relationshipBetween(world, a.id, b.id, indexes);
   if (existing) {
     normalizeRelationship(world, existing);
     existing.contexts = [...new Set([...(existing.contexts ?? []), ...contexts])];
@@ -329,11 +334,11 @@ function ensureRelationship(world: WorldState, a: Character, b: Character, kind:
   return relation;
 }
 
-function seedDebtObligations(world: WorldState): void {
+function seedDebtObligations(world: WorldState, indexes?: WorldIndexes): void {
   for (const relationship of world.relationships.filter(item => item.kind === 'долг')) {
     if (world.socialObligations.some(item => item.status === 'active' && [item.debtorCharacterId, item.creditorCharacterId].includes(relationship.characterAId) && [item.debtorCharacterId, item.creditorCharacterId].includes(relationship.characterBId))) continue;
-    const debtor = world.characters.find(item => item.id === relationship.characterAId);
-    const creditor = world.characters.find(item => item.id === relationship.characterBId);
+    const debtor = indexes?.characterById.get(relationship.characterAId) ?? world.characters.find(item => item.id === relationship.characterAId);
+    const creditor = indexes?.characterById.get(relationship.characterBId) ?? world.characters.find(item => item.id === relationship.characterBId);
     if (!debtor || !creditor) continue;
     const poorer = debtor.wealth + debtor.wallet <= creditor.wealth + creditor.wallet ? debtor : creditor;
     const richer = poorer.id === debtor.id ? creditor : debtor;
@@ -347,7 +352,7 @@ function formContextualRelationships(world: WorldState, rng: RNG, indexes: World
     const attempts = Math.min(10, Math.max(2, Math.ceil(locals.length / 180)));
     for (let attempt = 0; attempt < attempts && locals.length > 1; attempt += 1) {
       const a = rng.pick(locals);
-      const candidates = locals.filter(b => b.id !== a.id && !relationshipBetween(world, a.id, b.id));
+      const candidates = locals.filter(b => b.id !== a.id && !relationshipBetween(world, a.id, b.id, indexes));
       if (!candidates.length) continue;
       const b = rng.weighted(candidates.slice(0, 80).map(candidate => ({ value: candidate, weight: Math.max(1, contextualWeight(a, candidate)) })));
       const contexts = inferContexts(a, b, 'дружба');
@@ -367,15 +372,12 @@ function contextualWeight(a: Character, b: Character): number {
   return weight;
 }
 
-function advanceRelationships(world: WorldState, rng: RNG): void {
+function advanceRelationships(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
-  const characterById = new Map(world.characters.map(item => [item.id, item]));
   for (const relationship of world.relationships) {
-    normalizeRelationship(world, relationship);
-    const a = characterById.get(relationship.characterAId);
-    const b = characterById.get(relationship.characterBId);
+    const a = indexes.characterById.get(relationship.characterAId);
+    const b = indexes.characterById.get(relationship.characterBId);
     if (!a || !b) continue;
-    if (![1, 4, 7, 10].includes(world.month) && relationship.id % 4 !== world.month % 4) continue;
     relationship.contexts = [...new Set([...(relationship.contexts ?? []), ...inferContexts(a, b, relationship.kind)])];
     const sharedHouse = a.householdId && a.householdId === b.householdId;
     const sharedWork = a.employerEstablishmentId && a.employerEstablishmentId === b.employerEstablishmentId;
@@ -403,10 +405,17 @@ function advanceRelationships(world: WorldState, rng: RNG): void {
 function advanceUnions(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
   const handled = new Set<number>();
+  const divorceCounts = new Map<number, number>();
+  const divorceLimitBySettlement = new Map(world.settlements.map(settlement => [settlement.id, Math.max(1, Math.ceil(settlement.population / 1_000))]));
+  const totalDivorceLimit = Math.max(2, Math.ceil(world.characters.length / 600));
+  let divorces = 0;
   for (const person of world.characters.filter(item => item.spouseId && item.id < item.spouseId!)) {
-    const spouse = world.characters.find(item => item.id === person.spouseId);
+    if (divorces >= totalDivorceLimit) break;
+    const spouse = indexes.characterById.get(person.spouseId!);
     if (!spouse) { person.spouseId = undefined; continue; }
-    const relation = relationshipBetween(world, person.id, spouse.id);
+    const localDivorceLimit = divorceLimitBySettlement.get(person.settlementId) ?? 1;
+    if ((divorceCounts.get(person.settlementId) ?? 0) >= localDivorceLimit) continue;
+    const relation = relationshipBetween(world, person.id, spouse.id, indexes);
     if (!relation) continue;
     const tension = relation.tension ?? 0;
     const affection = relation.affection ?? 0;
@@ -429,15 +438,24 @@ function advanceUnions(world: WorldState, rng: RNG, indexes: WorldIndexes): void
     person.biography.push(`В ${world.year} году развёлся с ${spouse.name}.`); spouse.biography.push(`В ${world.year} году развёлся с ${person.name}.`);
     appendCausalEvent(world, { kind: 'household', title: `Распался брак ${person.name} и ${spouse.name}`, description: 'Супруги разделили дом, деньги и обязанности.', cause: 'накопившееся напряжение и потеря доверия', consequences: ['домохозяйства разделились', 'отношения семьи изменились'], entityRefs: [{ kind: 'character', id: person.id }, { kind: 'character', id: spouse.id }], importance: person.titles.length || spouse.titles.length ? 3 : 1 });
     handled.add(person.id); handled.add(spouse.id);
+    divorceCounts.set(person.settlementId, (divorceCounts.get(person.settlementId) ?? 0) + 1);
+    divorces += 1;
   }
 
   const candidates = world.relationships
     .filter(relation => ['любовь', 'дружба'].includes(relation.kind) && (relation.affection ?? 0) >= 62 && (relation.trust ?? 0) >= 45 && (relation.tension ?? 0) < 45)
-    .sort((a, b) => (b.affection ?? 0) - (a.affection ?? 0));
+    .sort((a, b) => (b.affection ?? 0) - (a.affection ?? 0) || a.id - b.id);
+  const marriageCounts = new Map<number, number>();
+  const marriageLimitBySettlement = new Map(world.settlements.map(settlement => [settlement.id, Math.max(1, Math.ceil(settlement.population / 280))]));
+  const totalMarriageLimit = Math.max(6, Math.ceil(world.characters.length / 120));
+  let marriages = 0;
   for (const relation of candidates) {
-    const a = world.characters.find(item => item.id === relation.characterAId);
-    const b = world.characters.find(item => item.id === relation.characterBId);
+    if (marriages >= totalMarriageLimit) break;
+    const a = indexes.characterById.get(relation.characterAId);
+    const b = indexes.characterById.get(relation.characterBId);
     if (!a || !b || a.spouseId || b.spouseId || handled.has(a.id) || handled.has(b.id) || a.age < 16 || b.age < 16 || a.settlementId !== b.settlementId || Math.abs(a.age - b.age) > 35) continue;
+    const localMarriageLimit = marriageLimitBySettlement.get(a.settlementId) ?? 1;
+    if ((marriageCounts.get(a.settlementId) ?? 0) >= localMarriageLimit) continue;
     const compatibility = (relation.affection ?? 0) + (relation.trust ?? 0) + (a.mind?.values.family ?? 0) * .35 + (b.mind?.values.family ?? 0) * .35 - (relation.tension ?? 0);
     if (compatibility < 135 || !rng.chance(Math.min(.55, .06 + compatibility / 500))) continue;
     const actor = (a.mind?.traits.ambition ?? 0) + (a.mind?.values.family ?? 0) >= (b.mind?.traits.ambition ?? 0) + (b.mind?.values.family ?? 0) ? a : b;
@@ -454,14 +472,16 @@ function advanceUnions(world: WorldState, rng: RNG, indexes: WorldIndexes): void
     a.biography.push(`В ${world.year} году вступил в брак с ${b.name}.`); b.biography.push(`В ${world.year} году вступил в брак с ${a.name}.`);
     appendCausalEvent(world, { kind: 'household', title: `Брак ${a.name} и ${b.name}`, description: 'Два человека объединили дом, имущество и обязанности.', cause: 'доверие, привязанность и желание создать семью', consequences: ['домохозяйства объединились', 'возникли новые родственные связи'], entityRefs: [{ kind: 'character', id: a.id }, { kind: 'character', id: b.id }, ...(a.householdId ? [{ kind: 'household' as const, id: a.householdId }] : [])], importance: a.titles.length || b.titles.length ? 3 : 1 });
     handled.add(a.id); handled.add(b.id);
+    marriageCounts.set(a.settlementId, (marriageCounts.get(a.settlementId) ?? 0) + 1);
+    marriages += 1;
   }
   void tick;
 }
 
-function advancePrivateAffairs(world: WorldState, rng: RNG): void {
+function advancePrivateAffairs(world: WorldState, rng: RNG, indexes?: WorldIndexes): void {
   for (const relationship of world.relationships.filter(item => item.kind === 'любовь' && (item.affection ?? 0) > 72 && (item.tension ?? 0) < 35)) {
-    const a = world.characters.find(item => item.id === relationship.characterAId);
-    const b = world.characters.find(item => item.id === relationship.characterBId);
+    const a = indexes?.characterById.get(relationship.characterAId) ?? world.characters.find(item => item.id === relationship.characterAId);
+    const b = indexes?.characterById.get(relationship.characterBId) ?? world.characters.find(item => item.id === relationship.characterBId);
     if (!a || !b || (!a.spouseId && !b.spouseId) || a.spouseId === b.id || b.spouseId === a.id) continue;
     if ((a.mind?.traits.honesty ?? 50) + (b.mind?.traits.honesty ?? 50) > 105 || !rng.chance(.025)) continue;
     relationship.public = false;
@@ -470,21 +490,22 @@ function advancePrivateAffairs(world: WorldState, rng: RNG): void {
     addCharacterSecret(world, a, { id: `affair:${Math.min(a.id, b.id)}:${Math.max(a.id, b.id)}`, kind: 'affair', severity: 58, knownByCharacterIds: [b.id], exposed: false, summary });
     addCharacterSecret(world, b, { id: `affair:${Math.min(a.id, b.id)}:${Math.max(a.id, b.id)}`, kind: 'affair', severity: 58, knownByCharacterIds: [a.id], exposed: false, summary });
     for (const person of [a, b]) {
-      const spouse = person.spouseId ? world.characters.find(item => item.id === person.spouseId) : undefined;
-      const marriage = spouse ? relationshipBetween(world, person.id, spouse.id) : undefined;
+      const spouse = person.spouseId ? indexes?.characterById.get(person.spouseId) ?? world.characters.find(item => item.id === person.spouseId) : undefined;
+      const marriage = spouse ? relationshipBetween(world, person.id, spouse.id, indexes) : undefined;
       if (marriage) { marriage.trust = clamp((marriage.trust ?? 50) - 5); marriage.tension = clamp((marriage.tension ?? 10) + 7); }
     }
   }
 }
 
-function advanceObligations(world: WorldState, rng: RNG): void {
+function advanceObligations(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
+  const changedDebtorIds = new Set<number>();
   for (const obligation of world.socialObligations) {
     if (obligation.status !== 'active') continue;
-    const debtor = world.characters.find(item => item.id === obligation.debtorCharacterId);
-    const creditor = world.characters.find(item => item.id === obligation.creditorCharacterId);
+    const debtor = indexes.characterById.get(obligation.debtorCharacterId);
+    const creditor = indexes.characterById.get(obligation.creditorCharacterId);
     if (!debtor || !creditor) { obligation.status = 'broken'; obligation.resolvedTick = tick; continue; }
-    const tie = relationshipBetween(world, debtor.id, creditor.id);
+    const tie = relationshipBetween(world, debtor.id, creditor.id, indexes);
     if (obligation.amount > 0) {
       const scheduled = obligation.dueTick !== undefined && tick >= obligation.dueTick;
       const voluntary = (debtor.mind?.traits.honesty ?? 50) + (tie?.trust ?? 0) * .3 > 72 && rng.chance(.16);
@@ -496,27 +517,34 @@ function advanceObligations(world: WorldState, rng: RNG): void {
           obligation.history.push(`${payment.toFixed(1)} крон выплачено в ${world.year}.${String(world.month).padStart(2, '0')}.`);
           recordStateDelta(world, { entityRef: { kind: 'character', id: debtor.id }, field: `socialObligation:${obligation.id}`, before, after: obligation.amount, amount: -payment, cause: 'выплата личного долга' });
           if (tie) { tie.trust = clamp((tie.trust ?? 40) + 3); tie.tension = clamp((tie.tension ?? 15) - 4); }
+          changedDebtorIds.add(debtor.id);
           if (obligation.amount <= .05) { obligation.status = 'fulfilled'; obligation.resolvedTick = tick; }
-        } else if (scheduled && tick - obligation.dueTick! > 6) defaultObligation(world, obligation, debtor, creditor, tie);
+        } else if (scheduled && tick - obligation.dueTick! > 6) {
+          defaultObligation(world, obligation, debtor, creditor, tie);
+          changedDebtorIds.add(debtor.id);
+        }
       }
     } else if (obligation.dueTick !== undefined && tick >= obligation.dueTick) {
       const reliability = (debtor.mind?.traits.honesty ?? 50) + (debtor.mind?.values.family ?? 0) * (obligation.kind === 'family_support' ? .35 : 0) + (tie?.trust ?? 0) * .25;
       if (rng.chance(clamp01(reliability / 120))) {
-        obligation.status = 'fulfilled'; obligation.resolvedTick = tick; obligation.history.push('Обещание или услуга выполнены.');
+        obligation.status = 'fulfilled'; obligation.resolvedTick = tick; obligation.history.push('Обещание или услуга выполнены.'); changedDebtorIds.add(debtor.id);
         if (tie) { tie.trust = clamp((tie.trust ?? 40) + 5); tie.affection = clamp((tie.affection ?? 30) + 3); }
-      } else defaultObligation(world, obligation, debtor, creditor, tie);
+      } else {
+        defaultObligation(world, obligation, debtor, creditor, tie);
+        changedDebtorIds.add(debtor.id);
+      }
     }
   }
-  if ([4, 10].includes(world.month)) createSocialObligations(world, rng);
-  syncMindObligations(world);
+  if ([4, 10].includes(world.month)) createSocialObligations(world, rng, indexes, changedDebtorIds);
+  syncMindObligations(world, indexes, changedDebtorIds);
 }
 
-function createSocialObligations(world: WorldState, rng: RNG): void {
+function createSocialObligations(world: WorldState, rng: RNG, indexes: WorldIndexes, changedDebtorIds: Set<number>): void {
   const candidates = world.relationships.filter(item => item.status === 'close' || ((item.trust ?? 0) > 60 && (item.tension ?? 0) < 30));
   for (const tie of candidates.slice(0, Math.min(80, candidates.length))) {
     if (!rng.chance(.06)) continue;
-    const a = world.characters.find(item => item.id === tie.characterAId);
-    const b = world.characters.find(item => item.id === tie.characterBId);
+    const a = indexes.characterById.get(tie.characterAId);
+    const b = indexes.characterById.get(tie.characterBId);
     if (!a || !b || world.socialObligations.some(item => item.status === 'active' && ((item.debtorCharacterId === a.id && item.creditorCharacterId === b.id) || (item.debtorCharacterId === b.id && item.creditorCharacterId === a.id)))) continue;
     const householdA = a.householdId ? world.households.find(item => item.id === a.householdId) : undefined;
     const householdB = b.householdId ? world.households.find(item => item.id === b.householdId) : undefined;
@@ -526,6 +554,7 @@ function createSocialObligations(world: WorldState, rng: RNG): void {
     const amount = Math.min(20, Math.max(2, ((creditor.wallet + (creditor.householdId ? world.households.find(item => item.id === creditor.householdId)?.wealth ?? 0 : 0)) * .08)));
     const kind: SocialObligationKind = tie.contexts?.includes('family') ? 'family_support' : rng.chance(.6) ? 'loan' : 'service';
     ensureObligation(world, kind, debtor.id, creditor.id, debtor.settlementId, kind === 'loan' ? amount : 0, clamp(45 + (tie.trust ?? 0) * .4), kind === 'loan' ? 'личный заём через доверенные отношения' : 'обещанная помощь знакомому', false, worldTick(world) + rng.int(6, 24));
+    changedDebtorIds.add(debtor.id);
   }
 }
 
@@ -546,11 +575,21 @@ function defaultObligation(world: WorldState, obligation: SocialObligation, debt
   creditor.mind!.emotions.anger = clamp(creditor.mind!.emotions.anger + 12);
 }
 
-function syncMindObligations(world: WorldState): void {
-  for (const character of world.characters) {
+function syncMindObligations(world: WorldState, indexes: WorldIndexes, characterIds: ReadonlySet<number>): void {
+  if (!characterIds.size) return;
+  const obligationsByDebtor = new Map<number, SocialObligation[]>();
+  for (const obligation of world.socialObligations) {
+    if (obligation.status !== 'active' || !characterIds.has(obligation.debtorCharacterId)) continue;
+    const list = obligationsByDebtor.get(obligation.debtorCharacterId) ?? [];
+    list.push(obligation);
+    obligationsByDebtor.set(obligation.debtorCharacterId, list);
+  }
+  for (const characterId of characterIds) {
+    const character = indexes.characterById.get(characterId);
+    if (!character) continue;
     const mind = ensureCharacterMind(world, character);
     const persistent = mind.obligations.filter(item => !item.id.startsWith('social:'));
-    const social = world.socialObligations.filter(item => item.status === 'active' && item.debtorCharacterId === character.id).slice(-8).map(item => ({
+    const social = (obligationsByDebtor.get(character.id) ?? []).slice(-8).map(item => ({
       id: `social:${item.id}`, kind: item.kind === 'loan' ? 'debt' as const : 'promise' as const,
       targetRef: { kind: 'character' as const, id: item.creditorCharacterId }, strength: item.strength, dueTick: item.dueTick, fulfilled: false, reason: item.reason,
     }));
@@ -558,13 +597,13 @@ function syncMindObligations(world: WorldState): void {
   }
 }
 
-function processDeathAftermath(world: WorldState): void {
+function processDeathAftermath(world: WorldState, indexes: WorldIndexes): void {
   const lastId = world.simulation.lastSocialBurialId ?? 0;
   const recent = world.burials.filter(item => item.id > lastId && item.subjectKind === 'character').sort((a, b) => a.id - b.id);
   for (const burial of recent) {
     const relatives = [...new Set([...(burial.parentIds ?? []), ...(burial.childIds ?? []), ...(burial.spouseId ? [burial.spouseId] : [])])];
     for (const id of relatives) {
-      const survivor = world.characters.find(item => item.id === id);
+      const survivor = indexes.characterById.get(id);
       if (!survivor) continue;
       const mind = ensureCharacterMind(world, survivor);
       mind.emotions.grief = clamp(mind.emotions.grief + 28 + burial.renown * .12);
@@ -590,10 +629,10 @@ function mergeHouseholds(world: WorldState, a: Character, b: Character, indexes:
   if (householdA.id === householdB.id) return;
   const target = householdA.wealth + householdA.memberIds.length >= householdB.wealth + householdB.memberIds.length ? householdA : householdB;
   const source = target.id === householdA.id ? householdB : householdA;
-  const targetHome = target.homeBuildingId ? world.buildings.find(item => item.id === target.homeBuildingId) : undefined;
-  const sourceHome = source.homeBuildingId ? world.buildings.find(item => item.id === source.homeBuildingId) : undefined;
+  const targetHome = target.homeBuildingId ? indexes.buildingById.get(target.homeBuildingId) : undefined;
+  const sourceHome = source.homeBuildingId ? indexes.buildingById.get(source.homeBuildingId) : undefined;
   for (const id of source.memberIds) {
-    const member = world.characters.find(item => item.id === id);
+    const member = indexes.characterById.get(id);
     if (member) {
       if (member.settlementId !== target.settlementId) moveResidentInIndexes(indexes, member, target.settlementId);
       member.householdId = target.id;
@@ -605,11 +644,14 @@ function mergeHouseholds(world: WorldState, a: Character, b: Character, indexes:
     if (targetHome) addUnique(targetHome.residentIds, id);
   }
   target.wealth += source.wealth; target.debt += source.debt; target.inventoryItemIds.push(...source.inventoryItemIds.filter(id => !target.inventoryItemIds.includes(id)));
-  for (const item of world.items) if (item.householdId === source.id) { item.householdId = target.id; item.settlementId = target.settlementId; item.buildingId = target.homeBuildingId; }
+  for (const itemId of source.inventoryItemIds) {
+    const item = indexes.itemById.get(itemId);
+    if (item?.householdId === source.id) { item.householdId = target.id; item.settlementId = target.settlementId; item.buildingId = target.homeBuildingId; }
+  }
   if (sourceHome?.householdId === source.id) sourceHome.householdId = undefined;
   world.households = world.households.filter(item => item.id !== source.id);
   for (const settlement of world.settlements) settlement.householdIds = settlement.householdIds.filter(id => id !== source.id);
-  const targetSettlement = world.settlements.find(item => item.id === target.settlementId);
+  const targetSettlement = indexes.settlementById.get(target.settlementId);
   if (targetSettlement) addUnique(targetSettlement.householdIds, target.id);
   indexes.householdById.delete(source.id);
   for (const [settlementId, households] of indexes.householdsBySettlement) {
@@ -626,9 +668,9 @@ function splitHouseholdAfterDivorce(world: WorldState, leaving: Character, stayi
   const wealth = source.wealth * .35;
   const debt = source.debt * .35;
   source.wealth -= wealth; source.debt -= debt; source.memberIds = source.memberIds.filter(id => id !== leaving.id);
-  const settlement = world.settlements.find(item => item.id === leaving.settlementId);
+  const settlement = indexes.settlementById.get(leaving.settlementId);
   if (!settlement) return;
-  const home = world.buildings.find(item => item.settlementId === settlement.id && ['house', 'tenement', 'manor'].includes(item.type) && item.condition > 25 && !item.householdId);
+  const home = (indexes.buildingsBySettlement.get(settlement.id) ?? []).find(item => ['house', 'tenement', 'manor'].includes(item.type) && item.condition > 25 && !item.householdId);
   const household: Household = {
     id: world.nextIds.household++, settlementId: settlement.id, homeBuildingId: home?.id, headCharacterId: leaving.id, memberIds: [leaving.id], status: wealth > 80 ? 'зажиточные' : wealth < 8 ? 'бедные' : 'обычные',
     wealth, debt, monthlyIncome: 0, monthlyExpenses: 0, foodReserveDays: 0, fuelReserveDays: 0, inventoryItemIds: [], needs: { ...leaving.needs }, history: [`Создано после развода в ${world.year} году.`],
@@ -637,7 +679,7 @@ function splitHouseholdAfterDivorce(world: WorldState, leaving: Character, stayi
   const list = indexes.householdsBySettlement.get(settlement.id) ?? []; list.push(household); indexes.householdsBySettlement.set(settlement.id, list);
   leaving.householdId = household.id; leaving.homeBuildingId = home?.id; leaving.homeless = !home;
   if (home) { home.householdId = household.id; addUnique(home.residentIds, leaving.id); }
-  if (source.homeBuildingId) { const oldHome = world.buildings.find(item => item.id === source.homeBuildingId); if (oldHome) oldHome.residentIds = oldHome.residentIds.filter(id => id !== leaving.id); }
+  if (source.homeBuildingId) { const oldHome = indexes.buildingById.get(source.homeBuildingId); if (oldHome) oldHome.residentIds = oldHome.residentIds.filter(id => id !== leaving.id); }
   void rng;
 }
 

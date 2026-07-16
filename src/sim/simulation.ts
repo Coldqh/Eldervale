@@ -1,9 +1,9 @@
-import type { Character, EntityRef, Kingdom, Monster, Relationship, Settlement, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
+import type { Character, EntityRef, Kingdom, Monster, Relationship, Settlement, SimulationPhaseProfile, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
 import { RNG } from './rng';
 import { personName, placeName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
-import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, pruneEmptyMaterialItems } from './materialEconomy';
+import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
 import { advanceLivingEconomy, detailedPopulationContext } from './livingEconomy';
 import { advanceMilitaryInfrastructure, applyArmyCasualties, synchronizeArmyStrength } from './militaryInfrastructure';
@@ -11,7 +11,7 @@ import { normalizeKingdomCapitals } from './kingdomState';
 import type { WorldIndexes } from './indexes';
 import {
   addResidentToIndexes, buildWorldIndexes, changeProfessionInIndexes, indexRelationship,
-  moveResidentInIndexes, relationshipKey, residents, workers,
+  moveResidentInIndexes, refreshDynamicWorldIndexes, rebuildRelationshipIndexes, relationshipKey, residents, workers,
 } from './indexes';
 import { prepareMonthSchedule, worldTick } from './scheduler';
 import { advanceModernTerritories, captureTerritoryAroundSettlement } from './territory';
@@ -787,7 +787,7 @@ function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): voi
     for (const candidate of world.settlements) {
       if (candidate.id === settlement.id || candidate.kingdomId !== settlement.kingdomId || candidate.residentialCapacity - candidate.population < 3) continue;
       const candidateDistance = Math.hypot(candidate.x - settlement.x, candidate.y - settlement.y);
-      const connection = localResidents.slice(0, 24).reduce((sum, resident) => sum + settlementConnectionScore(world, resident, candidate.id), 0);
+      const connection = localResidents.slice(0, 24).reduce((sum, resident) => sum + settlementConnectionScore(world, resident, candidate.id, indexes), 0);
       const score = (candidate.residentialCapacity - candidate.population) * .8 + candidate.prosperity * .25 + connection - candidateDistance * 4;
       if (score > bestScore) { bestScore = score; destination = candidate; }
     }
@@ -795,7 +795,7 @@ function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): voi
       settlement.unrest = Math.min(100, settlement.unrest + 5);
       continue;
     }
-    const migrants = localResidents.filter(character => character.age >= 14 && !character.titles.length).sort((a, b) => settlementConnectionScore(world, b, destination!.id) - settlementConnectionScore(world, a, destination!.id) || a.id - b.id).slice(0, Math.min(shortage, rng.int(1, 6)));
+    const migrants = localResidents.filter(character => character.age >= 14 && !character.titles.length).sort((a, b) => settlementConnectionScore(world, b, destination!.id, indexes) - settlementConnectionScore(world, a, destination!.id, indexes) || a.id - b.id).slice(0, Math.min(shortage, rng.int(1, 6)));
     if (!migrants.length) continue;
     for (const migrant of migrants) {
       moveResidentInIndexes(indexes, migrant, destination.id);
@@ -819,97 +819,120 @@ export interface SimulationEngine {
   world: WorldState;
   indexes: WorldIndexes;
   processedTasks: number;
+  phaseTotals: Map<string, { totalMs: number; calls: number; maxMs: number }>;
+  exactMonths: number;
+  coarseMonths: number;
 }
 
 export function createSimulationEngine(world: WorldState): SimulationEngine {
-  return { world, indexes: buildWorldIndexes(world), processedTasks: 0 };
+  world.simulation.performanceCoreVersion = 1;
+  return { world, indexes: buildWorldIndexes(world), processedTasks: 0, phaseTotals: new Map(), exactMonths: 0, coarseMonths: 0 };
 }
 
 export function replaceSimulationWorld(engine: SimulationEngine, world: WorldState): void {
   engine.world = world;
   engine.indexes = buildWorldIndexes(world);
   engine.processedTasks = 0;
+  engine.phaseTotals.clear();
+  engine.exactMonths = 0;
+  engine.coarseMonths = 0;
 }
 
-export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: string) => void): number {
+export function resetSimulationProfiler(engine: SimulationEngine): void {
+  engine.phaseTotals.clear();
+  engine.exactMonths = 0;
+  engine.coarseMonths = 0;
+}
+
+export function simulationPhaseProfile(engine: SimulationEngine): SimulationPhaseProfile[] {
+  return [...engine.phaseTotals.entries()]
+    .map(([phase, value]) => ({ phase, totalMs: value.totalMs, calls: value.calls, maxMs: value.maxMs }))
+    .sort((a, b) => b.totalMs - a.totalMs || a.phase.localeCompare(b.phase));
+}
+
+function runPhase<T>(engine: SimulationEngine, phase: string, onPhase: ((phase: string) => void) | undefined, action: () => T): T {
+  onPhase?.(phase);
+  const startedAt = performance.now();
+  try {
+    return action();
+  } finally {
+    const elapsed = performance.now() - startedAt;
+    const current = engine.phaseTotals.get(phase) ?? { totalMs: 0, calls: 0, maxMs: 0 };
+    current.totalMs += elapsed;
+    current.calls += 1;
+    current.maxMs = Math.max(current.maxMs, elapsed);
+    engine.phaseTotals.set(phase, current);
+  }
+}
+
+export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: string) => void, options: { fastForward?: boolean } = {}): number {
   const { world, indexes } = engine;
+  const fastForward = Boolean(options.fastForward);
+  if (fastForward) engine.coarseMonths += 1;
+  else engine.exactMonths += 1;
   initializeDecisionCore(world);
   world.month += 1;
   if (world.month > 12) { world.month = 1; world.year += 1; }
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
-  const schedule = prepareMonthSchedule(world, indexes);
+  const schedule = prepareMonthSchedule(world, indexes, { fastForward });
   const detailed = detailedPopulationContext(world, indexes, schedule.activeSettlementIds);
 
-  onPhase?.('Поля, посевы и уход за урожаем');
-  advanceAgriculture(world, rng, indexes, schedule.economySettlementIds);
-  onPhase?.('Домохозяйства, заведения и физическая экономика');
-  advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds, detailed.householdIds);
-  onPhase?.('Личная экипировка, работа, покупки и местные потребности');
-  advanceLivingEconomy(world, rng, indexes, detailed);
-  onPhase?.('Стройплощадки, материалы и работа строителей');
-  advanceConstruction(world, rng, indexes, schedule.economySettlementIds);
-  pruneEmptyMaterialItems(world);
-  onPhase?.('Поселения и торговые пути');
-  advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds);
+  if (schedule.economySettlementIds.size) runPhase(engine, 'Поля, посевы и уход за урожаем', onPhase, () => advanceAgriculture(world, rng, indexes, schedule.economySettlementIds));
+  if (schedule.economySettlementIds.size) runPhase(engine, 'Домохозяйства, заведения и физическая экономика', onPhase, () => advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds, detailed.householdIds));
+  runPhase(engine, 'Личная экипировка, работа, покупки и местные потребности', onPhase, () => advanceLivingEconomy(world, rng, indexes, detailed, { fastForward }));
+  if (schedule.economySettlementIds.size) runPhase(engine, 'Стройплощадки, материалы и работа строителей', onPhase, () => advanceConstruction(world, rng, indexes, schedule.economySettlementIds));
+  if (schedule.economySettlementIds.size) runPhase(engine, 'Поселения и торговые пути', onPhase, () => advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds));
 
   if (schedule.runPopulation) {
-    onPhase?.('Жители, семьи и наследование');
-    advancePopulation(world, rng, indexes);
+    runPhase(engine, 'Жители, семьи и наследование', onPhase, () => advancePopulation(world, rng, indexes));
+    rebuildRelationshipIndexes(indexes, world.relationships);
   }
   if (schedule.runHousing) {
-    onPhase?.('Строительство и переселения');
-    advanceHousing(world, rng, indexes);
+    runPhase(engine, 'Строительство и переселения', onPhase, () => advanceHousing(world, rng, indexes));
   }
 
-  onPhase?.(schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы');
-  advanceEcology(world, rng, indexes, {
-    settlementIds: schedule.ecologySettlementIds,
-    activeSettlementIds: schedule.activeSettlementIds,
-    updateAnimals: schedule.runSeasonalEcology,
-  });
+  if (schedule.ecologySettlementIds.size || schedule.runSeasonalEcology) runPhase(engine, schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы', onPhase, () => advanceEcology(world, rng, indexes, {
+    settlementIds: schedule.ecologySettlementIds, activeSettlementIds: schedule.activeSettlementIds, updateAnimals: schedule.runSeasonalEcology,
+  }));
 
   if (world.month === 1) {
-    onPhase?.('Медленное расширение границ');
-    advanceModernTerritories(world, new RNG(`${world.config.seed}:современные-границы:${world.year}`));
+    runPhase(engine, 'Медленное расширение границ', onPhase, () => advanceModernTerritories(world, new RNG(`${world.config.seed}:современные-границы:${world.year}`)));
   }
 
-  onPhase?.('Цели, эмоции, обязательства и мотивы жителей');
-  advanceMindSystem(world, rng);
-  onPhase?.('Связи, семьи, обещания и личные последствия');
-  advanceSocialSystem(world, rng, indexes);
-  onPhase?.('Казармы, гарнизоны, жалование и снабжение армий');
-  advanceMilitaryInfrastructure(world, rng, indexes);
-  pruneEmptyMaterialItems(world);
-  onPhase?.('Политика, армии и угрозы');
-  startWars(world, rng);
-  moveArmies(world, rng, indexes, schedule.dueArmyIds);
-  recoverArmies(world);
-  monsterActions(world, rng, indexes, schedule.dueMonsterIds);
-  normalizeKingdomCapitals(world);
-  onPhase?.('Городские службы, патрули, преступления, суды и пожары');
-  advanceSettlementLife(world, rng, indexes, schedule.activeSettlementIds, schedule.economySettlementIds);
-  onPhase?.('Память, слухи, письма и донесения');
-  const knowledge = advanceKnowledgeSystem(world, rng, indexes, detailed);
+  const mindIds = schedule.runMindGlobal ? undefined : fastForward && ![1, 4, 7, 10].includes(world.month) ? new Set<number>() : new Set<number>([
+    ...detailed.characterIds,
+    ...world.kingdoms.map(kingdom => kingdom.rulerId),
+    ...world.armies.map(army => army.commanderId).filter((id): id is number => typeof id === 'number'),
+  ]);
+  if (schedule.runMindGlobal || (mindIds?.size ?? 0)) runPhase(engine, 'Цели, эмоции, обязательства и мотивы жителей', onPhase, () => advanceMindSystem(world, rng, indexes, mindIds));
+  runPhase(engine, 'Связи, семьи, обещания и личные последствия', onPhase, () => advanceSocialSystem(world, rng, indexes, fastForward));
+  runPhase(engine, 'Казармы, гарнизоны, жалование и снабжение армий', onPhase, () => advanceMilitaryInfrastructure(world, rng, indexes));
+  runPhase(engine, 'Политика, армии и угрозы', onPhase, () => {
+    startWars(world, rng); moveArmies(world, rng, indexes, schedule.dueArmyIds); recoverArmies(world); monsterActions(world, rng, indexes, schedule.dueMonsterIds); normalizeKingdomCapitals(world);
+  });
+  runPhase(engine, 'Городские службы, патрули, преступления, суды и пожары', onPhase, () => advanceSettlementLife(world, rng, indexes, schedule.activeSettlementIds, schedule.economySettlementIds));
+  const knowledge = runPhase(engine, 'Память, слухи, письма и донесения', onPhase, () => advanceKnowledgeSystem(world, rng, indexes, detailed, { maintenance: schedule.runKnowledgeMaintenance }));
   for (const threat of knowledge.confirmedMonsterThreats) {
-    const monster = world.monsters.find(item => item.id === threat.monsterId);
+    const monster = indexes.monsterById.get(threat.monsterId) ?? world.monsters.find(item => item.id === threat.monsterId);
     if (!monster?.alive) { markKnowledgeDecision(world, threat.factId, 'К моменту решения угроза уже исчезла.'); continue; }
     dispatchHero(world, threat.monsterId, threat.kingdomId, rng, indexes);
     if (world.monsters.some(item => item.id === threat.monsterId)) dispatchArmyAgainstMonster(world, threat.monsterId, threat.kingdomId);
     markKnowledgeDecision(world, threat.factId, `Правитель получил подтверждённое донесение и отдал приказ в ${world.year}.${String(world.month).padStart(2, '0')}.`);
   }
-  onPhase?.('Кладбища, погребения и исчезновение следов');
-  advanceBurials(world, rng);
-  succession(world, rng);
-  onPhase?.('Дворы, вассалы, налоги, приказы и внутренняя политика');
-  advanceStateMachine(world, rng, indexes);
-  onPhase?.('Полевые лагеря, отдельные солдаты и походные колонны');
-  advancePhysicalArmySystem(world, rng);
+  runPhase(engine, 'Кладбища, погребения и исчезновение следов', onPhase, () => { advanceBurials(world, rng); succession(world, rng); });
+  runPhase(engine, 'Дворы, вассалы, налоги, приказы и внутренняя политика', onPhase, () => advanceStateMachine(world, rng, indexes));
+  runPhase(engine, 'Полевые лагеря, отдельные солдаты и походные колонны', onPhase, () => advancePhysicalArmySystem(world, rng, indexes));
 
   if (schedule.runBooks) writeBooks(world, rng);
   if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);
 
   // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
   ensureEstablishmentOwners(world, indexes);
+  runPhase(engine, 'Очистка исчерпанных предметов', onPhase, () => pruneEmptyMaterialItems(world, indexes));
+  if (world.month === 1) runPhase(engine, 'Уплотнение индексов и очередей', onPhase, () => {
+    invalidateMaterialRuntime(world);
+    refreshDynamicWorldIndexes(indexes, world);
+  });
 
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
@@ -918,6 +941,6 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
 export function advanceWorld(source: WorldState, months = 1): WorldState {
   const world = structuredClone(source);
   const engine = createSimulationEngine(world);
-  for (let step = 0; step < months; step += 1) advanceOneMonth(engine);
+  for (let step = 0; step < months; step += 1) advanceOneMonth(engine, undefined, { fastForward: months >= 24 });
   return world;
 }

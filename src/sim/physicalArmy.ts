@@ -3,6 +3,7 @@ import type {
 } from '../types';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
+import type { WorldIndexes } from './indexes';
 
 const PHYSICAL_ARMY_VERSION = 1;
 const FIELD_TERRAINS = new Set<Tile['terrain']>(['plains', 'forest', 'hills', 'coast', 'marsh', 'desert', 'tundra', 'mountains']);
@@ -16,27 +17,31 @@ interface StructurePlan {
   count: number;
 }
 
-export function initializePhysicalArmySystem(world: WorldState, rng = new RNG(`${world.config.seed}:физические-армии`)): void {
+export function initializePhysicalArmySystem(world: WorldState, rng = new RNG(`${world.config.seed}:физические-армии`), indexes?: WorldIndexes): void {
   world.armyCamps ??= [];
   world.armyCampStructures ??= [];
   world.armyLocalPositions ??= [];
   world.nextIds.armyCamp ??= Math.max(0, ...world.armyCamps.map(item => item.id)) + 1;
   world.nextIds.armyCampStructure ??= Math.max(0, ...world.armyCampStructures.map(item => item.id)) + 1;
-  for (const army of world.armies) synchronizePhysicalArmy(world, army, rng, true);
+  const positionCounts = countPositionsByArmy(world);
+  for (const army of world.armies) synchronizePhysicalArmy(world, army, rng, true, indexes, positionCounts.get(army.id) ?? 0);
   world.simulation.physicalArmyVersion = PHYSICAL_ARMY_VERSION;
 }
 
-export function advancePhysicalArmySystem(world: WorldState, rng: RNG): void {
+export function advancePhysicalArmySystem(world: WorldState, rng: RNG, indexes?: WorldIndexes): void {
   if (world.simulation.physicalArmyVersion !== PHYSICAL_ARMY_VERSION || !Array.isArray(world.armyCamps) || !Array.isArray(world.armyCampStructures) || !Array.isArray(world.armyLocalPositions)) {
-    initializePhysicalArmySystem(world, rng);
+    initializePhysicalArmySystem(world, rng, indexes);
     return;
   }
-  const armyIds = new Set(world.armies.map(item => item.id));
-  world.armyCamps = world.armyCamps.filter(item => armyIds.has(item.armyId));
-  const campIds = new Set(world.armyCamps.map(item => item.id));
-  world.armyCampStructures = world.armyCampStructures.filter(item => campIds.has(item.campId));
-  world.armyLocalPositions = world.armyLocalPositions.filter(item => armyIds.has(item.armyId));
-  for (const army of world.armies) synchronizePhysicalArmy(world, army, rng, false);
+  if (world.month === 1 || world.armyCamps.length !== world.armies.length) {
+    const armyIds = new Set(world.armies.map(item => item.id));
+    world.armyCamps = world.armyCamps.filter(item => armyIds.has(item.armyId));
+    const campIds = new Set(world.armyCamps.map(item => item.id));
+    world.armyCampStructures = world.armyCampStructures.filter(item => campIds.has(item.campId));
+    world.armyLocalPositions = world.armyLocalPositions.filter(item => armyIds.has(item.armyId));
+  }
+  const positionCounts = countPositionsByArmy(world);
+  for (const army of world.armies) synchronizePhysicalArmy(world, army, rng, false, indexes, positionCounts.get(army.id) ?? 0);
 }
 
 export function nextArmyFieldStep(world: WorldState, army: Army, targetX: number, targetY: number): { x: number; y: number } {
@@ -58,17 +63,8 @@ export function ensureArmyOutsideSettlements(world: WorldState, army: Army): voi
   if (field) { army.x = field.x; army.y = field.y; }
 }
 
-function synchronizePhysicalArmy(world: WorldState, army: Army, rng: RNG, initial: boolean): void {
+function synchronizePhysicalArmy(world: WorldState, army: Army, rng: RNG, initial: boolean, indexes: WorldIndexes | undefined, positionCount: number): void {
   ensureArmyOutsideSettlements(world, army);
-  const soldierIds = new Set(army.soldierIds);
-  for (const building of world.buildings) building.workerIds = building.workerIds.filter(id => !soldierIds.has(id));
-  for (const establishment of world.establishments) establishment.workerIds = establishment.workerIds.filter(id => !soldierIds.has(id));
-  for (const soldierId of army.soldierIds) {
-    const soldier = world.characters.find(item => item.id === soldierId);
-    if (!soldier) continue;
-    soldier.workplace = `полевой лагерь армии ${army.name}`;
-    soldier.workplaceBuildingId = undefined;
-  }
   const mode: ArmyCamp['mode'] = CAMP_STATUSES.has(army.status) ? 'camp' : army.status === 'battle' ? 'battle' : 'column';
   const tick = worldTick(world);
   let camp = world.armyCamps.find(item => item.armyId === army.id);
@@ -82,31 +78,61 @@ function synchronizePhysicalArmy(world: WorldState, army: Army, rng: RNG, initia
     world.armyCamps.push(camp);
   }
   const moved = camp.globalX !== army.x || camp.globalY !== army.y;
+  const modeChanged = camp.mode !== mode;
   camp.kingdomId = army.kingdomId;
   camp.globalX = army.x; camp.globalY = army.y; camp.mode = mode; camp.lastUpdatedTick = tick;
   if (moved) { camp.establishedTick = tick; camp.history.push(`Армия переместилась в квадрат ${army.x}:${army.y}.`); }
   const signature = `${mode}:${army.soldierIds.length}:${Math.round(army.logistics.tents ?? 0)}:${army.supplyWagonIds.length}`;
+  const rosterSignature = armyRosterSignature(army);
   const currentSignature = (camp as ArmyCamp & { layoutSignature?: string }).layoutSignature;
-  if (initial || moved || currentSignature !== signature) {
-    rebuildCampLayout(world, army, camp, mode, rng);
+  const rosterChanged = camp.rosterSignature !== rosterSignature;
+  const layoutChanged = initial || moved || modeChanged || currentSignature !== signature;
+  const positionsChanged = layoutChanged || rosterChanged || positionCount !== army.soldierIds.length;
+
+  if (initial || rosterChanged) {
+    const soldierIds = new Set(army.soldierIds);
+    for (const building of world.buildings) building.workerIds = building.workerIds.filter(id => !soldierIds.has(id));
+    for (const establishment of world.establishments) establishment.workerIds = establishment.workerIds.filter(id => !soldierIds.has(id));
+    for (const soldierId of army.soldierIds) {
+      const soldier = indexes?.characterById.get(soldierId) ?? world.characters.find(item => item.id === soldierId);
+      if (!soldier) continue;
+      soldier.workplace = `полевой лагерь армии ${army.name}`;
+      soldier.workplaceBuildingId = undefined;
+    }
+    camp.rosterSignature = rosterSignature;
+  }
+  if (layoutChanged) {
+    rebuildCampLayout(world, army, camp, mode, rng, indexes);
     (camp as ArmyCamp & { layoutSignature?: string }).layoutSignature = signature;
   }
-  rebuildSoldierPositions(world, army, camp, mode);
+  if (positionsChanged) rebuildSoldierPositions(world, army, camp, mode, indexes);
   for (const wagonId of army.supplyWagonIds) {
-    const wagon = world.supplyWagons.find(item => item.id === wagonId && item.status !== 'уничтожен');
+    const wagon = indexes?.supplyWagonById.get(wagonId) ?? world.supplyWagons.find(item => item.id === wagonId && item.status !== 'уничтожен');
     if (!wagon) continue;
     wagon.x = army.x; wagon.y = army.y;
     if (mode === 'camp' && wagon.status !== 'разграблен') wagon.status = 'склад';
   }
-  applyCampConsequences(world, army, mode);
+  applyCampConsequences(world, army, mode, indexes);
 }
 
-function rebuildCampLayout(world: WorldState, army: Army, camp: ArmyCamp, mode: ArmyCamp['mode'], rng: RNG): void {
+function countPositionsByArmy(world: WorldState): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const position of world.armyLocalPositions) counts.set(position.armyId, (counts.get(position.armyId) ?? 0) + 1);
+  return counts;
+}
+
+function armyRosterSignature(army: Army): string {
+  let checksum = 0;
+  for (const id of army.soldierIds) checksum = (checksum * 33 + id) >>> 0;
+  return `${army.soldierIds.length}:${checksum}`;
+}
+
+function rebuildCampLayout(world: WorldState, army: Army, camp: ArmyCamp, mode: ArmyCamp['mode'], rng: RNG, indexes?: WorldIndexes): void {
   const oldIds = new Set(camp.structureIds);
   world.armyCampStructures = world.armyCampStructures.filter(item => !oldIds.has(item.id));
   camp.structureIds = [];
   if (mode !== 'camp' || army.soldierIds.length === 0) { camp.perimeterRadius = 6; return; }
-  const soldiers = army.soldierIds.map(id => world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item?.alive));
+  const soldiers = army.soldierIds.map(id => indexes?.characterById.get(id) ?? world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item?.alive));
   const officers = soldiers.filter(item => ['командир', 'офицер', 'сержант', 'рыцарь'].includes(item.militaryRole ?? ''));
   const rankAndFile = soldiers.filter(item => !officers.includes(item));
   const availableTents = Math.max(1, Math.floor(army.logistics.tents || Math.ceil(soldiers.length / 6)));
@@ -149,10 +175,10 @@ function rebuildCampLayout(world: WorldState, army: Army, camp: ArmyCamp, mode: 
   camp.perimeterRadius = Math.max(8, Math.ceil(Math.max(maxX - minX, maxY - minY) / 2) + 3);
 }
 
-function rebuildSoldierPositions(world: WorldState, army: Army, camp: ArmyCamp, mode: ArmyCamp['mode']): void {
+function rebuildSoldierPositions(world: WorldState, army: Army, camp: ArmyCamp, mode: ArmyCamp['mode'], indexes?: WorldIndexes): void {
   const tick = worldTick(world);
   world.armyLocalPositions = world.armyLocalPositions.filter(item => item.armyId !== army.id);
-  const soldiers = army.soldierIds.map(id => world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item?.alive));
+  const soldiers = army.soldierIds.map(id => indexes?.characterById.get(id) ?? world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item?.alive));
   const used = new Set<string>();
   if (mode === 'camp') assignCampTents(world, camp, soldiers);
   for (let index = 0; index < soldiers.length; index += 1) {
@@ -224,7 +250,7 @@ function activityFor(soldier: Character, mode: ArmyCamp['mode'], index: number, 
   return options[hashSeed(`${soldier.id}:${army.id}:${army.status}`) % options.length]!;
 }
 
-function applyCampConsequences(world: WorldState, army: Army, mode: ArmyCamp['mode']): void {
+function applyCampConsequences(world: WorldState, army: Army, mode: ArmyCamp['mode'], indexes?: WorldIndexes): void {
   if (mode !== 'camp' || army.soldierIds.length === 0) return;
   const needed = Math.max(1, Math.ceil(army.soldierIds.length / 6));
   const coverage = Math.min(1, (army.logistics.tents ?? 0) / needed);
@@ -233,7 +259,7 @@ function applyCampConsequences(world: WorldState, army: Army, mode: ArmyCamp['mo
   army.readiness = Math.max(0, army.readiness - 1);
   const unsheltered = army.soldierIds.slice(Math.floor(army.soldierIds.length * coverage));
   for (const id of unsheltered.slice(0, 40)) {
-    const soldier = world.characters.find(item => item.id === id);
+    const soldier = indexes?.characterById.get(id) ?? world.characters.find(item => item.id === id);
     if (soldier) soldier.needs.rest = Math.min(100, soldier.needs.rest + 4);
   }
 }

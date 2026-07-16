@@ -5,6 +5,7 @@ import { inspectWorldIntegrity } from '../src/sim/integrity';
 import { migrateWorld } from '../src/sim/migrateWorld';
 import { advanceWorld } from '../src/sim/simulation';
 import { generateLocalMap, localCellSummary } from '../src/lib/localMap';
+import { aggregateArchiveRows } from '../src/lib/archiveCatalog';
 
 const config = {
   ...defaultConfig,
@@ -56,7 +57,7 @@ function localMarkerSignature(map: ReturnType<typeof generateLocalMap>) {
 const first = generateHistoricalWorld(config);
 const second = generateHistoricalWorld(config);
 assert.deepEqual(signature(first), signature(second), 'один seed должен давать одинаковую прожитую историю');
-assert.equal(first.version, 19);
+assert.equal(first.version, 20);
 assert.ok(first.decisions.length > 0, 'история должна содержать решения');
 assert.ok(first.stateDeltas.length > 0, 'история должна содержать изменения состояния');
 assert.ok(first.characters.every(character => character.mind), 'каждый живой персонаж должен иметь психику');
@@ -65,6 +66,16 @@ assert.ok(Array.isArray(first.socialObligations), 'мир должен хран�
 assert.ok(first.armies.every(army => !first.tiles[army.y * first.config.width + army.x]?.settlementId), 'армии не должны размещаться в поселениях');
 assert.equal(first.armyLocalPositions.length, first.armies.reduce((sum, army) => sum + army.soldierIds.length, 0), 'каждый солдат должен иметь отдельную локальную позицию');
 assert.ok(first.armyCamps.some(camp => camp.mode === 'camp' && camp.structureIds.length > 10), 'полевой лагерь должен состоять из реальных сооружений');
+const animalArchive = aggregateArchiveRows(first, 'animalPopulation')!;
+const resourceArchive = aggregateArchiveRows(first, 'ingredient')!;
+const itemArchive = aggregateArchiveRows(first, 'item')!;
+const fieldArchive = aggregateArchiveRows(first, 'field')!;
+assert.equal(animalArchive.length, new Set(first.animalPopulations.map(item => item.species)).size, 'архив должен объединять животных по видам');
+assert.equal(Math.round(animalArchive.reduce((sum, row) => sum + row.total, 0)), Math.round(first.animalPopulations.reduce((sum, item) => sum + item.count, 0)), 'агрегированный архив должен сохранять общую численность животных');
+assert.equal(resourceArchive.length, new Set(first.ingredients.map(item => `${item.kind}:${item.name}`)).size, 'архив должен объединять одинаковые ресурсы');
+assert.equal(itemArchive.length, new Set(first.items.filter(item => item.quantity > .0001 && item.condition > 0).map(item => item.templateId)).size, 'архив должен объединять предметы по типам');
+assert.equal(fieldArchive.length, new Set(first.fields.map(item => item.crop)).size, 'архив должен объединять поля по культуре');
+assert.ok([animalArchive, resourceArchive, itemArchive, fieldArchive].every(rows => rows.every(row => row.representativeId > 0 && row.entries > 0)), 'каждая агрегированная строка должна открывать реальный объект');
 for (const army of first.armies) {
   const map = generateLocalMap(first, army.x, army.y);
   const soldiers = map.markers.filter(marker => marker.id.startsWith(`army-soldier-${army.id}-`));
@@ -125,13 +136,13 @@ const report = inspectWorldIntegrity(focusedFuture);
 assert.deepEqual(report.errors, [], `ошибки целостности: ${report.errors.join(' | ')}`);
 
 const legacy = structuredClone(first) as any;
-legacy.version = 18;
+legacy.version = 19;
 delete legacy.armyCamps;
 delete legacy.armyCampStructures;
 delete legacy.armyLocalPositions;
 legacy.simulation.physicalArmyVersion = undefined;
 const migrated = migrateWorld(legacy);
-assert.equal(migrated.version, 19);
+assert.equal(migrated.version, 20);
 assert.ok(migrated.characters.every(character => character.mind), 'миграция должна восстановить психику');
 assert.ok(Array.isArray(migrated.decisions) && Array.isArray(migrated.stateDeltas), 'миграция должна создать журналы причинности');
 assert.ok(Array.isArray(migrated.socialObligations), 'миграция должна сохранить социальные обязательства');

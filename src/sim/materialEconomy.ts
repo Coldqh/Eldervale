@@ -869,9 +869,9 @@ function consume(world: WorldState, ids: number[], templateId: string, quantity:
   return quantity - remaining;
 }
 
-function cleanEmptyItems(world: WorldState): void {
+function cleanEmptyItems(world: WorldState): boolean {
   const removedItems = world.items.filter(item => item.quantity <= .0001 || item.condition <= 0);
-  if (!removedItems.length) return;
+  if (!removedItems.length) return false;
   const removed = new Set(removedItems.map(item => item.id));
   const householdIds = new Set<number>();
   const establishmentIds = new Set<number>();
@@ -908,9 +908,19 @@ function cleanEmptyItems(world: WorldState): void {
     if (offers) activeRuntime.offersBySettlementTemplate.set(key, offers.filter(entry => !removed.has(entry.item.id)));
   }
   world.items = world.items.filter(item => !removed.has(item.id));
+  return true;
 }
 
-export function pruneEmptyMaterialItems(world: WorldState): void { cleanEmptyItems(world); }
+export function invalidateMaterialRuntime(world: WorldState): void {
+  if (activeRuntime?.itemById) activeRuntime = undefined;
+  materialRuntimeCache.delete(world);
+}
+
+export function pruneEmptyMaterialItems(world: WorldState, indexes?: WorldIndexes): void {
+  const changed = cleanEmptyItems(world);
+  if (changed && indexes) indexes.itemById = new Map(world.items.map(item => [item.id, item]));
+  if (changed) invalidateMaterialRuntime(world);
+}
 
 function spoilItems(world: WorldState, settlementIds: ReadonlySet<number>, elapsedMonths: number): void {
   for (const item of world.items) {
@@ -1447,7 +1457,6 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
       recalculateMarket(world, settlement);
     }
     createShipments(world, settlementIds);
-    cleanEmptyItems(world);
   } finally {
     activeRuntime = undefined;
   }

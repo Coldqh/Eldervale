@@ -1,7 +1,7 @@
 import type { SimulationProfile, SimulationProgress, WorldConfig, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from './worldWorkerProtocol';
 import { generateHistoricalWorld } from '../sim/historicalEngine';
-import { advanceOneMonth, createSimulationEngine, type SimulationEngine } from '../sim/simulation';
+import { advanceOneMonth, createSimulationEngine, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
@@ -95,11 +95,13 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     fallbackCancelled = false;
     let average = 0;
     const startTasks = fallbackEngine.processedTasks;
+    resetSimulationProfiler(fallbackEngine);
+    const fastForward = command.months >= 24;
     for (let step = 0; step < command.months; step += 1) {
       if (fallbackCancelled) return { world: fallbackEngine.world, cancelled: true };
       const monthStart = performance.now();
       let phase = 'Симуляция мира';
-      advanceOneMonth(fallbackEngine, value => { phase = value; });
+      advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward });
       const monthMs = performance.now() - monthStart;
       average = average ? average * .72 + monthMs * .28 : monthMs;
       const completed = step + 1;
@@ -110,8 +112,10 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       operation: 'симуляция', months: command.months, totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt,
       indexedEntities: countIndexedEntities(fallbackEngine.indexes), processedTasks: fallbackEngine.processedTasks - startTasks,
       activeRegions: fallbackEngine.world.simulation.activeRegionKeys.length, sleepingRegions: fallbackEngine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
+      fastForward, exactMonths: fallbackEngine.exactMonths, coarseMonths: fallbackEngine.coarseMonths, phaseTimings: simulationPhaseProfile(fallbackEngine),
     };
     fallbackProfile = profile;
+    fallbackEngine.world.simulation.lastProfile = profile;
     return { world: fallbackEngine.world, profile };
   }
   if (command.action === 'snapshot') return { world: fallbackEngine?.world, profile: fallbackProfile };

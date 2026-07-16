@@ -27,11 +27,11 @@ export function migrateWorld(input: unknown): WorldState {
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-19`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-20`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 19;
+  localized.version = 20;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -95,6 +95,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 17) { localized.simulation.decisionCoreVersion = undefined; localized.simulation.mindSystemVersion = undefined; }
   if (sourceVersion < 18) { localized.simulation.socialSystemVersion = undefined; localized.simulation.lastSocialBurialId = undefined; }
   if (sourceVersion < 19) localized.simulation.physicalArmyVersion = undefined;
+  if (sourceVersion < 20) localized.simulation.performanceCoreVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],

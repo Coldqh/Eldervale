@@ -3,6 +3,7 @@ import type {
   Message, PersonalMemory, Rumor, Settlement, SettlementKnowledge, WorldEvent, WorldState,
 } from '../types';
 import type { WorldIndexes } from './indexes';
+import { refreshKnowledgeIndexes } from './indexes';
 import type { DetailedPopulationContext } from './livingEconomy';
 import { RNG } from './rng';
 import { worldTick } from './scheduler';
@@ -15,6 +16,8 @@ const MAX_CHARACTER_FACTS = 28;
 const MAX_CHARACTER_MEMORIES = 14;
 const MAX_SETTLEMENT_FACTS = 120;
 const MAX_SETTLEMENT_RUMORS = 36;
+
+let activeIndexes: WorldIndexes | undefined;
 
 export interface KnowledgeAdvanceResult {
   confirmedMonsterThreats: { factId: number; monsterId: number; kingdomId: number; settlementId: number }[];
@@ -57,10 +60,11 @@ export function ensureCharacterKnowledge(character: Character, tick: number): Ch
 }
 
 function settlementKnowledge(world: WorldState, settlementId: number): SettlementKnowledge {
-  let state = world.settlementKnowledge.find(item => item.settlementId === settlementId);
+  let state = activeIndexes?.settlementKnowledgeBySettlement.get(settlementId) ?? world.settlementKnowledge.find(item => item.settlementId === settlementId);
   if (!state) {
     state = { settlementId, factIds: [], verifiedFactIds: [], rumorIds: [], lastUpdatedTick: worldTick(world) };
     world.settlementKnowledge.push(state);
+    activeIndexes?.settlementKnowledgeBySettlement.set(settlementId, state);
   }
   state.factIds ??= [];
   state.verifiedFactIds ??= [];
@@ -80,14 +84,14 @@ function addFactToCharacter(world: WorldState, character: Character | undefined,
   const tick = worldTick(world);
   const knowledge = ensureCharacterKnowledge(character, tick);
   pushUniqueLimited(knowledge.factIds, factId, MAX_CHARACTER_FACTS);
-  const existing = world.memories.find(memory => memory.characterId === character.id && memory.factId === factId);
+  const existing = knowledge.memoryIds.map(id => activeIndexes?.memoryById.get(id) ?? world.memories.find(memory => memory.id === id)).find(memory => memory?.factId === factId);
   if (existing) {
     existing.confidence = Math.max(existing.confidence, confidence);
     existing.lastRecalledTick = tick;
     return;
   }
   if (!knowledge.detailed && emotionalWeight < 55 && knowledge.memoryIds.length >= 5) return;
-  const fact = world.knowledgeFacts.find(item => item.id === factId);
+  const fact = activeIndexes?.knowledgeFactById.get(factId) ?? world.knowledgeFacts.find(item => item.id === factId);
   const memory: PersonalMemory = {
     id: world.nextIds.memory++, characterId: character.id, factId, eventId: fact?.eventId,
     kind: memoryKind(fact), summary: fact?.statement ?? 'Смутное известие', learnedTick: tick, sourceKind: source,
@@ -96,6 +100,7 @@ function addFactToCharacter(world: WorldState, character: Character | undefined,
     private: privateMemory, lastRecalledTick: tick,
   };
   world.memories.push(memory);
+  activeIndexes?.memoryById.set(memory.id, memory);
   pushUniqueLimited(knowledge.memoryIds, memory.id, MAX_CHARACTER_MEMORIES);
 }
 
@@ -133,25 +138,25 @@ function settlementForRef(world: WorldState, ref?: EntityRef): Settlement | unde
   if (!ref) return undefined;
   if (ref.kind === 'settlement') return world.settlements.find(item => item.id === ref.id);
   if (ref.kind === 'character') {
-    const character = world.characters.find(item => item.id === ref.id);
-    return character ? world.settlements.find(item => item.id === character.settlementId) : undefined;
+    const character = activeIndexes?.characterById.get(ref.id) ?? world.characters.find(item => item.id === ref.id);
+    return character ? activeIndexes?.settlementById.get(character.settlementId) ?? world.settlements.find(item => item.id === character.settlementId) : undefined;
   }
   if (ref.kind === 'kingdom') {
-    const kingdom = world.kingdoms.find(item => item.id === ref.id);
-    return kingdom ? world.settlements.find(item => item.id === kingdom.capitalId) : undefined;
+    const kingdom = activeIndexes?.kingdomById.get(ref.id) ?? world.kingdoms.find(item => item.id === ref.id);
+    return kingdom ? activeIndexes?.settlementById.get(kingdom.capitalId) ?? world.settlements.find(item => item.id === kingdom.capitalId) : undefined;
   }
   if (ref.kind === 'army') {
-    const army = world.armies.find(item => item.id === ref.id);
+    const army = activeIndexes?.armyById.get(ref.id) ?? world.armies.find(item => item.id === ref.id);
     return army ? nearestSettlement(world, army.x, army.y) : undefined;
   }
   if (ref.kind === 'monster') {
-    const monster = world.monsters.find(item => item.id === ref.id);
+    const monster = activeIndexes?.monsterById.get(ref.id) ?? world.monsters.find(item => item.id === ref.id);
     if (!monster) return undefined;
     return monster.targetSettlementId ? world.settlements.find(item => item.id === monster.targetSettlementId) : nearestSettlement(world, monster.x, monster.y);
   }
   if (ref.kind === 'tradeRoute') {
-    const route = world.tradeRoutes.find(item => item.id === ref.id);
-    return route ? world.settlements.find(item => item.id === route.fromSettlementId) : undefined;
+    const route = activeIndexes?.tradeRouteById.get(ref.id) ?? world.tradeRoutes.find(item => item.id === ref.id);
+    return route ? activeIndexes?.settlementById.get(route.fromSettlementId) ?? world.settlements.find(item => item.id === route.fromSettlementId) : undefined;
   }
   return undefined;
 }
@@ -206,7 +211,7 @@ function witnessCharacters(world: WorldState, event: WorldEvent, origin?: Settle
   const ids = new Set(event.entityRefs.filter(ref => ref.kind === 'character').map(ref => ref.id));
   const direct = [...ids].map(id => world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item?.alive));
   if (!origin) return direct;
-  const locals = world.characters.filter(character => character.alive && character.settlementId === origin.id);
+  const locals = activeIndexes?.residentsBySettlement.get(origin.id) ?? world.characters.filter(character => character.alive && character.settlementId === origin.id);
   const preferred = locals.filter(character => ['guard', 'hunter', 'merchant', 'scribe', 'priest', 'soldier'].includes(character.profession) || character.renown >= 40);
   return [...direct, ...preferred.slice(0, Math.max(2, Math.min(7, event.importance + 1)))].filter((item, index, list) => list.findIndex(other => other.id === item.id) === index);
 }
@@ -232,6 +237,7 @@ function createRumor(world: WorldState, fact: KnowledgeFact, originSettlementId:
     history: [`Возник в поселении ${world.settlements.find(item => item.id === originSettlementId)?.name ?? originSettlementId}.`],
   };
   world.rumors.push(rumor);
+  activeIndexes?.rumorById.set(rumor.id, rumor);
   const state = settlementKnowledge(world, originSettlementId);
   pushUniqueLimited(state.rumorIds, rumor.id, MAX_SETTLEMENT_RUMORS);
   return rumor;
@@ -280,7 +286,8 @@ export function registerWorldEventKnowledge(world: WorldState, event: WorldEvent
   if (existing) return existing;
   const fact = eventFact(world, event);
   world.knowledgeFacts.push(fact);
-  const origin = fact.originSettlementId ? world.settlements.find(item => item.id === fact.originSettlementId) : undefined;
+  activeIndexes?.knowledgeFactById.set(fact.id, fact);
+  const origin = fact.originSettlementId ? activeIndexes?.settlementById.get(fact.originSettlementId) ?? world.settlements.find(item => item.id === fact.originSettlementId) : undefined;
   if (origin) addFactToSettlement(world, origin.id, fact.id, fact.verified);
   const witnesses = witnessCharacters(world, event, origin);
   for (const witness of witnesses) addFactToCharacter(world, witness, fact.id, 'свидетель', 96, Math.min(100, 25 + event.importance * 13));
@@ -380,7 +387,6 @@ export function initializeKnowledgeSystem(world: WorldState, rng: RNG): void {
   ensureCollections(world);
   const tick = worldTick(world);
   if (world.simulation.knowledgeSystemVersion === 1 && world.settlementKnowledge.length === world.settlements.length) {
-    for (const character of world.characters) ensureCharacterKnowledge(character, tick);
     return;
   }
   world.settlementKnowledge = world.settlements.map(settlement => ({ settlementId: settlement.id, factIds: [], verifiedFactIds: [], rumorIds: [], lastUpdatedTick: tick }));
@@ -424,7 +430,7 @@ function deliverMessage(world: WorldState, message: Message, rng: RNG): void {
     message.history.push(message.status === 'перехвачено' ? 'Послание перехвачено на дороге.' : 'Послание исчезло в пути.');
     if (message.status === 'перехвачено') {
       for (const factId of message.knowledgeFactIds) {
-        const fact = world.knowledgeFacts.find(item => item.id === factId);
+        const fact = activeIndexes?.knowledgeFactById.get(factId) ?? world.knowledgeFacts.find(item => item.id === factId);
         if (fact) createRumor(world, fact, message.fromSettlementId, rng, Math.max(20, message.reliability - 30));
       }
     }
@@ -432,11 +438,15 @@ function deliverMessage(world: WorldState, message: Message, rng: RNG): void {
   }
   message.status = 'доставлено';
   message.history.push(`Доставлено в ${world.year}.${String(world.month).padStart(2, '0')}.`);
-  const recipient = message.recipientCharacterId ? world.characters.find(item => item.id === message.recipientCharacterId) : message.recipientKingdomId ? world.characters.find(item => item.id === world.kingdoms.find(kingdom => kingdom.id === message.recipientKingdomId)?.rulerId) : undefined;
+  const recipient = message.recipientCharacterId
+    ? activeIndexes?.characterById.get(message.recipientCharacterId) ?? world.characters.find(item => item.id === message.recipientCharacterId)
+    : message.recipientKingdomId
+      ? (() => { const kingdom = activeIndexes?.kingdomById.get(message.recipientKingdomId!) ?? world.kingdoms.find(item => item.id === message.recipientKingdomId); return kingdom ? activeIndexes?.characterById.get(kingdom.rulerId) ?? world.characters.find(item => item.id === kingdom.rulerId) : undefined; })()
+      : undefined;
   for (const factId of message.knowledgeFactIds) {
     addFactToSettlement(world, message.toSettlementId, factId, message.reliability >= 75);
     addFactToCharacter(world, recipient, factId, message.kind === 'королевский указ' ? 'указ' : message.kind === 'военный рапорт' ? 'донесение' : message.kind === 'торговая весть' ? 'торговец' : 'письмо', message.reliability, 48, message.sealed);
-    const fact = world.knowledgeFacts.find(item => item.id === factId);
+    const fact = activeIndexes?.knowledgeFactById.get(factId) ?? world.knowledgeFacts.find(item => item.id === factId);
     if (fact) fact.history.push(`Сведения доставлены в ${world.settlements.find(item => item.id === message.toSettlementId)?.name ?? message.toSettlementId}.`);
   }
 }
@@ -444,12 +454,13 @@ function deliverMessage(world: WorldState, message: Message, rng: RNG): void {
 function spreadSettlementRumors(world: WorldState, settlement: Settlement, rng: RNG, detailed: DetailedPopulationContext): number {
   const state = settlementKnowledge(world, settlement.id);
   const tick = worldTick(world);
-  const rumorPool = state.rumorIds.map(id => world.rumors.find(item => item.id === id)).filter((item): item is Rumor => Boolean(item && item.status !== 'затих' && item.status !== 'опровергнут'));
-  const factPool = state.factIds.map(id => world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item));
+  const rumorPool = state.rumorIds.map(id => activeIndexes?.rumorById.get(id) ?? world.rumors.find(item => item.id === id)).filter((item): item is Rumor => Boolean(item && item.status !== 'затих' && item.status !== 'опровергнут'));
+  const factPool = state.factIds.map(id => activeIndexes?.knowledgeFactById.get(id) ?? world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item));
   if (!rumorPool.length && factPool.length && rng.chance(.18)) createRumor(world, rng.pick(factPool), settlement.id, rng);
-  const currentPool = state.rumorIds.map(id => world.rumors.find(item => item.id === id)).filter((item): item is Rumor => Boolean(item && item.status !== 'затих' && item.status !== 'опровергнут'));
+  const currentPool = state.rumorIds.map(id => activeIndexes?.rumorById.get(id) ?? world.rumors.find(item => item.id === id)).filter((item): item is Rumor => Boolean(item && item.status !== 'затих' && item.status !== 'опровергнут'));
   if (!currentPool.length) return 0;
-  const locals = world.characters.filter(character => character.alive && character.settlementId === settlement.id && (detailed.characterIds.has(character.id) || character.knowledge.detailed || ['merchant', 'priest', 'guard', 'scribe'].includes(character.profession)));
+  const locals = (activeIndexes?.residentsBySettlement.get(settlement.id) ?? world.characters.filter(character => character.alive && character.settlementId === settlement.id))
+    .filter(character => detailed.characterIds.has(character.id) || character.knowledge.detailed || ['merchant', 'priest', 'guard', 'scribe'].includes(character.profession));
   const attempts = detailed.settlementIds.has(settlement.id) ? Math.min(12, Math.max(2, Math.ceil(locals.length / 25))) : 1;
   let spread = 0;
   for (let index = 0; index < attempts && locals.length; index += 1) {
@@ -470,15 +481,15 @@ function spreadSettlementRumors(world: WorldState, settlement: Settlement, rng: 
 function merchantCarriesNews(world: WorldState, rng: RNG): void {
   const tick = worldTick(world);
   for (const merchant of world.travelingMerchants) {
-    const character = world.characters.find(item => item.id === merchant.characterId);
+    const character = activeIndexes?.characterById.get(merchant.characterId) ?? world.characters.find(item => item.id === merchant.characterId);
     if (!character?.alive) continue;
     const state = settlementKnowledge(world, merchant.currentSettlementId);
     if (merchant.status === 'торгует' || merchant.status === 'отдыхает') {
-      const candidates = state.factIds.map(id => world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item && item.secrecy < 45)).sort((a, b) => b.importance - a.importance || b.createdTick - a.createdTick);
+      const candidates = state.factIds.map(id => activeIndexes?.knowledgeFactById.get(id) ?? world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item && item.secrecy < 45)).sort((a, b) => b.importance - a.importance || b.createdTick - a.createdTick);
       for (const fact of candidates.slice(0, 3)) addFactToCharacter(world, character, fact.id, 'торговец', rng.int(45, 82), 20);
     }
     if (merchant.nextSettlementId && merchant.status === 'в пути') {
-      const known = character.knowledge.factIds.map(id => world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item && item.secrecy < 35)).slice(-3);
+      const known = character.knowledge.factIds.map(id => activeIndexes?.knowledgeFactById.get(id) ?? world.knowledgeFacts.find(item => item.id === id)).filter((item): item is KnowledgeFact => Boolean(item && item.secrecy < 35)).slice(-3);
       for (const fact of known) {
         const existing = world.messages.find(message => message.status === 'в пути' && message.kind === 'торговая весть' && message.senderCharacterId === character.id && message.knowledgeFactIds.includes(fact.id));
         if (existing || rng.chance(.65)) continue;
@@ -492,18 +503,18 @@ function merchantCarriesNews(world: WorldState, rng: RNG): void {
 function createOfficialReports(world: WorldState): void {
   const currentTick = worldTick(world);
   for (const state of world.settlementKnowledge) {
-    const settlement = world.settlements.find(item => item.id === state.settlementId);
-    const kingdom = settlement ? world.kingdoms.find(item => item.id === settlement.kingdomId) : undefined;
-    const capital = kingdom ? world.settlements.find(item => item.id === kingdom.capitalId) : undefined;
+    const settlement = activeIndexes?.settlementById.get(state.settlementId) ?? world.settlements.find(item => item.id === state.settlementId);
+    const kingdom = settlement ? activeIndexes?.kingdomById.get(settlement.kingdomId) ?? world.kingdoms.find(item => item.id === settlement.kingdomId) : undefined;
+    const capital = kingdom ? activeIndexes?.settlementById.get(kingdom.capitalId) ?? world.settlements.find(item => item.id === kingdom.capitalId) : undefined;
     if (!settlement || !kingdom || !capital || settlement.id === capital.id) continue;
     const candidate = state.verifiedFactIds
-      .map(id => world.knowledgeFacts.find(item => item.id === id))
+      .map(id => activeIndexes?.knowledgeFactById.get(id) ?? world.knowledgeFacts.find(item => item.id === id))
       .filter((item): item is KnowledgeFact => Boolean(item && item.importance >= 4 && item.createdTick >= currentTick - 36 && !item.tags.includes('решение-принято')))
       .sort((a, b) => b.createdTick - a.createdTick)[0];
     if (!candidate) continue;
-    const ruler = world.characters.find(item => item.id === kingdom.rulerId);
+    const ruler = activeIndexes?.characterById.get(kingdom.rulerId) ?? world.characters.find(item => item.id === kingdom.rulerId);
     if (ruler?.knowledge.factIds.includes(candidate.id)) continue;
-    const sender = world.characters.find(character => character.alive && character.settlementId === settlement.id && ['guard', 'scribe', 'priest', 'merchant'].includes(character.profession));
+    const sender = (activeIndexes?.residentsBySettlement.get(settlement.id) ?? world.characters).find(character => character.alive && character.settlementId === settlement.id && ['guard', 'scribe', 'priest', 'merchant'].includes(character.profession));
     queueMessage(world, { kind: candidate.topic === 'чудовище' ? 'донесение' : candidate.topic === 'война' ? 'военный рапорт' : 'письмо', senderCharacterId: sender?.id, recipientCharacterId: ruler?.id, recipientKingdomId: kingdom.id, fromSettlementId: settlement.id, toSettlementId: capital.id, knowledgeFactIds: [candidate.id], reliability: 88, sealed: true });
   }
 }
@@ -535,18 +546,30 @@ function updateDetailedKnowledge(world: WorldState, detailed: DetailedPopulation
   }
 }
 
+function updateActiveDetailedKnowledge(world: WorldState, detailed: DetailedPopulationContext): void {
+  const tick = worldTick(world);
+  for (const id of detailed.characterIds) {
+    const character = activeIndexes?.characterById.get(id);
+    if (!character) continue;
+    ensureCharacterKnowledge(character, tick).detailed = true;
+  }
+}
+
 function loseDeadSecrets(world: WorldState): void {
-  const living = new Set(world.characters.map(character => character.id));
+  const living = new Set(activeIndexes?.characterById.keys() ?? world.characters.map(character => character.id));
   const removedMemoryIds = new Set<number>();
   for (const memory of world.memories) if (!living.has(memory.characterId)) removedMemoryIds.add(memory.id);
   if (!removedMemoryIds.size) return;
   world.memories = world.memories.filter(memory => !removedMemoryIds.has(memory.id));
   for (const character of world.characters) character.knowledge.memoryIds = character.knowledge.memoryIds.filter(id => !removedMemoryIds.has(id));
+  const livingFacts = new Set<number>();
+  const publicFacts = new Set<number>();
+  const transitFacts = new Set<number>();
+  for (const character of world.characters) for (const id of character.knowledge.factIds) livingFacts.add(id);
+  for (const state of world.settlementKnowledge) for (const id of state.factIds) publicFacts.add(id);
+  for (const message of world.messages) if (message.status === 'в пути') for (const id of message.knowledgeFactIds) transitFacts.add(id);
   for (const fact of world.knowledgeFacts) {
-    const livingHolder = world.characters.some(character => character.knowledge.factIds.includes(fact.id));
-    const publicHolder = world.settlementKnowledge.some(state => state.factIds.includes(fact.id));
-    const inTransit = world.messages.some(message => message.status === 'в пути' && message.knowledgeFactIds.includes(fact.id));
-    if (!livingHolder && !publicHolder && !inTransit && fact.secrecy >= 50 && !fact.tags.includes('утрачено')) {
+    if (!livingFacts.has(fact.id) && !publicFacts.has(fact.id) && !transitFacts.has(fact.id) && fact.secrecy >= 50 && !fact.tags.includes('утрачено')) {
       fact.tags.push('утрачено');
       fact.history.push('Последний известный носитель умер, не передав сведения.');
     }
@@ -557,10 +580,10 @@ function confirmedThreats(world: WorldState): KnowledgeAdvanceResult['confirmedM
   const result: KnowledgeAdvanceResult['confirmedMonsterThreats'] = [];
   for (const fact of world.knowledgeFacts) {
     if (fact.topic !== 'чудовище' || !fact.verified || fact.tags.includes('решение-принято') || fact.subjectRef?.kind !== 'monster' || !fact.originSettlementId) continue;
-    const monster = world.monsters.find(item => item.id === fact.subjectRef!.id && item.alive);
-    const settlement = world.settlements.find(item => item.id === fact.originSettlementId);
-    const kingdom = settlement ? world.kingdoms.find(item => item.id === settlement.kingdomId) : undefined;
-    const ruler = kingdom ? world.characters.find(item => item.id === kingdom.rulerId) : undefined;
+    const monster = activeIndexes?.monsterById.get(fact.subjectRef!.id) ?? world.monsters.find(item => item.id === fact.subjectRef!.id && item.alive);
+    const settlement = activeIndexes?.settlementById.get(fact.originSettlementId) ?? world.settlements.find(item => item.id === fact.originSettlementId);
+    const kingdom = settlement ? activeIndexes?.kingdomById.get(settlement.kingdomId) ?? world.kingdoms.find(item => item.id === settlement.kingdomId) : undefined;
+    const ruler = kingdom ? activeIndexes?.characterById.get(kingdom.rulerId) ?? world.characters.find(item => item.id === kingdom.rulerId) : undefined;
     if (!monster || !settlement || !kingdom || !ruler?.knowledge.factIds.includes(fact.id)) continue;
     const capitalState = settlementKnowledge(world, kingdom.capitalId);
     if (!capitalState.verifiedFactIds.includes(fact.id)) continue;
@@ -576,30 +599,46 @@ export function markKnowledgeDecision(world: WorldState, factId: number, note: s
   fact.history.push(note);
 }
 
-export function advanceKnowledgeSystem(world: WorldState, rng: RNG, indexes: WorldIndexes, detailed: DetailedPopulationContext): KnowledgeAdvanceResult {
-  initializeKnowledgeSystem(world, rng);
-  updateDetailedKnowledge(world, detailed);
-  const tick = worldTick(world);
-  let deliveredMessages = 0;
-  for (const message of world.messages) {
-    if (message.status !== 'в пути' || message.arrivalTick > tick) continue;
-    deliverMessage(world, message, new RNG(`${world.config.seed}:доставка-сообщения:${message.id}:${tick}`));
-    if ((message as Message).status === 'доставлено') deliveredMessages += 1;
+export function advanceKnowledgeSystem(
+  world: WorldState,
+  rng: RNG,
+  indexes: WorldIndexes,
+  detailed: DetailedPopulationContext,
+  options: { maintenance?: boolean } = {},
+): KnowledgeAdvanceResult {
+  activeIndexes = indexes;
+  try {
+    if (world.simulation.knowledgeSystemVersion !== 1) initializeKnowledgeSystem(world, rng);
+    refreshKnowledgeIndexes(indexes, world);
+    if (options.maintenance !== false) updateDetailedKnowledge(world, detailed);
+    else updateActiveDetailedKnowledge(world, detailed);
+    const tick = worldTick(world);
+    let deliveredMessages = 0;
+    for (const message of world.messages) {
+      if (message.status !== 'в пути' || message.arrivalTick > tick) continue;
+      deliverMessage(world, message, new RNG(`${world.config.seed}:доставка-сообщения:${message.id}:${tick}`));
+      if ((message as Message).status === 'доставлено') deliveredMessages += 1;
+    }
+    let spreadRumors = 0;
+    const activeSettlementIds = new Set(detailed.settlementIds);
+    if ([1, 4, 7, 10].includes(world.month)) for (const settlement of world.settlements) activeSettlementIds.add(settlement.id);
+    for (const settlementId of activeSettlementIds) {
+      const settlement = indexes.settlementById.get(settlementId);
+      if (settlement) spreadRumors += spreadSettlementRumors(world, settlement, new RNG(`${world.config.seed}:слухи:${settlement.id}:${tick}`), detailed);
+    }
+    merchantCarriesNews(world, rng);
+    if (options.maintenance !== false) {
+      createOfficialReports(world);
+      seedPropaganda(world, rng);
+      loseDeadSecrets(world);
+      decayRumors(world, tick);
+      trimKnowledgeCollections(world);
+    }
+    return { confirmedMonsterThreats: deliveredMessages || options.maintenance !== false ? confirmedThreats(world) : [], deliveredMessages, spreadRumors };
+  } finally {
+    refreshKnowledgeIndexes(indexes, world);
+    activeIndexes = undefined;
   }
-  let spreadRumors = 0;
-  const activeSettlementIds = new Set(detailed.settlementIds);
-  if ([1, 4, 7, 10].includes(world.month)) for (const settlement of world.settlements) activeSettlementIds.add(settlement.id);
-  for (const settlementId of activeSettlementIds) {
-    const settlement = indexes.settlementById.get(settlementId);
-    if (settlement) spreadRumors += spreadSettlementRumors(world, settlement, new RNG(`${world.config.seed}:слухи:${settlement.id}:${tick}`), detailed);
-  }
-  merchantCarriesNews(world, rng);
-  createOfficialReports(world);
-  seedPropaganda(world, rng);
-  loseDeadSecrets(world);
-  decayRumors(world, tick);
-  trimKnowledgeCollections(world);
-  return { confirmedMonsterThreats: confirmedThreats(world), deliveredMessages, spreadRumors };
 }
 
 function decayRumors(world: WorldState, tick: number): void {
@@ -607,11 +646,11 @@ function decayRumors(world: WorldState, tick: number): void {
     if (rumor.status === 'опровергнут' || rumor.status === 'затих') continue;
     const age = tick - rumor.lastSpreadTick;
     if (age > 60 || (age > 24 && rumor.spreadCount < 2)) rumor.status = 'затих';
-    const fact = world.knowledgeFacts.find(item => item.id === rumor.factId);
+    const fact = activeIndexes?.knowledgeFactById.get(rumor.factId) ?? world.knowledgeFacts.find(item => item.id === rumor.factId);
     if (fact?.verified && rumor.confidence >= 70) rumor.status = 'подтверждён';
   }
   for (const state of world.settlementKnowledge) state.rumorIds = state.rumorIds.filter(id => {
-    const rumor = world.rumors.find(item => item.id === id);
+    const rumor = activeIndexes?.rumorById.get(id) ?? world.rumors.find(item => item.id === id);
     return Boolean(rumor && rumor.status !== 'затих' && rumor.status !== 'опровергнут');
   });
 }

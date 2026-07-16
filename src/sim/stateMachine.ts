@@ -91,7 +91,7 @@ export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldI
     state.monthlyTaxIncome = 0;
     updateVassals(world, kingdom, state, rng, tick);
     runStateBudget(world, kingdom, state, rng, tick);
-    updateFactions(world, kingdom, state, rng, tick);
+    updateFactions(world, kingdom, state, rng, tick, indexes);
     processOrders(world, kingdom, state, rng, tick);
     maybeCreateOrder(world, kingdom, state, rng, tick);
     advanceCrises(world, kingdom, state, rng, tick);
@@ -548,7 +548,7 @@ function runStateBudget(world: WorldState, kingdom: Kingdom, state: KingdomGover
   if (tick % 12 === 0) state.history.push(`Годовой итог: налогов ${state.monthlyTaxIncome.toFixed(1)}, двор ${state.monthlyCourtCost.toFixed(1)}, долг ${state.debt.toFixed(1)}.`);
 }
 
-function updateFactions(world: WorldState, kingdom: Kingdom, state: KingdomGovernment, rng: RNG, tick: number): void {
+function updateFactions(world: WorldState, kingdom: Kingdom, state: KingdomGovernment, rng: RNG, tick: number, indexes: WorldIndexes): void {
   const warActive = world.wars.some(war => war.active && (war.attackerId === kingdom.id || war.defenderId === kingdom.id));
   const realmUnrest = average(world.settlements.filter(item => item.kingdomId === kingdom.id).map(item => item.unrest));
   for (const factionId of state.factionIds) {
@@ -564,7 +564,7 @@ function updateFactions(world: WorldState, kingdom: Kingdom, state: KingdomGover
     }
     if (tick % 3 === faction.id % 3) {
       const candidates = factionMembers(world, world.characters.filter(character => character.alive && character.kingdomId === kingdom.id), state, faction.kind);
-      recruitFactionThroughRelationships(world, faction, leader, candidates);
+      recruitFactionThroughRelationships(world, faction, leader, candidates, indexes);
     }
     faction.influence = clamp(faction.influence + faction.memberIds.length / 80 + (leader.courtOfficeIds?.length ?? 0) * .2 - .2, 4, 95);
     let drift = (state.legitimacy - 50) / 180 + (leader.loyalty - 50) / 200 - realmUnrest / 500;

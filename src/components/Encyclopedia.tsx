@@ -3,11 +3,12 @@ import type { EntityKind, EntityRef, WorldState } from '../types';
 import { armyStatusLabel, buildingTypeLabel, materialLabel, monsterSpeciesLabel, monsterTierLabel, professionLabel, settlementTypeLabel, speciesLabel } from '../i18n';
 import { getTitle } from './EntityPanel';
 import { TextureIcon } from './TextureIcon';
+import { aggregateArchiveRows, type ArchiveCatalogRow } from '../lib/archiveCatalog';
 
 const groups: { kind: EntityKind; label: string }[] = [
-  { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Здания' }, { kind: 'establishment', label: 'Заведения' }, { kind: 'item', label: 'Предметы' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'field', label: 'Поля' }, { kind: 'constructionProject', label: 'Стройки' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
+  { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Типы зданий' }, { kind: 'establishment', label: 'Типы заведений' }, { kind: 'item', label: 'Типы предметов' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'field', label: 'Типы полей' }, { kind: 'constructionProject', label: 'Стройки' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
   { kind: 'monster', label: 'Живые существа' }, { kind: 'burial', label: 'Умершие и павшие' }, { kind: 'cemetery', label: 'Кладбища' }, { kind: 'artifact', label: 'Артефакты' }, { kind: 'book', label: 'Книги' },
-  { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Животные' }, { kind: 'ingredient', label: 'Ресурсы' }, { kind: 'recipe', label: 'Алхимия' },
+  { kind: 'dungeon', label: 'Подземелья' }, { kind: 'animalPopulation', label: 'Виды животных' }, { kind: 'ingredient', label: 'Типы ресурсов' }, { kind: 'recipe', label: 'Алхимия' },
   { kind: 'kingdomGovernment', label: 'Государственная власть' }, { kind: 'nobleTitle', label: 'Титулы и владения' }, { kind: 'vassalContract', label: 'Вассальные договоры' }, { kind: 'courtOffice', label: 'Двор и должности' }, { kind: 'courtFaction', label: 'Придворные группировки' }, { kind: 'royalOrder', label: 'Государственные приказы' }, { kind: 'stateCrisis', label: 'Мятежи и кризисы' }, { kind: 'diplomaticAgreement', label: 'Договоры и посольства' },
   { kind: 'settlementGovernment', label: 'Местная власть' }, { kind: 'districtCivic', label: 'Районы и службы' }, { kind: 'patrol', label: 'Патрули' }, { kind: 'crime', label: 'Преступления' }, { kind: 'courtCase', label: 'Судебные дела' }, { kind: 'fireIncident', label: 'Пожары' },
   { kind: 'knowledgeFact', label: 'Знания' }, { kind: 'rumor', label: 'Слухи' }, { kind: 'message', label: 'Письма и донесения' },
@@ -26,18 +27,23 @@ function listFor(world: WorldState, kind: EntityKind): any[] {
 export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect: (ref: EntityRef) => void }) {
   const [kind, setKind] = useState<EntityKind>('character');
   const [query, setQuery] = useState('');
+  const aggregateRows = useMemo(() => aggregateArchiveRows(world, kind), [world, kind]);
+  const categoryCounts = useMemo(() => new Map(groups.map(group => [group.kind, aggregateArchiveRows(world, group.kind)?.length ?? listFor(world, group.kind).length])), [world]);
   const rows = useMemo(() => {
     const normalized = query.trim().toLowerCase();
+    if (aggregateRows) return aggregateRows.filter(item => !normalized || `${item.title} ${item.subtitle}`.toLowerCase().includes(normalized)).slice(0, 220);
     return listFor(world, kind).filter(item => !normalized || getTitle(world, { kind, id: item.id }).toLowerCase().includes(normalized)).slice(0, 220);
-  }, [world, kind, query]);
+  }, [world, kind, query, aggregateRows]);
   return <div className="encyclopedia">
     <div className="search-box"><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Найти имя, место или книгу…" /></div>
-    <div className="chip-row">{groups.map(group => <button className={kind === group.kind ? 'chip active' : 'chip'} key={group.kind} onClick={() => setKind(group.kind)}>{group.label}<small>{listFor(world, group.kind).length}</small></button>)}</div>
+    <div className="chip-row">{groups.map(group => <button className={kind === group.kind ? 'chip active' : 'chip'} key={group.kind} onClick={() => setKind(group.kind)}>{group.label}<small>{categoryCounts.get(group.kind) ?? 0}</small></button>)}</div>
     <div className="entity-list">{rows.map(item => {
-      const ref: EntityRef = { kind, id: item.id };
-      return <button key={item.id} className="entity-card" onClick={() => onSelect(ref)}>
-        <TextureIcon kind={kind} subtype={kind === 'monster' ? item.species : undefined} className="entity-rune" />
-        <span><strong>{getTitle(world, ref)}</strong><small>{subtitle(kind, item)}</small></span>
+      const aggregate = aggregateRows ? item as ArchiveCatalogRow : undefined;
+      const id = aggregate?.representativeId ?? item.id;
+      const ref: EntityRef = { kind, id };
+      return <button key={aggregate?.key ?? item.id} className="entity-card" onClick={() => onSelect(ref)}>
+        <TextureIcon kind={kind} subtype={aggregate?.subtype ?? (kind === 'monster' ? item.species : undefined)} className="entity-rune" />
+        <span><strong>{aggregate?.title ?? getTitle(world, ref)}</strong><small>{aggregate?.subtitle ?? subtitle(kind, item)}</small></span>
       </button>;
     })}</div>
   </div>;

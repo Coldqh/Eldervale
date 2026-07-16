@@ -15,6 +15,9 @@ export interface MonthSchedule {
   runHousing: boolean;
   runBooks: boolean;
   runSettlementLifecycle: boolean;
+  runMindGlobal: boolean;
+  runKnowledgeMaintenance: boolean;
+  fastForward: boolean;
   processedTasks: number;
 }
 
@@ -41,11 +44,11 @@ export function ensureSimulationRuntime(world: WorldState): void {
   world.simulation.observerFocus ??= undefined;
 }
 
-function actionInterval(world: WorldState, action: ScheduledAction): number {
+function actionInterval(world: WorldState, indexes: WorldIndexes, action: ScheduledAction): number {
   if (action.kind === 'army') return 1;
   if (action.kind === 'war') return 1;
   if (action.kind === 'monster') {
-    const monster = world.monsters.find(item => item.id === action.entityId);
+    const monster = indexes.monsterById.get(action.entityId ?? -1);
     if (!monster) return 4;
     if (monster.targetSettlementId || monster.hunger >= 70 || monster.tier === 'boss') return 1;
     if (monster.tier === 'miniboss') return 2;
@@ -55,7 +58,7 @@ function actionInterval(world: WorldState, action: ScheduledAction): number {
   return action.repeatEvery ?? 3;
 }
 
-function synchronizeEntityQueue(world: WorldState): void {
+function synchronizeEntityQueue(world: WorldState, indexes: WorldIndexes): void {
   const tick = worldTick(world);
   const validKeys = new Set<string>();
   for (const army of world.armies) {
@@ -72,7 +75,7 @@ function synchronizeEntityQueue(world: WorldState): void {
     if (existing.has(key)) continue;
     const [kind, rawId] = key.split(':') as ['army' | 'monster' | 'war', string];
     const action: ScheduledAction = { id: key, kind, entityId: Number(rawId), dueTick: tick + 1 };
-    action.repeatEvery = actionInterval(world, action);
+    action.repeatEvery = actionInterval(world, indexes, action);
     world.simulation.queuedActions.push(action);
   }
 }
@@ -105,7 +108,7 @@ function collectActiveRegions(world: WorldState, indexes: WorldIndexes): { regio
     if (army.status === 'garrison' || army.status === 'recovering') continue;
     activate(army.x, army.y, 2);
     activateSettlement(army.targetSettlementId ? indexes.settlementById.get(army.targetSettlementId) : undefined);
-    const targetMonster = army.targetMonsterId ? world.monsters.find(monster => monster.id === army.targetMonsterId) : undefined;
+    const targetMonster = army.targetMonsterId ? indexes.monsterById.get(army.targetMonsterId) : undefined;
     if (targetMonster) activate(targetMonster.x, targetMonster.y, 2);
   }
   for (const war of world.wars) {
@@ -124,9 +127,10 @@ function collectActiveRegions(world: WorldState, indexes: WorldIndexes): { regio
   return { regions, settlements };
 }
 
-export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): MonthSchedule {
+export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes, options: { fastForward?: boolean } = {}): MonthSchedule {
   ensureSimulationRuntime(world);
-  synchronizeEntityQueue(world);
+  synchronizeEntityQueue(world, indexes);
+  const fastForward = Boolean(options.fastForward);
   const tick = worldTick(world);
   const due = world.simulation.queuedActions.filter(action => action.dueTick <= tick);
   const remaining = world.simulation.queuedActions.filter(action => action.dueTick > tick);
@@ -136,7 +140,7 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
   for (const action of due) {
     if (action.kind === 'army' && action.entityId) dueArmyIds.add(action.entityId);
     if (action.kind === 'monster' && action.entityId) dueMonsterIds.add(action.entityId);
-    action.repeatEvery = actionInterval(world, action);
+    action.repeatEvery = actionInterval(world, indexes, action);
     action.dueTick = tick + Math.max(1, action.repeatEvery);
     remaining.push(action);
   }
@@ -144,10 +148,12 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
 
   const { regions, settlements: activeSettlementIds } = collectActiveRegions(world, indexes);
   const seasonal = [1, 4, 7, 10].includes(world.month);
-  const bulkEconomy = [1, 7].includes(world.month);
-  const bulkEcology = seasonal || [8, 12].includes(world.month);
+  const bulkEconomy = fastForward ? world.month === 1 : [1, 7].includes(world.month);
+  const bulkEcology = fastForward ? [1, 7].includes(world.month) : seasonal || [8, 12].includes(world.month);
   const economySettlementIds = new Set<number>(activeSettlementIds);
   const ecologySettlementIds = new Set<number>(activeSettlementIds);
+  if (fastForward && ![1, 4, 7, 10].includes(world.month)) economySettlementIds.clear();
+  if (fastForward && !seasonal) ecologySettlementIds.clear();
   if (bulkEconomy) {
     for (const settlement of world.settlements) {
       economySettlementIds.add(settlement.id);
@@ -161,7 +167,7 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
 
   world.simulation.clockTick = tick;
   world.simulation.activeRegionKeys = [...regions];
-  world.simulation.sleepingRegionCount = Math.max(0, world.tiles.filter(tile => tile.terrain !== 'ocean').length - regions.size);
+  world.simulation.sleepingRegionCount = Math.max(0, indexes.landTileCount - regions.size);
 
   return {
     tick,
@@ -176,6 +182,9 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes): 
     runHousing: world.month === 8,
     runBooks: world.month === 12,
     runSettlementLifecycle: world.month === 3,
+    runMindGlobal: fastForward ? world.month === 1 : seasonal,
+    runKnowledgeMaintenance: seasonal,
+    fastForward,
     processedTasks: due.length + economySettlementIds.size + ecologySettlementIds.size,
   };
 }

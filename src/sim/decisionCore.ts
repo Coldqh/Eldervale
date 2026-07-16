@@ -4,6 +4,29 @@ import { worldTick } from './scheduler';
 const MAX_DECISIONS = 12_000;
 const MAX_STATE_DELTAS = 40_000;
 
+interface DecisionRuntimeIndex {
+  decisions: Map<number, DecisionRecord>;
+  deltas: Map<number, StateDelta>;
+  decisionCount: number;
+  deltaCount: number;
+}
+
+const runtimeIndexes = new WeakMap<WorldState, DecisionRuntimeIndex>();
+
+function decisionRuntime(world: WorldState): DecisionRuntimeIndex {
+  let runtime = runtimeIndexes.get(world);
+  if (!runtime || runtime.decisionCount !== world.decisions.length || runtime.deltaCount !== world.stateDeltas.length) {
+    runtime = {
+      decisions: new Map(world.decisions.map(item => [item.id, item])),
+      deltas: new Map(world.stateDeltas.map(item => [item.id, item])),
+      decisionCount: world.decisions.length,
+      deltaCount: world.stateDeltas.length,
+    };
+    runtimeIndexes.set(world, runtime);
+  }
+  return runtime;
+}
+
 export interface DecisionInput {
   actorRef: EntityRef;
   goal: string;
@@ -37,6 +60,7 @@ export function initializeDecisionCore(world: WorldState): void {
   world.nextIds.decision ??= Math.max(0, ...world.decisions.map(item => item.id)) + 1;
   world.nextIds.stateDelta ??= Math.max(0, ...world.stateDeltas.map(item => item.id)) + 1;
   world.simulation.decisionCoreVersion = 1;
+  decisionRuntime(world);
 }
 
 export function chooseBestOption(options: DecisionOptionScore[]): DecisionOptionScore {
@@ -65,7 +89,10 @@ export function recordDecision(world: WorldState, input: DecisionInput): Decisio
     historical: Boolean(input.historical),
     tags: [...new Set(input.tags ?? [])],
   };
+  const runtime = decisionRuntime(world);
   world.decisions.push(decision);
+  runtime.decisions.set(decision.id, decision);
+  runtime.decisionCount = world.decisions.length;
   trimDecisionCore(world);
   return decision;
 }
@@ -88,9 +115,12 @@ export function recordStateDelta(world: WorldState, input: StateDeltaInput): Sta
     eventId: input.eventId,
     historical: Boolean(input.historical),
   };
+  const runtime = decisionRuntime(world);
   world.stateDeltas.push(delta);
+  runtime.deltas.set(delta.id, delta);
+  runtime.deltaCount = world.stateDeltas.length;
   if (delta.decisionId) {
-    const decision = world.decisions.find(item => item.id === delta.decisionId);
+    const decision = runtime.decisions.get(delta.decisionId);
     if (decision && !decision.stateDeltaIds.includes(delta.id)) decision.stateDeltaIds.push(delta.id);
   }
   trimDecisionCore(world);
@@ -99,7 +129,8 @@ export function recordStateDelta(world: WorldState, input: StateDeltaInput): Sta
 
 export function linkDecisionToEvent(world: WorldState, decisionId: number | undefined, event: WorldEvent, deltaIds: number[] = []): void {
   if (!decisionId) return;
-  const decision = world.decisions.find(item => item.id === decisionId);
+  const runtime = decisionRuntime(world);
+  const decision = runtime.decisions.get(decisionId);
   if (!decision) return;
   decision.eventId = event.id;
   event.decisionId = decision.id;
@@ -107,7 +138,7 @@ export function linkDecisionToEvent(world: WorldState, decisionId: number | unde
   decision.stateDeltaIds = ids;
   event.stateDeltaIds = ids;
   for (const id of ids) {
-    const delta = world.stateDeltas.find(item => item.id === id);
+    const delta = runtime.deltas.get(id);
     if (delta) { delta.eventId = event.id; delta.decisionId ??= decisionId; }
   }
 }
@@ -184,4 +215,6 @@ function trimDecisionCore(world: WorldState): void {
     for (const decision of world.decisions) decision.stateDeltaIds = decision.stateDeltaIds.filter(id => !removedIds.has(id));
     for (const event of world.events) if (event.stateDeltaIds) event.stateDeltaIds = event.stateDeltaIds.filter(id => !removedIds.has(id));
   }
+  const runtime = runtimeIndexes.get(world);
+  if (runtime && (runtime.decisionCount !== world.decisions.length || runtime.deltaCount !== world.stateDeltas.length)) runtimeIndexes.delete(world);
 }

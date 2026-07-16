@@ -2,7 +2,7 @@
 import type { SimulationProfile, SimulationProgress, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage } from '../lib/worldWorkerProtocol';
 import { generateHistoricalWorld } from '../sim/historicalEngine';
-import { advanceOneMonth, createSimulationEngine, type SimulationEngine } from '../sim/simulation';
+import { advanceOneMonth, createSimulationEngine, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
 const scope = self as DedicatedWorkerGlobalScope;
@@ -37,6 +37,7 @@ async function initialize(message: Extract<WorldWorkerCommand, { action: 'initia
     activeRegions: engine.world.simulation.activeRegionKeys.length, sleepingRegions: engine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
   };
   lastProfile = profile;
+  engine.world.simulation.lastProfile = profile;
   post({ id: message.id, type: 'complete', profile });
 }
 
@@ -71,6 +72,8 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
   cancelRequestedFor = undefined;
   const startedAt = performance.now();
   const startTasks = engine.processedTasks;
+  resetSimulationProfiler(engine);
+  const fastForward = message.months >= 24;
   let movingAverageMs = 0;
   let lastPhase = 'Подготовка планировщика';
 
@@ -83,6 +86,7 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
         operation: 'симуляция', months: step, totalMs: elapsed, simulationMs: elapsed, indexedEntities: countIndexedEntities(engine.indexes),
         processedTasks: engine.processedTasks - startTasks, activeRegions: engine.world.simulation.activeRegionKeys.length,
         sleepingRegions: engine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
+        fastForward, exactMonths: engine.exactMonths, coarseMonths: engine.coarseMonths, phaseTimings: simulationPhaseProfile(engine),
       };
       lastProfile = profile;
       activeOperationId = undefined;
@@ -92,7 +96,7 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
     }
 
     const monthStarted = performance.now();
-    advanceOneMonth(engine, phase => { lastPhase = phase; });
+    advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward });
     const monthMs = performance.now() - monthStarted;
     movingAverageMs = movingAverageMs ? movingAverageMs * .72 + monthMs * .28 : monthMs;
     const completed = step + 1;
@@ -114,8 +118,10 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
     operation: 'симуляция', months: message.months, totalMs: simulationMs, simulationMs, indexedEntities: countIndexedEntities(engine.indexes),
     processedTasks: engine.processedTasks - startTasks, activeRegions: engine.world.simulation.activeRegionKeys.length,
     sleepingRegions: engine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
+    fastForward, exactMonths: engine.exactMonths, coarseMonths: engine.coarseMonths, phaseTimings: simulationPhaseProfile(engine),
   };
   lastProfile = profile;
+  engine.world.simulation.lastProfile = profile;
   activeOperationId = undefined;
   post({ id: message.id, type: 'complete', world: engine.world, profile });
 }

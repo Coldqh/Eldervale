@@ -914,7 +914,18 @@ export interface SimulationProfile {
   processedTasks?: number;
   activeRegions?: number;
   sleepingRegions?: number;
+  fastForward?: boolean;
+  exactMonths?: number;
+  coarseMonths?: number;
+  phaseTimings?: SimulationPhaseProfile[];
   generatedAt: number;
+}
+
+export interface SimulationPhaseProfile {
+  phase: string;
+  totalMs: number;
+  calls: number;
+  maxMs: number;
 }
 
 export type ScheduledActionKind = 'army' | 'monster' | 'war' | 'region';
@@ -941,6 +952,7 @@ export interface SimulationRuntimeState {
   lastSocialBurialId?: number;
   decisionCoreVersion?: 1;
   mindSystemVersion?: 1;
+  performanceCoreVersion?: 1;
   clockTick: number;
   activeRegionKeys: string[];
   sleepingRegionCount: number;
@@ -1181,6 +1193,7 @@ export interface ArmyCamp {
   establishedTick: number;
   lastUpdatedTick: number;
   layoutSignature: string;
+  rosterSignature?: string;
   history: string[];
 }
 
@@ -1585,7 +1598,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 19;
+  version: 20;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

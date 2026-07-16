@@ -82,7 +82,7 @@ export function advanceSettlementLife(
       advancePatrols(world, settlement, government, rng);
       maybeCommitCrime(world, settlement, government, rng, indexes);
       investigateCrimes(world, settlement, government, rng);
-      processCourtCases(world, settlement, government, rng);
+      processCourtCases(world, settlement, government, rng, indexes);
       maybeStartFire(world, settlement, government, rng);
       advanceFires(world, settlement, government, rng, indexes);
     } else if (world.month === 1 || world.month === 7) {
@@ -308,7 +308,7 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
     .filter(character => character.id !== perpetrator.id && character.id !== victim.id && character.homeDistrict === district.districtName)
     .filter(character => rng.chance(Math.max(.08, district.safety / 140)))
     .slice(0, Math.max(2, rng.int(1, 6)));
-  const witnesses = potentialWitnesses.filter(character => witnessWillReport(world, character, perpetrator, victim, severity, rng).reports).slice(0, 4);
+  const witnesses = potentialWitnesses.filter(character => witnessWillReport(world, character, perpetrator, victim, severity, rng, indexes).reports).slice(0, 4);
   const evidence = clamp(rng.int(6, 36) + witnesses.length * 16 + government.guardIds.length / Math.max(1, settlement.population) * 760, 0, 100);
   const decision = recordDecision(world, {
     actorRef: { kind: 'character', id: perpetrator.id }, goal: selected.chosen.id === 'нападение' ? 'выплеснуть злость или запугать жертву' : 'получить ресурсы незаконным путём',
@@ -369,7 +369,7 @@ function investigateCrimes(world: WorldState, settlement: Settlement, government
   }
 }
 
-function processCourtCases(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG): void {
+function processCourtCases(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG, indexes: WorldIndexes): void {
   const pending = world.courtCases.filter(item => item.settlementId === settlement.id && item.status !== 'завершено' && item.status !== 'прекращено').slice(0, Math.max(1, government.judgeIds.length));
   for (const courtCase of pending) {
     const crime = world.crimes.find(item => item.id === courtCase.crimeId);
@@ -378,7 +378,7 @@ function processCourtCases(world: WorldState, settlement: Settlement, government
     courtCase.status = 'слушается';
     const judge = courtCase.judgeId ? world.characters.find(item => item.id === courtCase.judgeId) : undefined;
     const victim = crime.victimCharacterId ? world.characters.find(item => item.id === crime.victimCharacterId) : undefined;
-    const influence = applyJudicialInfluence(world, judge, defendant, victim, crime.severity, rng);
+    const influence = applyJudicialInfluence(world, judge, defendant, victim, crime.severity, rng, indexes);
     const guiltyScore = crime.evidence + crime.witnessIds.length * 12 - government.corruption * rng.int(0, 1) + influence.bias + rng.int(-15, 15);
     courtCase.history.push(`${influence.reason}; влияние на оценку дела ${influence.bias >= 0 ? '+' : ''}${influence.bias.toFixed(1)}${influence.bribe > 0 ? `, передано ${influence.bribe.toFixed(1)} крон` : ''}.`);
     const verdict = sentenceFor(crime, guiltyScore, rng);

@@ -890,3 +890,10 @@ button { border: 0; cursor: pointer; }
   .local-inspector-heading { padding-right: 34px; }
   .local-marker-list { padding-bottom: 4px; }
 }
+
+/* v3.4: профиль тяжёлых фаз симуляции */
+.phase-profile-list { display: grid; gap: 6px; margin-top: 12px; }
+.phase-profile-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.055); }
+.phase-profile-list span { min-width: 0; color: #a8afa6; font-size: 9px; line-height: 1.35; }
+.phase-profile-list strong { color: var(--gold-pale); font-size: 10px; font-weight: 600; }
+.phase-profile-list small { grid-column: 1 / -1; color: #687168; font-size: 8px; }

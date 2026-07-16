@@ -4,6 +4,7 @@ import type {
 } from '../types';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
+import type { WorldIndexes } from './indexes';
 
 export interface MotiveInput {
   id: string;
@@ -30,6 +31,7 @@ const TRAITS: CharacterTraitKey[] = ['greed', 'empathy', 'courage', 'patience', 
 const VALUES: CharacterValueKey[] = ['family', 'faith', 'wealth', 'power', 'freedom', 'order'];
 
 export function initializeMindSystem(world: WorldState): void {
+  if (world.simulation.mindSystemVersion === 1) return;
   for (const character of world.characters) ensureCharacterMind(world, character);
   world.simulation.mindSystemVersion = 1;
 }
@@ -72,17 +74,22 @@ export function ensureCharacterMind(world: WorldState, character: Character): Ch
   return mind;
 }
 
-export function advanceMindSystem(world: WorldState, rng: RNG): void {
-  initializeMindSystem(world);
+export function advanceMindSystem(
+  world: WorldState,
+  rng: RNG,
+  indexes?: WorldIndexes,
+  characterIds?: ReadonlySet<number>,
+): void {
+  if (world.simulation.mindSystemVersion !== 1) initializeMindSystem(world);
   const tick = worldTick(world);
-  const quarterly = [1, 4, 7, 10].includes(world.month);
-  for (const character of world.characters) {
+  const targets = characterIds
+    ? [...characterIds].map(id => indexes?.characterById.get(id) ?? world.characters.find(item => item.id === id)).filter((item): item is Character => Boolean(item))
+    : world.characters;
+  for (const character of targets) {
     if (!character.alive) continue;
     const mind = ensureCharacterMind(world, character);
-    const detailed = character.knowledge?.detailed || character.titles.length > 0 || character.courtOfficeIds?.length;
-    if (!quarterly && !detailed && character.id % 3 !== world.month % 3) continue;
-    const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
-    const settlement = world.settlements.find(item => item.id === character.settlementId);
+    const household = character.householdId ? indexes?.householdById.get(character.householdId) ?? world.households.find(item => item.id === character.householdId) : undefined;
+    const settlement = indexes?.settlementById.get(character.settlementId) ?? world.settlements.find(item => item.id === character.settlementId);
     const hunger = Math.max(character.needs.hunger, household?.needs.hunger ?? 0);
     const danger = Math.max(character.needs.safety, settlement?.unrest ?? 0, character.homeless ? 60 : 0);
     const debtPressure = Math.min(100, (household?.debt ?? 0) * 8 + (character.servicePayArrears ?? 0) * 3);
@@ -92,14 +99,16 @@ export function advanceMindSystem(world: WorldState, rng: RNG): void {
     mind.emotions.stress = clamp(mind.emotions.stress * .78 + hunger * .18 + danger * .15 + debtPressure * .15 + rng.int(-2, 3));
     mind.emotions.hope = clamp(mind.emotions.hope * .86 + (character.health + (settlement?.prosperity ?? 40)) * .07 - mind.emotions.stress * .05 + rng.int(-2, 2));
     mind.emotions.contentment = clamp(62 - hunger * .32 - danger * .22 - debtPressure * .18 + mind.emotions.hope * .22 + rng.int(-3, 3));
-    mind.emotions.grief = clamp(mind.emotions.grief * .9 + recentLossWeight(world, character) * .25);
+    // Новое горе начисляется системой смерти сразу родственникам. Здесь оно только затухает,
+    // поэтому не требуется ежемесячно искать каждого родственника среди всех захоронений.
+    mind.emotions.grief = clamp(mind.emotions.grief * .9);
     mind.emotions.updatedTick = tick;
-    refreshGoals(world, character);
+    refreshGoals(world, character, indexes);
     refreshObligations(world, character);
     updateReputations(world, character);
     for (const goal of mind.goals) {
       if (goal.status !== 'active') continue;
-      goal.priority = clamp(goal.priority + goalPressure(world, character, goal.kind));
+      goal.priority = clamp(goal.priority + goalPressure(world, character, goal.kind, indexes));
       goal.updatedTick = tick;
     }
   }
@@ -178,11 +187,11 @@ function normalizeMind(world: WorldState, character: Character): void {
   for (const key of VALUES) mind.values[key] = clamp(mind.values[key] ?? seededValue(world, character, `value:${key}`));
 }
 
-function refreshGoals(world: WorldState, character: Character): void {
+function refreshGoals(world: WorldState, character: Character, indexes?: WorldIndexes): void {
   const mind = character.mind!;
   const tick = worldTick(world);
-  const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
-  const settlement = world.settlements.find(item => item.id === character.settlementId);
+  const household = character.householdId ? indexes?.householdById.get(character.householdId) ?? world.households.find(item => item.id === character.householdId) : undefined;
+  const settlement = indexes?.settlementById.get(character.settlementId) ?? world.settlements.find(item => item.id === character.settlementId);
   const desired: { kind: PersonalGoalKind; priority: number; reason: string; targetRef?: EntityRef }[] = [];
   if (character.health < 65 || character.needs.hunger > 55 || character.needs.thirst > 55) desired.push({ kind: 'survive', priority: 92, reason: 'здоровье или базовые потребности под угрозой' });
   if (household && (household.needs.hunger > 38 || household.foodReserveDays < 8)) desired.push({ kind: 'feed_family', priority: clamp(58 + mind.values.family * .35 + household.needs.hunger * .25), reason: 'семье не хватает пищи', targetRef: { kind: 'household', id: household.id } });
@@ -248,18 +257,13 @@ function reputationReason(character: Character, group: GroupReputation['group'])
   return 'профессия, известность и поведение';
 }
 
-function goalPressure(world: WorldState, character: Character, kind: PersonalGoalKind): number {
-  const settlement = world.settlements.find(item => item.id === character.settlementId);
+function goalPressure(world: WorldState, character: Character, kind: PersonalGoalKind, indexes?: WorldIndexes): number {
+  const settlement = indexes?.settlementById.get(character.settlementId) ?? world.settlements.find(item => item.id === character.settlementId);
   if (kind === 'survive') return character.health < 45 ? 4 : -2;
   if (kind === 'feed_family') return character.needs.hunger > 60 ? 3 : -1;
   if (kind === 'protect_home') return (settlement?.unrest ?? 0) > 55 ? 2 : -.5;
   if (kind === 'escape_justice') return character.legalStatus === 'свободен' ? -8 : 3;
   return -.15;
-}
-
-function recentLossWeight(world: WorldState, character: Character): number {
-  const relatives = new Set([...character.parentIds, ...character.childIds, ...(character.spouseId ? [character.spouseId] : [])]);
-  return world.burials.filter(item => item.subjectKind === 'character' && item.subjectId && relatives.has(item.subjectId) && item.deathYear >= world.year - 2).reduce((sum, item) => sum + Math.min(100, 35 + item.renown * .3), 0);
 }
 
 function seededValue(world: WorldState, character: Character, key: string, offset = 0): number {

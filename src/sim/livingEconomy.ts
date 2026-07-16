@@ -383,8 +383,8 @@ function compactWear(world: WorldState, rng: RNG, detailedCharacterIds: Readonly
   }
 }
 
-function laborCapacity(establishment: Establishment, world: WorldState): number {
-  const building = world.buildings.find(item => item.id === establishment.buildingId);
+function laborCapacity(establishment: Establishment, indexes: WorldIndexes): number {
+  const building = indexes.buildingById.get(establishment.buildingId);
   if (!building) return 2;
   return Math.max(2, Math.min(28, Math.ceil(building.capacity / (['ферма', 'рудник', 'каменоломня'].includes(establishment.type) ? 4 : 7))));
 }
@@ -405,21 +405,26 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
   for (const settlement of world.settlements) {
     const establishments = settlement.establishmentIds.map(id => indexes.establishmentById.get(id)).filter((item): item is Establishment => Boolean(item?.active));
     if (!establishments.length) continue;
-    const capacityById = new Map(establishments.map(establishment => [establishment.id, laborCapacity(establishment, world)]));
+    const capacityById = new Map(establishments.map(establishment => [establishment.id, laborCapacity(establishment, indexes)]));
+    let vacancies = establishments.filter(establishment => (workerCounts.get(establishment.id) ?? 0) < (capacityById.get(establishment.id) ?? 2));
+    const totalVacancies = vacancies.reduce((sum, establishment) => sum + Math.max(0, (capacityById.get(establishment.id) ?? 2) - (workerCounts.get(establishment.id) ?? 0)), 0);
+    if (!totalVacancies) continue;
     const unemployed = (indexes.residentsBySettlement.get(settlement.id) ?? []).filter(character => character.age >= 14 && character.age <= 75
-      && !employed.has(character.id) && !travelingCharacterIds.has(character.id) && !character.titles.some(title => /король|правитель|вождь/i.test(title)));
+      && !employed.has(character.id) && !travelingCharacterIds.has(character.id) && !character.titles.some(title => /король|правитель|вождь/i.test(title)))
+      .sort((a, b) => a.id - b.id)
+      .slice(0, Math.min(totalVacancies * 5, 240));
     for (const character of unemployed) {
+      if (!vacancies.length) break;
       const preferred = professionPreferred[character.profession] ?? [];
       let target: Establishment | undefined;
       let bestScore = Number.NEGATIVE_INFINITY;
-      for (const establishment of establishments) {
+      for (const establishment of vacancies) {
         const capacity = capacityById.get(establishment.id) ?? 2;
         const current = workerCounts.get(establishment.id) ?? 0;
-        if (current >= capacity) continue;
         const preference = preferred.includes(establishment.type) ? 100 : 0;
         const vacancy = (capacity - current) / Math.max(1, capacity) * 20;
-        const socialConnection = workplaceConnectionScore(world, character, establishment);
-        const familyPressure = character.householdId && establishment.workerIds.some(id => world.characters.find(item => item.id === id)?.householdId === character.householdId) ? 12 : 0;
+        const socialConnection = workplaceConnectionScore(world, character, establishment, indexes);
+        const familyPressure = character.householdId && establishment.workerIds.some(id => indexes.characterById.get(id)?.householdId === character.householdId) ? 12 : 0;
         const score = preference + vacancy + establishment.reputation / 20 + socialConnection + familyPressure - establishment.id / 1_000_000;
         if (score > bestScore) { bestScore = score; target = establishment; }
       }
@@ -435,6 +440,7 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
       indexes.employmentById.set(contract.id, contract);
       employed.add(character.id);
       workerCounts.set(target.id, (workerCounts.get(target.id) ?? 0) + 1);
+      if ((workerCounts.get(target.id) ?? 0) >= (capacityById.get(target.id) ?? 2)) vacancies = vacancies.filter(item => item.id !== target!.id);
       if (!target.workerIds.includes(character.id)) target.workerIds.push(character.id);
       const building = indexes.buildingById.get(target.buildingId);
       if (building && !building.workerIds.includes(character.id)) building.workerIds.push(character.id);
@@ -449,20 +455,20 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
 function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
   for (const merchant of world.travelingMerchants) {
-    const character = world.characters.find(item => item.id === merchant.characterId);
+    const character = indexes.characterById.get(merchant.characterId);
     if (!character?.alive) continue;
     if (merchant.status === 'в пути' && merchant.arrivalTick > tick) continue;
     if (merchant.status === 'в пути') {
       merchant.currentSettlementId = merchant.nextSettlementId ?? merchant.currentSettlementId;
       if (character.settlementId !== merchant.currentSettlementId) moveResidentInIndexes(indexes, character, merchant.currentSettlementId);
       merchant.status = 'торгует';
-      merchant.history.push(`Прибыл в ${world.settlements.find(item => item.id === merchant.currentSettlementId)?.name ?? 'поселение'} в ${world.year}.${String(world.month).padStart(2, '0')}.`);
+      merchant.history.push(`Прибыл в ${indexes.settlementById.get(merchant.currentSettlementId)?.name ?? 'поселение'} в ${world.year}.${String(world.month).padStart(2, '0')}.`);
     }
-    const settlement = world.settlements.find(item => item.id === merchant.currentSettlementId);
+    const settlement = indexes.settlementById.get(merchant.currentSettlementId);
     if (!settlement) continue;
-    const buyers = settlement.establishmentIds.map(id => world.establishments.find(item => item.id === id)).filter((item): item is Establishment => Boolean(item?.active && ['рынок', 'лавка', 'одежная лавка', 'продовольственная лавка', 'оружейная лавка', 'склад'].includes(item.type)));
+    const buyers = settlement.establishmentIds.map(id => indexes.establishmentById.get(id)).filter((item): item is Establishment => Boolean(item?.active && ['рынок', 'лавка', 'одежная лавка', 'продовольственная лавка', 'оружейная лавка', 'склад'].includes(item.type)));
     for (const itemId of [...merchant.wagonInventoryItemIds]) {
-      const item = world.items.find(candidate => candidate.id === itemId && candidate.quantity > .1 && candidate.condition > 0);
+      const item = indexes.itemById.get(itemId);
       const buyer = buyers.sort((a, b) => b.cash - a.cash)[0];
       if (!item || !buyer) continue;
       const quantity = Math.min(item.quantity, Math.max(.5, item.quantity * .25));
@@ -479,13 +485,13 @@ function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndex
     }
     const nextIndex = (merchant.routeSettlementIds.indexOf(merchant.currentSettlementId) + 1) % merchant.routeSettlementIds.length;
     merchant.nextSettlementId = merchant.routeSettlementIds[nextIndex];
-    const next = world.settlements.find(item => item.id === merchant.nextSettlementId);
+    const next = indexes.settlementById.get(merchant.nextSettlementId!);
     const distance = next ? Math.hypot(next.x - settlement.x, next.y - settlement.y) : 1;
     const route = world.tradeRoutes.find(item => [item.fromSettlementId, item.toSettlementId].includes(merchant.currentSettlementId) && [item.fromSettlementId, item.toSettlementId].includes(merchant.nextSettlementId!));
     if (route && route.safety < 35 && rng.chance((35 - route.safety) / 180)) {
       merchant.cash *= .65;
       for (const itemId of merchant.wagonInventoryItemIds) {
-        const item = world.items.find(candidate => candidate.id === itemId);
+        const item = indexes.itemById.get(itemId);
         if (item) item.quantity *= .6;
       }
       merchant.status = 'ограблен';
@@ -525,12 +531,13 @@ export function detailedPopulationContext(world: WorldState, indexes: WorldIndex
   return context;
 }
 
-export function advanceLivingEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, detailed: DetailedPopulationContext): void {
-  initializeLivingEconomy(world, rng);
+export function advanceLivingEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, detailed: DetailedPopulationContext, options: { fastForward?: boolean } = {}): void {
+  if (world.simulation.livingEconomyVersion !== 1) initializeLivingEconomy(world, rng);
   const itemById = indexes.itemById;
   compactWear(world, rng, detailed.characterIds, itemById);
   rebalanceLabor(world, indexes);
   moveTravelingMerchants(world, rng, indexes);
+  if (options.fastForward && ![1, 4, 7, 10].includes(world.month)) return;
   const householdById = indexes.householdById;
   for (const settlementId of detailed.settlementIds) {
     const settlement = indexes.settlementById.get(settlementId);
@@ -554,7 +561,6 @@ export function advanceLivingEconomy(world: WorldState, rng: RNG, indexes: World
       household.needs.lastUpdatedTick = worldTick(world);
     }
   }
-  pruneEmptyMaterialItems(world);
   if (world.month === 12 && detailed.settlementIds.size) appendCausalEvent(world, {
     kind: 'retail', title: 'Год местной торговли завершён', description: 'Жители активных районов получали жалование, покупали еду, воду, одежду и инструменты.',
     cause: 'работа рынков и личные потребности жителей', consequences: ['товары изнашивались', 'деньги переходили между жителями и лавками'],
