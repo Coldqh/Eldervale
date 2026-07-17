@@ -865,14 +865,20 @@ function runPhase<T>(engine: SimulationEngine, phase: string, onPhase: ((phase: 
   }
 }
 
-export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: string) => void, options: { fastForward?: boolean } = {}): number {
+export function advanceOneMonth(
+  engine: SimulationEngine,
+  onPhase?: (phase: string) => void,
+  options: { fastForward?: boolean; monthStep?: number } = {},
+): number {
   const { world, indexes } = engine;
   const fastForward = Boolean(options.fastForward);
-  if (fastForward) engine.coarseMonths += 1;
-  else engine.exactMonths += 1;
+  const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
+  if (fastForward) engine.coarseMonths += monthStep;
+  else engine.exactMonths += monthStep;
   initializeDecisionCore(world);
-  world.month += 1;
-  if (world.month > 12) { world.month = 1; world.year += 1; }
+  const absoluteMonth = world.year * 12 + world.month - 1 + monthStep;
+  world.year = Math.floor(absoluteMonth / 12);
+  world.month = absoluteMonth % 12 + 1;
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
   const schedule = prepareMonthSchedule(world, indexes, { fastForward });
   const detailed = detailedPopulationContext(world, indexes, schedule.activeSettlementIds);
@@ -905,13 +911,15 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
     ...world.armies.map(army => army.commanderId).filter((id): id is number => typeof id === 'number'),
   ]);
   if (schedule.runMindGlobal || (mindIds?.size ?? 0)) runPhase(engine, 'Цели, эмоции, обязательства и мотивы жителей', onPhase, () => advanceMindSystem(world, rng, indexes, mindIds));
-  runPhase(engine, 'Связи, семьи, обещания и личные последствия', onPhase, () => advanceSocialSystem(world, rng, indexes, fastForward));
-  runPhase(engine, 'Казармы, гарнизоны, жалование и снабжение армий', onPhase, () => advanceMilitaryInfrastructure(world, rng, indexes));
+  if (!fastForward || [1, 4, 7, 10].includes(world.month)) runPhase(engine, 'Связи, семьи, обещания и личные последствия', onPhase, () => advanceSocialSystem(world, rng, indexes, fastForward));
+  if (!fastForward || world.month === 1 || world.armies.some(army => army.status !== 'garrison' && army.status !== 'recovering')) runPhase(engine, 'Казармы, гарнизоны, жалование и снабжение армий', onPhase, () => advanceMilitaryInfrastructure(world, rng, indexes));
   runPhase(engine, 'Политика, армии и угрозы', onPhase, () => {
     startWars(world, rng); moveArmies(world, rng, indexes, schedule.dueArmyIds); recoverArmies(world); monsterActions(world, rng, indexes, schedule.dueMonsterIds); normalizeKingdomCapitals(world);
   });
-  runPhase(engine, 'Городские службы, патрули, преступления, суды и пожары', onPhase, () => advanceSettlementLife(world, rng, indexes, schedule.activeSettlementIds, schedule.economySettlementIds));
-  const knowledge = runPhase(engine, 'Память, слухи, письма и донесения', onPhase, () => advanceKnowledgeSystem(world, rng, indexes, detailed, { maintenance: schedule.runKnowledgeMaintenance }));
+  runPhase(engine, 'Городские службы, патрули, преступления, суды и пожары', onPhase, () => advanceSettlementLife(world, rng, indexes, schedule.activeSettlementIds, schedule.economySettlementIds, { fastForward, elapsedMonths: monthStep }));
+  const knowledge = (!fastForward || [1, 4, 7, 10].includes(world.month) || world.messages.some(message => message.status === 'в пути' && message.arrivalTick <= worldTick(world)))
+    ? runPhase(engine, 'Память, слухи, письма и донесения', onPhase, () => advanceKnowledgeSystem(world, rng, indexes, detailed, { maintenance: schedule.runKnowledgeMaintenance }))
+    : { confirmedMonsterThreats: [], deliveredMessages: 0, spreadRumors: 0 };
   for (const threat of knowledge.confirmedMonsterThreats) {
     const monster = indexes.monsterById.get(threat.monsterId) ?? world.monsters.find(item => item.id === threat.monsterId);
     if (!monster?.alive) { markKnowledgeDecision(world, threat.factId, 'К моменту решения угроза уже исчезла.'); continue; }
@@ -920,15 +928,15 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
     markKnowledgeDecision(world, threat.factId, `Правитель получил подтверждённое донесение и отдал приказ в ${world.year}.${String(world.month).padStart(2, '0')}.`);
   }
   runPhase(engine, 'Кладбища, погребения и исчезновение следов', onPhase, () => { advanceBurials(world, rng); succession(world, rng); });
-  runPhase(engine, 'Дворы, вассалы, налоги, приказы и внутренняя политика', onPhase, () => advanceStateMachine(world, rng, indexes));
-  runPhase(engine, 'Полевые лагеря, отдельные солдаты и походные колонны', onPhase, () => advancePhysicalArmySystem(world, rng, indexes));
+  if (!fastForward || [1, 4, 7, 10].includes(world.month)) runPhase(engine, 'Дворы, вассалы, налоги, приказы и внутренняя политика', onPhase, () => advanceStateMachine(world, rng, indexes));
+  if (!fastForward || world.month === 1 || world.armies.some(army => army.status !== 'garrison' && army.status !== 'recovering')) runPhase(engine, 'Полевые лагеря, отдельные солдаты и походные колонны', onPhase, () => advancePhysicalArmySystem(world, rng, indexes));
 
   if (schedule.runBooks) writeBooks(world, rng);
   if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);
 
   // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
   ensureEstablishmentOwners(world, indexes);
-  runPhase(engine, 'Очистка исчерпанных предметов', onPhase, () => pruneEmptyMaterialItems(world, indexes));
+  if (!fastForward || world.month === 1) runPhase(engine, 'Очистка исчерпанных предметов', onPhase, () => pruneEmptyMaterialItems(world, indexes));
   if (world.month === 1) runPhase(engine, 'Уплотнение индексов и очередей', onPhase, () => {
     invalidateMaterialRuntime(world);
     refreshDynamicWorldIndexes(indexes, world);
@@ -941,6 +949,17 @@ export function advanceOneMonth(engine: SimulationEngine, onPhase?: (phase: stri
 export function advanceWorld(source: WorldState, months = 1): WorldState {
   const world = structuredClone(source);
   const engine = createSimulationEngine(world);
-  for (let step = 0; step < months; step += 1) advanceOneMonth(engine, undefined, { fastForward: months >= 24 });
+  const fastForward = months >= 12;
+  let completed = 0;
+  while (completed < months) {
+    const monthStep = fastForward ? Math.min(months - completed, monthsToNextQuarter(engine.world.month)) : 1;
+    advanceOneMonth(engine, undefined, { fastForward, monthStep });
+    completed += monthStep;
+  }
   return world;
+}
+
+export function monthsToNextQuarter(month: number): number {
+  for (const anchor of [1, 4, 7, 10]) if (anchor > month) return anchor - month;
+  return 13 - month;
 }

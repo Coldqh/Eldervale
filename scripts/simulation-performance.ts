@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { defaultConfig } from '../src/sim/generator';
 import { generateHistoricalWorld } from '../src/sim/historicalEngine';
 import { inspectWorldIntegrity } from '../src/sim/integrity';
-import { advanceOneMonth, createSimulationEngine, resetSimulationProfiler, simulationPhaseProfile } from '../src/sim/simulation';
+import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile } from '../src/sim/simulation';
 
 const config = {
   ...defaultConfig,
@@ -29,7 +29,12 @@ const exactMs = performance.now() - startedAt;
 
 resetSimulationProfiler(fast);
 startedAt = performance.now();
-for (let month = 0; month < 120; month += 1) advanceOneMonth(fast, undefined, { fastForward: true });
+let completedMonths = 0;
+while (completedMonths < 120) {
+  const monthStep = Math.min(120 - completedMonths, monthsToNextQuarter(fast.world.month));
+  advanceOneMonth(fast, undefined, { fastForward: true, monthStep });
+  completedMonths += monthStep;
+}
 const fastMs = performance.now() - startedAt;
 const profile = simulationPhaseProfile(fast);
 

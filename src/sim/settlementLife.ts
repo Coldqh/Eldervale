@@ -60,33 +60,50 @@ export function advanceSettlementLife(
   indexes: WorldIndexes,
   activeSettlementIds: ReadonlySet<number>,
   economySettlementIds: ReadonlySet<number>,
+  options: { fastForward?: boolean; elapsedMonths?: number } = {},
 ): void {
   if (world.simulation.settlementLifeVersion !== 1 || world.settlementGovernments.length !== world.settlements.length) initializeSettlementLife(world, rng, indexes);
   const tick = worldTick(world);
+  const elapsedMonths = Math.max(1, Math.floor(options.elapsedMonths ?? 1));
   releaseCompletedSentences(world, tick);
   cleanOrphanedCivicRecords(world);
+  const unresolvedCrimeSettlements = new Set(world.crimes
+    .filter(item => ['совершено', 'расследуется', 'подозреваемый найден', 'передано в суд'].includes(item.status))
+    .map(item => item.settlementId));
+  const pendingCourtSettlements = new Set(world.courtCases
+    .filter(item => item.status !== 'завершено' && item.status !== 'прекращено')
+    .map(item => item.settlementId));
 
   for (const settlement of world.settlements) {
     const active = activeSettlementIds.has(settlement.id);
     const economy = economySettlementIds.has(settlement.id);
-    if (!active && !economy) continue;
     const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
     if (!government) continue;
-    updateCivicRoster(world, settlement, government, indexes);
-    updateHomelessness(world, settlement, government, indexes);
-    updateDistrictConditions(world, settlement, government, active ? 1 : 6, indexes);
-    collectLocalTaxes(world, settlement, government, active ? 1 : 6);
-    fundServices(world, settlement, government, active ? 1 : 6, indexes);
-    ensureFutureCivicProjects(world, settlement, rng);
+    if (active || economy) {
+      updateCivicRoster(world, settlement, government, indexes);
+      updateHomelessness(world, settlement, government, indexes);
+      updateDistrictConditions(world, settlement, government, active ? elapsedMonths : Math.max(6, elapsedMonths), indexes);
+      collectLocalTaxes(world, settlement, government, active ? elapsedMonths : Math.max(6, elapsedMonths));
+      fundServices(world, settlement, government, active ? elapsedMonths : Math.max(6, elapsedMonths), indexes);
+      ensureFutureCivicProjects(world, settlement, rng);
+    }
     if (active) {
       advancePatrols(world, settlement, government, rng);
-      maybeCommitCrime(world, settlement, government, rng, indexes);
-      investigateCrimes(world, settlement, government, rng);
-      processCourtCases(world, settlement, government, rng, indexes);
       maybeStartFire(world, settlement, government, rng);
       advanceFires(world, settlement, government, rng, indexes);
-    } else if (world.month === 1 || world.month === 7) {
+    } else if ((economy || options.fastForward) && (world.month === 1 || world.month === 7)) {
       aggregateDistantDisorder(world, settlement, government, rng);
+    }
+
+    const incidentTarget = populationCrimeIncidentCount(world, settlement, government, rng, elapsedMonths);
+    let created = 0;
+    for (let attempt = 0; attempt < incidentTarget; attempt += 1) {
+      if (maybeCommitCrime(world, settlement, government, rng, indexes, { forced: true })) created += 1;
+    }
+    const hasJusticeWork = created > 0 || unresolvedCrimeSettlements.has(settlement.id) || pendingCourtSettlements.has(settlement.id);
+    if (hasJusticeWork) {
+      investigateCrimes(world, settlement, government, rng, elapsedMonths);
+      processCourtCases(world, settlement, government, rng, indexes, elapsedMonths);
     }
   }
   cleanOrphanedCivicRecords(world);
@@ -245,22 +262,59 @@ function advancePatrols(world: WorldState, settlement: Settlement, government: S
   government.activeDecision = settlement.unrest > 55 ? 'усилить ночные патрули' : government.treasury < 10 ? 'сократить расходы служб' : 'поддерживать порядок';
 }
 
-function maybeCommitCrime(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG, indexes: WorldIndexes): void {
+function populationCrimeIncidentCount(
+  world: WorldState,
+  settlement: Settlement,
+  government: SettlementGovernment,
+  rng: RNG,
+  elapsedMonths: number,
+): number {
+  if (settlement.population < 2) return 0;
   const states = world.districtCivicStates.filter(item => item.settlementId === settlement.id);
-  if (!states.length) return;
+  if (!states.length) return 0;
+  const averageCrime = states.reduce((sum, item) => sum + item.crimeRate, 0) / states.length;
+  const homeless = states.reduce((sum, item) => sum + item.homelessCount, 0);
+  const poverty = homeless / Math.max(1, settlement.population);
+  const guardCoverage = government.guardIds.length / Math.max(1, settlement.population) * 1_000;
+  const shortagePressure = Math.min(.8, settlement.shortages.length * .18);
+  const modifier = clamp(
+    .42 + averageCrime / 72 + settlement.unrest / 115 + poverty * 4.2 + shortagePressure + government.corruption / 190 - guardCoverage / 42,
+    .32,
+    2.8,
+  );
+  const expected = settlement.population * .0022 * modifier * elapsedMonths / 12;
+  const whole = Math.floor(expected);
+  const sampled = whole + (rng.chance(expected - whole) ? 1 : 0);
+  return Math.min(Math.max(1, Math.ceil(elapsedMonths * 2)), sampled);
+}
+
+function maybeCommitCrime(
+  world: WorldState,
+  settlement: Settlement,
+  government: SettlementGovernment,
+  rng: RNG,
+  indexes: WorldIndexes,
+  options: { forced?: boolean } = {},
+): boolean {
+  const states = world.districtCivicStates.filter(item => item.settlementId === settlement.id);
+  if (!states.length) return false;
   const averageCrime = states.reduce((sum, item) => sum + item.crimeRate, 0) / states.length;
   const poverty = states.reduce((sum, item) => sum + item.homelessCount, 0) / Math.max(1, settlement.population);
   const opportunityChance = clamp(.008 + averageCrime / 1800 + settlement.unrest / 2300 + poverty * .22 - government.guardIds.length / Math.max(1, settlement.population) * 1.5, .002, .24);
-  if (!rng.chance(opportunityChance)) return;
+  if (!options.forced && !rng.chance(opportunityChance)) return false;
   const district = rng.weighted(states.map(item => ({ value: item, weight: Math.max(1, item.crimeRate + item.homelessCount * 4) })));
   const residents = residentsOf(world, settlement.id, indexes).filter(character => character.alive && character.age >= 14 && character.legalStatus !== 'заключён');
-  if (residents.length < 2) return;
-  const candidates = residents.filter(character => character.id !== government.leaderCharacterId && !government.guardIds.includes(character.id));
-  if (!candidates.length) return;
+  if (residents.length < 2) return false;
+  const candidates = reservoirSample(
+    residents.filter(character => character.id !== government.leaderCharacterId && !government.guardIds.includes(character.id)),
+    64,
+    rng,
+  );
+  if (!candidates.length) return false;
 
   const evaluated = candidates.map(character => {
     const mind = ensureCharacterMind(world, character);
-    const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
+    const household = character.householdId ? indexes.householdById.get(character.householdId) : undefined;
     const scarcity = Math.max(character.needs.hunger, household?.needs.hunger ?? 0, character.homeless ? 78 : 0);
     const anger = mind.emotions.anger;
     const guardPressure = government.guardIds.length / Math.max(1, settlement.population) * 900 + district.safety * .25;
@@ -288,19 +342,22 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
         harm: 10, deception: 38, legalPenalty: 30,
       }),
     ];
-    const chosen = [...options].sort((a, b) => b.utility - a.utility)[0]!;
     const abstain = options[0]!;
-    return { character, options, chosen, margin: chosen.id === 'abstain' ? -100 : chosen.utility - abstain.utility };
+    const chosen = [...options.slice(1)].sort((a, b) => b.utility - a.utility)[0]!;
+    return { character, options, chosen, margin: chosen.utility - abstain.utility };
   }).sort((a, b) => b.margin - a.margin || b.chosen.utility - a.chosen.utility);
 
   const selected = evaluated[0];
-  if (!selected || selected.margin < 4 || !rng.chance(Math.min(.82, .12 + selected.margin / 110))) return;
+  if (!selected) return false;
+  if (options.forced) {
+    if (selected.margin < -12) return false;
+  } else if (selected.margin < 4 || !rng.chance(Math.min(.82, .12 + selected.margin / 110))) return false;
   const perpetrator = selected.character;
   const type = selected.chosen.id as CrimeType;
-  const victims = residents.filter(character => character.id !== perpetrator.id);
+  const victims = reservoirSample(residents.filter(character => character.id !== perpetrator.id), 80, rng);
   const victim = [...victims].sort((a, b) => {
-    const aHouse = a.householdId ? world.households.find(item => item.id === a.householdId)?.wealth ?? a.wealth : a.wealth;
-    const bHouse = b.householdId ? world.households.find(item => item.id === b.householdId)?.wealth ?? b.wealth : b.wealth;
+    const aHouse = a.householdId ? indexes.householdById.get(a.householdId)?.wealth ?? a.wealth : a.wealth;
+    const bHouse = b.householdId ? indexes.householdById.get(b.householdId)?.wealth ?? b.wealth : b.wealth;
     return (type === 'кража' || type === 'грабёж' || type === 'мошенничество' || type === 'взлом') ? bHouse - aHouse : Math.abs(a.id - perpetrator.id) - Math.abs(b.id - perpetrator.id);
   })[0] ?? rng.pick(victims);
   const severity = crimeSeverity(type);
@@ -320,7 +377,7 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
 
   const crime: CrimeIncident = {
     id: world.nextIds.crime++, type, settlementId: settlement.id, districtName: district.districtName,
-    perpetratorId: perpetrator.id, victimCharacterId: victim.id, victimEstablishmentId: type === 'кража' || type === 'взлом' ? rng.pick(world.establishments.filter(item => item.settlementId === settlement.id))?.id : undefined,
+    perpetratorId: perpetrator.id, victimCharacterId: victim.id, victimEstablishmentId: type === 'кража' || type === 'взлом' ? rng.pick(indexes.establishmentsBySettlement.get(settlement.id) ?? [])?.id : undefined,
     witnessIds: witnesses.map(item => item.id), evidence, severity, stolenItemIds: [], status: witnesses.length || evidence >= 45 ? 'расследуется' : 'совершено', createdTick: worldTick(world), history: [`Совершено в районе ${district.districtName}.`, `Мотив: ${decision.reason}.`],
   };
   world.crimes.push(crime);
@@ -351,16 +408,17 @@ function maybeCommitCrime(world: WorldState, settlement: Settlement, government:
     decisionId: decision.id, stateDeltaIds: deltaIds,
   });
   linkDecisionToEvent(world, decision.id, event, deltaIds);
+  return true;
 }
 
-function investigateCrimes(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG): void {
+function investigateCrimes(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG, elapsedMonths = 1): void {
   const patrols = world.civicPatrols.filter(item => item.settlementId === settlement.id && item.status === 'патрулирует');
   for (const crime of world.crimes.filter(item => item.settlementId === settlement.id && ['совершено', 'расследуется', 'подозреваемый найден'].includes(item.status))) {
     const perpetrator = crime.perpetratorId ? world.characters.find(item => item.id === crime.perpetratorId) : undefined;
     if (!perpetrator) { crime.status = 'не раскрыто'; continue; }
     const districtPatrol = patrols.find(item => item.districtName === crime.districtName);
     const investigation = crime.evidence + (districtPatrol?.guardIds.length ?? 0) * 8 + government.judgeIds.length * 5 - government.corruption * .35 + rng.int(-18, 22);
-    if (investigation < 55) { crime.status = 'расследуется'; crime.evidence = clamp(crime.evidence + rng.int(1, 8), 0, 100); continue; }
+    if (investigation < 55) { crime.status = 'расследуется'; crime.evidence = clamp(crime.evidence + rng.int(1, 8) * Math.max(1, elapsedMonths), 0, 100); continue; }
     crime.status = 'передано в суд'; crime.resolvedTick = worldTick(world); perpetrator.legalStatus = 'под стражей';
     if (districtPatrol) { districtPatrol.arrests += 1; districtPatrol.status = 'реагирует'; }
     if (!world.courtCases.some(item => item.crimeId === crime.id)) {
@@ -369,8 +427,10 @@ function investigateCrimes(world: WorldState, settlement: Settlement, government
   }
 }
 
-function processCourtCases(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG, indexes: WorldIndexes): void {
-  const pending = world.courtCases.filter(item => item.settlementId === settlement.id && item.status !== 'завершено' && item.status !== 'прекращено').slice(0, Math.max(1, government.judgeIds.length));
+function processCourtCases(world: WorldState, settlement: Settlement, government: SettlementGovernment, rng: RNG, indexes: WorldIndexes, elapsedMonths = 1): void {
+  const pending = world.courtCases
+    .filter(item => item.settlementId === settlement.id && item.status !== 'завершено' && item.status !== 'прекращено')
+    .slice(0, Math.max(1, government.judgeIds.length * Math.max(1, elapsedMonths)));
   for (const courtCase of pending) {
     const crime = world.crimes.find(item => item.id === courtCase.crimeId);
     const defendant = courtCase.defendantId ? world.characters.find(item => item.id === courtCase.defendantId) : undefined;
@@ -645,6 +705,16 @@ function crimeCause(type: CrimeType, perpetrator: Character, settlement: Settlem
 function leadershipScore(character: Character): number { return character.renown * 2 + character.wealth + character.titles.length * 35 + (['scribe', 'merchant', 'priest', 'guard'].includes(character.profession) ? 20 : 0); }
 function councilScore(character: Character): number { return character.renown + character.wealth * .5 + (['scribe', 'merchant', 'priest', 'guard', 'healer'].includes(character.profession) ? 30 : 0); }
 function residentsOf(world: WorldState, settlementId: number, indexes?: WorldIndexes): Character[] { return indexes?.residentsBySettlement.get(settlementId) ?? world.characters.filter(item => item.settlementId === settlementId); }
+
+function reservoirSample<T>(values: readonly T[], limit: number, rng: RNG): T[] {
+  if (values.length <= limit) return [...values];
+  const result = values.slice(0, limit);
+  for (let index = limit; index < values.length; index += 1) {
+    const replacement = rng.int(0, index);
+    if (replacement < limit) result[replacement] = values[index]!;
+  }
+  return result;
+}
 function pickRole(residents: Character[], professions: string[], count: number, previous: number[], visualRole: string): number[] { const chosen = [...residents].filter(item => previous.includes(item.id) || professions.includes(item.profession)).sort((a, b) => Number(previous.includes(b.id)) - Number(previous.includes(a.id)) || b.health - a.health || a.id - b.id).slice(0, count); chosen.forEach(item => { item.visualRole = visualRole; }); return chosen.map(item => item.id); }
 function attachWorkers(building: Building | undefined, ids: number[]): void { if (building) building.workerIds = [...new Set(ids.filter(Boolean))]; }
 function chooseDistrict(settlement: Settlement, type: BuildingType) { const preferred = type === 'fireStation' ? ['центр', 'рынок', 'ремесленный район'] : type === 'prison' ? ['крепость', 'окраина'] : type === 'shelter' ? ['окраина', 'жилой район'] : ['центр', 'крепость']; return settlement.districts.find(item => preferred.includes(item.role)) ?? settlement.districts[0]!; }

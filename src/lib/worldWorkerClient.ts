@@ -1,7 +1,7 @@
 import type { SimulationProfile, SimulationProgress, WorldConfig, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from './worldWorkerProtocol';
 import { generateHistoricalWorld } from '../sim/historicalEngine';
-import { advanceOneMonth, createSimulationEngine, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
+import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
@@ -82,8 +82,8 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     const world = generateHistoricalWorld(command.config, (phase, completed, total, detail) => {
       const elapsedMs = performance.now() - startedAt;
       const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
-      const capped = Math.min(94, completed / Math.max(1, total) * 94);
-      onProgress?.({ operation, phase, completed: capped, total: 100, percent: capped, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
+      const scaled = Math.min(97, completed / Math.max(1, total) * 97);
+      onProgress?.({ operation, phase, completed: scaled, total: 100, percent: scaled, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
     });
     fallbackEngine = createSimulationEngine(world);
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };
@@ -96,17 +96,20 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     let average = 0;
     const startTasks = fallbackEngine.processedTasks;
     resetSimulationProfiler(fallbackEngine);
-    const fastForward = command.months >= 24;
-    for (let step = 0; step < command.months; step += 1) {
+    const fastForward = command.months >= 12;
+    let completedMonths = 0;
+    while (completedMonths < command.months) {
       if (fallbackCancelled) return { world: fallbackEngine.world, cancelled: true };
       const monthStart = performance.now();
       let phase = 'Симуляция мира';
-      advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward });
+      const monthStep = fastForward ? Math.min(command.months - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
+      advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward, monthStep });
       const monthMs = performance.now() - monthStart;
-      average = average ? average * .72 + monthMs * .28 : monthMs;
-      const completed = step + 1;
-      onProgress?.({ operation: 'симуляция', phase, completed, total: command.months, percent: completed / command.months * 100, elapsedMs: performance.now() - startedAt, etaMs: average * (command.months - completed), year: fallbackEngine.world.year, month: fallbackEngine.world.month });
-      if (completed % 2 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
+      const normalizedMonthMs = monthMs / monthStep;
+      average = average ? average * .72 + normalizedMonthMs * .28 : normalizedMonthMs;
+      completedMonths += monthStep;
+      onProgress?.({ operation: 'симуляция', phase, completed: completedMonths, total: command.months, percent: completedMonths / command.months * 100, elapsedMs: performance.now() - startedAt, etaMs: average * (command.months - completedMonths), year: fallbackEngine.world.year, month: fallbackEngine.world.month });
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
     }
     const profile: SimulationProfile = {
       operation: 'симуляция', months: command.months, totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt,

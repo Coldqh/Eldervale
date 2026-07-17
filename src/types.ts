@@ -949,6 +949,8 @@ export interface SimulationRuntimeState {
   stateMachineVersion?: 1;
   socialSystemVersion?: 1;
   physicalArmyVersion?: 1;
+  cemeteryPlacementVersion?: 1;
+  lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
   decisionCoreVersion?: 1;
   mindSystemVersion?: 1;

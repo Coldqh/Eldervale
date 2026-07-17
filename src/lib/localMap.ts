@@ -429,19 +429,71 @@ function placeDungeonEntrance(cells: LocalCell[], width: number, height: number,
 
 function placeCemeteries(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number): void {
   for (const cemetery of world.cemeteries.filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
-    const x0 = Math.max(2, Math.min(width - 10, cemetery.localX - 4));
-    const y0 = Math.max(2, Math.min(height - 10, cemetery.localY - 4));
     const burialCount = cemetery.burialIds.length;
     const plotSize = Math.max(6, Math.min(14, 6 + Math.ceil(Math.sqrt(Math.max(1, burialCount)))));
+    const preferred = {
+      x: Math.max(2, Math.min(width - plotSize - 2, cemetery.localX - Math.floor(plotSize / 2))),
+      y: Math.max(2, Math.min(height - plotSize - 2, cemetery.localY - Math.floor(plotSize / 2))),
+    };
+    const placement = findFreeCemeteryRect(cells, width, height, preferred.x, preferred.y, plotSize);
+    if (!placement) continue;
+    const x0 = placement.x;
+    const y0 = placement.y;
     for (let y = y0; y < Math.min(height - 1, y0 + plotSize); y += 1) for (let x = x0; x < Math.min(width - 1, x0 + plotSize); x += 1) {
       const edge = x === x0 || y === y0 || x === x0 + plotSize - 1 || y === y0 + plotSize - 1;
       const cell = cells[y * width + x];
-      if (!cell || cell.ground === 'water' || cell.ground === 'road') continue;
+      if (!cell || !cemeteryCellAvailable(cell)) continue;
       if (edge) { cell.feature = 'cemetery'; cell.blocked = false; cell.ground = 'dirt'; }
       else if ((x + y) % 2 === 0 && burialCount > 0) { cell.feature = 'grave'; cell.blocked = false; cell.ground = 'grass'; }
       cell.building = cemetery.name;
     }
   }
+}
+
+function findFreeCemeteryRect(
+  cells: LocalCell[],
+  width: number,
+  height: number,
+  preferredX: number,
+  preferredY: number,
+  size: number,
+): { x: number; y: number } | undefined {
+  const fits = (x: number, y: number) => {
+    if (x < 2 || y < 2 || x + size >= width - 2 || y + size >= height - 2) return false;
+    for (let yy = y - 1; yy <= y + size; yy += 1) {
+      for (let xx = x - 1; xx <= x + size; xx += 1) {
+        const cell = cells[yy * width + xx];
+        if (!cell || !cemeteryCellAvailable(cell)) return false;
+      }
+    }
+    return true;
+  };
+
+  if (fits(preferredX, preferredY)) return { x: preferredX, y: preferredY };
+  const maxRadius = Math.max(width, height);
+  for (let radius = 2; radius <= maxRadius; radius += 2) {
+    for (let dx = -radius; dx <= radius; dx += 2) {
+      for (const dy of [-radius, radius]) {
+        const x = Math.max(2, Math.min(width - size - 3, preferredX + dx));
+        const y = Math.max(2, Math.min(height - size - 3, preferredY + dy));
+        if (fits(x, y)) return { x, y };
+      }
+    }
+    for (let dy = -radius + 2; dy <= radius - 2; dy += 2) {
+      for (const dx of [-radius, radius]) {
+        const x = Math.max(2, Math.min(width - size - 3, preferredX + dx));
+        const y = Math.max(2, Math.min(height - size - 3, preferredY + dy));
+        if (fits(x, y)) return { x, y };
+      }
+    }
+  }
+  return undefined;
+}
+
+function cemeteryCellAvailable(cell: LocalCell): boolean {
+  if (cell.ground === 'water' || cell.ground === 'road') return false;
+  if (cell.blocked || cell.building || cell.fieldId || cell.constructionProjectId || cell.armyCampStructureId) return false;
+  return !cell.feature || ['grass', 'bush', 'tree', 'flowers', 'reeds'].includes(cell.feature);
 }
 
 function applyHistoricalScars(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number, rng: RNG): void {
@@ -514,7 +566,10 @@ function buildSurfaceMarkers(
   }
   for (const cemetery of world.cemeteries.filter(item => item.globalX === tile.x && item.globalY === tile.y)) {
     const buried = cemetery.burialIds.length;
-    markers.push({ id: `cemetery-${cemetery.id}`, x: cemetery.localX, y: cemetery.localY, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: buried, detail: `${buried} записей о погребении · вместимость ${cemetery.capacity}` });
+    const occupied = cells.filter(cell => cell.building === cemetery.name && (cell.feature === 'cemetery' || cell.feature === 'grave'));
+    const markerX = occupied.length ? Math.round(occupied.reduce((sum, cell) => sum + cell.x, 0) / occupied.length) : cemetery.localX;
+    const markerY = occupied.length ? Math.round(occupied.reduce((sum, cell) => sum + cell.y, 0) / occupied.length) : cemetery.localY;
+    markers.push({ id: `cemetery-${cemetery.id}`, x: markerX, y: markerY, kind: 'cemetery', label: cemetery.name, refs: [{ kind: 'cemetery', id: cemetery.id }], count: buried, detail: `${buried} записей о погребении · вместимость ${cemetery.capacity}` });
   }
 
   markers.push(...placeNaturalResources(world, tile, cells, width, height));
@@ -719,38 +774,19 @@ function placeAnimalPopulation(
   const predicate = (cell: LocalCell) => animalCellAvailable(cell, population.species, settlement, width);
   const candidates = cells.filter(predicate);
   if (!candidates.length) return markers;
-  const groupSize = animalGroupSize(population.species, population.diet);
-  const clusterCount = Math.max(1, Math.min(count, Math.ceil(count / groupSize)));
-  const centers = selectSeparatedCenters(candidates, clusterCount, `${world.config.seed}:стада:${population.id}:${world.year}:${seasonIndex(world.month)}`);
-  const pools: LocalCell[][] = centers.map(() => []);
-  for (const cell of candidates) {
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < centers.length; index += 1) {
-      const center = centers[index]!;
-      const distance = Math.hypot(cell.x - center.x, cell.y - center.y);
-      if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = index; }
-    }
-    pools[nearestIndex]!.push(cell);
-  }
-  pools.forEach((pool, poolIndex) => pool.sort((a, b) => {
-    const center = centers[poolIndex]!;
-    const distanceA = Math.hypot(a.x - center.x, a.y - center.y);
-    const distanceB = Math.hypot(b.x - center.x, b.y - center.y);
-    if (distanceA !== distanceB) return distanceA - distanceB;
-    return hashSeed(`${world.config.seed}:стая:${population.id}:${a.x}:${a.y}`)
-      - hashSeed(`${world.config.seed}:стая:${population.id}:${b.x}:${b.y}`);
-  }));
-  const pointers = pools.map(() => 0);
+  const seed = `${world.config.seed}:рассеивание:${population.id}:${world.year}:${seasonIndex(world.month)}`;
+  const start = hashSeed(`${seed}:start`) % candidates.length;
+  const step = coprimeStep(candidates.length, hashSeed(`${seed}:step`));
+  const selected: LocalPoint[] = [];
+  const idealSpacing = Math.max(1, Math.floor(Math.sqrt(candidates.length / Math.max(1, count)) * .62));
+  let cursor = start;
   for (let unitIndex = 0; unitIndex < count; unitIndex += 1) {
-    const targetPool = Math.floor(unitIndex / groupSize) % pools.length;
     let point: LocalPoint | undefined;
-    for (let offset = 0; offset < pools.length && !point; offset += 1) {
-      const poolIndex = (targetPool + offset) % pools.length;
-      const pool = pools[poolIndex]!;
-      while (pointers[poolIndex]! < pool.length) {
-        const cell = pool[pointers[poolIndex]!]!;
-        pointers[poolIndex] = pointers[poolIndex]! + 1;
+    for (let spacing = idealSpacing; spacing >= 0 && !point; spacing -= 1) {
+      for (let attempt = 0; attempt < candidates.length; attempt += 1) {
+        const cell = candidates[cursor]!;
+        cursor = (cursor + step) % candidates.length;
+        if (spacing > 0 && selected.some(other => Math.max(Math.abs(other.x - cell.x), Math.abs(other.y - cell.y)) < spacing)) continue;
         point = occupancy.claim({ x: cell.x, y: cell.y }, predicate);
         if (point) break;
       }
@@ -760,13 +796,15 @@ function placeAnimalPopulation(
       point = occupancy.claimNearest(fallback, `${world.config.seed}:особь-резерв:${population.id}:${unitIndex}`, broadAnimalCellAvailable);
     }
     if (!point) break;
+    selected.push(point);
     markers.push({
       id: `fauna-${population.id}-${unitIndex}`, x: point.x, y: point.y, kind: 'fauna', label: `${population.species} ${unitIndex + 1}`,
       refs: [{ kind: 'animalPopulation', id: population.id }],
       detail: `${population.diet} · особь ${unitIndex + 1}/${count} · здоровье популяции ${Math.round(population.health)}%`,
       visualRole: population.species,
     });
-    if (unitIndex % groupSize === 0) {
+    const trailInterval = Math.max(4, Math.ceil(count / 8));
+    if (unitIndex % trailInterval === 0) {
       const trail = cells[point.y * width + point.x];
       if (trail && !trail.feature) trail.feature = 'animal-trail';
     }
@@ -774,13 +812,17 @@ function placeAnimalPopulation(
   return markers;
 }
 
-function animalGroupSize(species: string, diet: WorldState['animalPopulations'][number]['diet']): number {
-  if (/заяц|кролик|крыс|мыш|суслик/i.test(species)) return 4;
-  if (/олень|лось|антилоп|коз|овц/i.test(species)) return 8;
-  if (/волк|гиен|шакал/i.test(species)) return 6;
-  if (/кабан|свин/i.test(species)) return 5;
-  if (/птиц|ворон|гусь|утк/i.test(species)) return 10;
-  return diet === 'хищник' ? 3 : 5;
+function coprimeStep(length: number, seed: number): number {
+  if (length <= 1) return 1;
+  let step = Math.max(1, seed % length);
+  while (greatestCommonDivisor(step, length) !== 1) step = (step + 1) % length || 1;
+  return step;
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let left = Math.abs(a), right = Math.abs(b);
+  while (right) { const next = left % right; left = right; right = next; }
+  return left || 1;
 }
 
 function seasonIndex(month: number): number { return Math.floor((Math.max(1, month) - 1) / 3); }

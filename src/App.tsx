@@ -172,7 +172,7 @@ export default function App() {
       setLoadingText('Сохраняем созданный мир');
       setProgress({ operation: 'сохранение', phase: 'Разделяем мир на безопасные части', completed: 0, total: 3, percent: 0, elapsedMs: 0 });
       const saveStarted = performance.now();
-      const createdSlot = await createWorldSlot(result.world);
+      const createdSlot = await createWorldSlot(result.world, undefined, { onProgress: setProgress });
       const saveMs = performance.now() - saveStarted;
       setProgress({ operation: 'сохранение', phase: 'Подготавливаем интерфейс', completed: 2, total: 3, percent: 98, elapsedMs: saveMs });
       setActiveSlotId(createdSlot.slotId);
@@ -209,12 +209,14 @@ export default function App() {
       const result = await advanceWorldInBackground(months, setProgress);
       if (!result.world) throw new Error('Симуляция не вернула состояние мира');
       const receivedAt = performance.now();
+      setLoadingText('Сохраняем изменения мира');
+      setProgress({ operation: 'сохранение', phase: 'Подготовка сохранения', completed: 0, total: 100, percent: 0, elapsedMs: 0 });
       const saveStarted = performance.now();
-      const stored = await saveWorld(result.world, activeSlotId);
+      const stored = await saveWorld(result.world, activeSlotId, { onProgress: setProgress });
       const saveMs = performance.now() - saveStarted;
       setActiveSlotId(stored.slotId);
       setStorageProfile(stored);
-      await refreshStorage(stored.slotId);
+      void refreshStorage(stored.slotId);
       const profile: SimulationProfile = {
         ...(result.profile ?? { operation: 'симуляция', months, totalMs: receivedAt - roundTripStarted, generatedAt: Date.now() }),
         workerRoundTripMs: Math.max(0, receivedAt - roundTripStarted - (result.profile?.simulationMs ?? 0)),
@@ -252,7 +254,7 @@ export default function App() {
       setEntityStack([]);
       setView('map');
       setLocalPosition(undefined);
-      const createdSlot = await createWorldSlot(migrated, `import-${Date.now()}`);
+      const createdSlot = await createWorldSlot(migrated, `import-${Date.now()}`, { onProgress: setProgress });
       setActiveSlotId(createdSlot.slotId);
       setStorageProfile(createdSlot.profile);
       await refreshStorage(createdSlot.slotId);

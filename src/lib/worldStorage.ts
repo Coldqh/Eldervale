@@ -1,4 +1,4 @@
-import type { StorageProfile, WorldSlotMeta, WorldSnapshotMeta, WorldState } from '../types';
+import type { SimulationProgress, StorageProfile, WorldSlotMeta, WorldSnapshotMeta, WorldState } from '../types';
 import { migrateWorld } from '../sim/migrateWorld';
 import { APP_VERSION } from '../version';
 
@@ -16,6 +16,7 @@ const ACTIVE_SLOT_FALLBACK = 'eldervale-active-slot';
 const SNAPSHOT_INTERVAL_YEARS = 25;
 const SNAPSHOT_LIMIT = 4;
 const TILE_CHUNK_SIZE = 256;
+const ENTITY_CHUNK_SIZE = 160;
 
 const entityCollections = [
   'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'militaryUnits', 'supplyWagons', 'armyCamps', 'armyCampStructures', 'armyLocalPositions', 'monsters', 'cemeteries', 'burials', 'animalPopulations',
@@ -183,6 +184,7 @@ async function loadPartitionedWorld(slotId: string): Promise<WorldState | undefi
       const record = cursor.value as StoredRecord;
       fingerprints.set(record.key, record.fingerprint);
       if (record.collection === 'tiles') tileChunks.push({ order: Number(record.order), data: record.data as WorldState['tiles'] });
+      else if (Array.isArray(record.data)) collections[record.collection]!.push(...record.data);
       else collections[record.collection]!.push(record.data);
       cursor.continue();
     };
@@ -200,7 +202,11 @@ async function loadPartitionedWorld(slotId: string): Promise<WorldState | undefi
   return migrateWorld({ ...core.core, tiles: tileChunks.flatMap(chunk => chunk.data), ...collections });
 }
 
-export async function createWorldSlot(world: WorldState, preferredId?: string): Promise<{ slotId: string; world: WorldState; profile: StorageProfile }> {
+export async function createWorldSlot(
+  world: WorldState,
+  preferredId?: string,
+  options: { onProgress?: (progress: SimulationProgress) => void } = {},
+): Promise<{ slotId: string; world: WorldState; profile: StorageProfile }> {
   const existing = new Set((await listWorldSlots()).map(slot => slot.id));
   let slotId = sanitizeSlotId(preferredId || `${world.config.seed}-${Date.now()}`);
   let suffix = 2;
@@ -208,7 +214,7 @@ export async function createWorldSlot(world: WorldState, preferredId?: string): 
   activeSlotCache = slotId;
   // Новый мир уже является полным сохранением. Создавать рядом вторую
   // полную копию-снимок бессмысленно и очень дорого на крупных мирах.
-  const profile = await saveWorld(world, slotId);
+  const profile = await saveWorld(world, slotId, { onProgress: options.onProgress });
   await setActiveWorldSlot(slotId);
   return { slotId, world, profile };
 }
@@ -216,16 +222,27 @@ export async function createWorldSlot(world: WorldState, preferredId?: string): 
 export async function saveWorld(
   world: WorldState,
   slotId?: string,
-  options: { forceSnapshot?: boolean; reason?: WorldSnapshotMeta['reason'] } = {},
+  options: { forceSnapshot?: boolean; reason?: WorldSnapshotMeta['reason']; onProgress?: (progress: SimulationProgress) => void } = {},
 ): Promise<StorageProfile> {
   const startedAt = performance.now();
+  const report = (phase: string, completed: number, total: number, detail?: string) => options.onProgress?.({
+    operation: 'сохранение', phase, completed, total, percent: total ? completed / total * 100 : 0,
+    elapsedMs: performance.now() - startedAt, detail,
+  });
+  report('Подготовка хранилища', 0, 100);
   const resolvedSlot = slotId ?? await getActiveWorldSlotId() ?? sanitizeSlotId(`${world.config.seed}-${Date.now()}`);
   activeSlotCache = resolvedSlot;
   const previousFingerprints = fingerprintCache.get(resolvedSlot) ?? await readStoredFingerprints(resolvedSlot);
-  const currentRecords = partitionWorld(world, resolvedSlot);
+  report('Сериализация изменяемых коллекций', 4, 100);
+  const currentRecords = await partitionWorld(world, resolvedSlot, (done, total, collection) => {
+    report(`Сериализация: ${collection}`, 4 + done / Math.max(1, total) * 61, 100, `${done.toLocaleString('ru-RU')} / ${total.toLocaleString('ru-RU')} частей`);
+  });
+  report('Сравнение с предыдущим сохранением', 66, 100);
   const currentFingerprints = new Map(currentRecords.map(record => [record.key, record.fingerprint]));
   const changed = currentRecords.filter(record => previousFingerprints.get(record.key) !== record.fingerprint);
   const deleted = [...previousFingerprints.keys()].filter(key => !currentFingerprints.has(key));
+  const rebuildSlotRecords = deleted.length > 2_000 || previousFingerprints.size > Math.max(400, currentRecords.length * 4);
+  const recordsToWrite = rebuildSlotRecords ? currentRecords : changed;
   const slots = await listWorldSlots();
   const previousMeta = slots.find(slot => slot.id === resolvedSlot);
   const snapshotDue = Boolean(options.forceSnapshot || (previousMeta?.lastSnapshotYear !== undefined && world.year - previousMeta.lastSnapshotYear >= SNAPSHOT_INTERVAL_YEARS));
@@ -241,6 +258,9 @@ export async function saveWorld(
   };
 
   try {
+    report('Запись изменений в IndexedDB', 72, 100, rebuildSlotRecords
+      ? `быстрая смена формата · ${recordsToWrite.length.toLocaleString('ru-RU')} частей`
+      : `${recordsToWrite.length.toLocaleString('ru-RU')} изменённых частей · ${deleted.length.toLocaleString('ru-RU')} удалённых`);
     const db = await openDatabase();
     const stores = [SLOT_STORE, CORE_STORE, RECORD_STORE, PREFERENCE_STORE, SNAPSHOT_STORE];
     const transaction = db.transaction(stores, 'readwrite');
@@ -249,8 +269,9 @@ export async function saveWorld(
     const slotStore = transaction.objectStore(SLOT_STORE);
     const snapshotStore = transaction.objectStore(SNAPSHOT_STORE);
     coreStore.put({ slotId: resolvedSlot, core } satisfies StoredCore);
-    for (const record of changed) recordStore.put(record);
-    for (const key of deleted) recordStore.delete(key);
+    if (rebuildSlotRecords) recordStore.delete(IDBKeyRange.bound(`${resolvedSlot}:`, `${resolvedSlot}:\uffff`));
+    for (const record of recordsToWrite) recordStore.put(record);
+    if (!rebuildSlotRecords) for (const key of deleted) recordStore.delete(key);
     transaction.objectStore(PREFERENCE_STORE).put(resolvedSlot, ACTIVE_SLOT_KEY);
 
     let snapshotCreated = false;
@@ -266,14 +287,16 @@ export async function saveWorld(
     }
     slotStore.put(meta);
     await transactionDone(transaction);
+    report('Завершение транзакции', 94, 100);
     db.close();
     fingerprintCache.set(resolvedSlot, currentFingerprints);
     localStorage.removeItem(LEGACY_KEY);
     try { localStorage.setItem(ACTIVE_SLOT_FALLBACK, resolvedSlot); } catch { /* Необязательно. */ }
     if (snapshotCreated) await trimSnapshots(resolvedSlot);
+    report('Мир сохранён', 100, 100, `${recordsToWrite.length.toLocaleString('ru-RU')} частей записано`);
     return {
-      slotId: resolvedSlot, writtenRecords: changed.length + 2 + (snapshotCreated ? 1 : 0), skippedRecords: currentRecords.length - changed.length,
-      deletedRecords: deleted.length, bytesEstimated, snapshotCreated, totalMs: performance.now() - startedAt,
+      slotId: resolvedSlot, writtenRecords: recordsToWrite.length + 2 + (snapshotCreated ? 1 : 0), skippedRecords: rebuildSlotRecords ? 0 : currentRecords.length - changed.length,
+      deletedRecords: rebuildSlotRecords ? previousFingerprints.size : deleted.length, bytesEstimated, snapshotCreated, totalMs: performance.now() - startedAt,
     };
   } catch (error) {
     try {
@@ -369,21 +392,39 @@ export function estimateWorldBytes(world: WorldState): number {
   try { return new Blob([JSON.stringify(world)]).size; } catch { return 0; }
 }
 
-function partitionWorld(world: WorldState, slotId: string): StoredRecord[] {
+async function partitionWorld(
+  world: WorldState,
+  slotId: string,
+  onProgress?: (completed: number, total: number, collection: string) => void,
+): Promise<StoredRecord[]> {
   const records: StoredRecord[] = [];
+  const total = Math.ceil(world.tiles.length / TILE_CHUNK_SIZE)
+    + entityCollections.reduce((sum, collection) => sum + Math.ceil((world[collection] as unknown[]).length / ENTITY_CHUNK_SIZE), 0);
+  let completed = 0;
+  const push = async (record: StoredRecord, collection: string) => {
+    records.push(record);
+    completed += 1;
+    onProgress?.(completed, total, collection);
+    if (completed % 12 === 0) await yieldToBrowser();
+  };
   for (let start = 0; start < world.tiles.length; start += TILE_CHUNK_SIZE) {
     const order = start / TILE_CHUNK_SIZE;
     const data = world.tiles.slice(start, start + TILE_CHUNK_SIZE);
-    records.push(makeRecord(slotId, 'tiles', order, data));
+    await push(makeRecord(slotId, 'tiles', order, data), 'карта');
   }
   for (const collection of entityCollections) {
     const items = world[collection] as unknown[];
-    for (let index = 0; index < items.length; index += 1) {
-      const item: any = items[index];
-      records.push(makeRecord(slotId, collection, item?.id ?? index, item));
+    for (let start = 0; start < items.length; start += ENTITY_CHUNK_SIZE) {
+      const order = start / ENTITY_CHUNK_SIZE;
+      const data = items.slice(start, start + ENTITY_CHUNK_SIZE);
+      await push(makeRecord(slotId, collection, `chunk-${order}`, data), collection);
     }
   }
   return records;
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 function makeRecord(slotId: string, collection: StoredRecord['collection'], order: number | string, data: unknown): StoredRecord {

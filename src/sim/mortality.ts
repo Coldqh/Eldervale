@@ -1,7 +1,7 @@
 import type { BurialRecord, BurialState, Cemetery, Character, Monster, WorldState } from '../types';
 import type { WorldIndexes } from './indexes';
 import { indexBurial, rebuildRelationshipIndexes } from './indexes';
-import { RNG } from './rng';
+import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { inheritanceHeir } from './socialSystem';
 
@@ -26,27 +26,134 @@ export function ensureCemeteries(world: WorldState, rng = new RNG(`${world.confi
   world.nextIds.cemetery ??= Math.max(0, ...world.cemeteries.map(item => item.id)) + 1;
   world.nextIds.burial ??= Math.max(0, ...world.burials.map(item => item.id)) + 1;
 
+  const migratePlacements = world.simulation.cemeteryPlacementVersion !== 1;
   for (const settlement of world.settlements) {
-    if (world.cemeteries.some(item => item.settlementId === settlement.id)) continue;
-    const size = world.config.localMapSize ?? 128;
-    const district = settlement.districts.find(item => item.role === 'окраина') ?? settlement.districts.at(-1) ?? settlement.districts[0];
-    const localX = 8 + rng.int(0, Math.max(1, Math.floor(size * .18)));
-    const localY = Math.max(8, size - 12 - rng.int(0, Math.max(1, Math.floor(size * .18))));
-    world.cemeteries.push({
+    let cemetery = world.cemeteries.find(item => item.settlementId === settlement.id);
+    if (!cemetery) {
+      cemetery = {
       id: world.nextIds.cemetery++,
       name: `Кладбище ${settlement.name}`,
       settlementId: settlement.id,
-      globalX: district?.x ?? settlement.x,
-      globalY: district?.y ?? settlement.y,
-      localX,
-      localY,
+      globalX: settlement.x,
+      globalY: settlement.y,
+      localX: 12,
+      localY: 12,
       foundedYear: Math.max(1, settlement.foundedYear + rng.int(0, Math.max(0, Math.min(20, world.year - settlement.foundedYear)))),
       capacity: Math.max(80, Math.ceil(settlement.population * 1.6)),
       burialIds: [],
       caretakerCharacterId: world.characters.find(character => character.alive && character.settlementId === settlement.id && ['priest', 'guard'].includes(character.profession))?.id,
       history: [`Основано для жителей поселения ${settlement.name}.`],
-    });
+      };
+      world.cemeteries.push(cemetery);
+      placeCemeterySafely(world, settlement.id, cemetery.id);
+    } else if (migratePlacements && cemeteryPlacementConflicts(world, cemetery)) {
+      const before = `${cemetery.globalX}:${cemetery.globalY}/${cemetery.localX}:${cemetery.localY}`;
+      placeCemeterySafely(world, settlement.id, cemetery.id);
+      const after = `${cemetery.globalX}:${cemetery.globalY}/${cemetery.localX}:${cemetery.localY}`;
+      if (before !== after) cemetery.history.push(`Участок перенесён с ${before} на ${after}, чтобы не пересекаться с домами, полями и стройками.`);
+    }
   }
+  world.simulation.cemeteryPlacementVersion = 1;
+}
+
+function placeCemeterySafely(world: WorldState, settlementId: number, cemeteryId: number): void {
+  const settlement = world.settlements.find(item => item.id === settlementId);
+  const cemetery = world.cemeteries.find(item => item.id === cemeteryId);
+  if (!settlement || !cemetery) return;
+  const mapSize = world.config.localMapSize ?? 128;
+  const plotSize = 12;
+  const districtCoordinates = new Set(settlement.districts.map(item => `${item.x}:${item.y}`));
+  const candidateTiles = world.tiles
+    .filter(tile => tile.terrain !== 'ocean' && !tile.settlementId && !tile.dungeonId)
+    .map(tile => ({ tile, distance: Math.min(...settlement.districts.map(district => Math.hypot(tile.x - district.x, tile.y - district.y))) }))
+    .filter(entry => entry.distance <= 2.25)
+    .sort((a, b) => Number(b.tile.kingdomId === settlement.kingdomId) - Number(a.tile.kingdomId === settlement.kingdomId)
+      || a.distance - b.distance
+      || hashSeed(`${world.config.seed}:кладбищенская-земля:${cemetery.id}:${a.tile.x}:${a.tile.y}`) - hashSeed(`${world.config.seed}:кладбищенская-земля:${cemetery.id}:${b.tile.x}:${b.tile.y}`));
+  const outskirts = settlement.districts
+    .filter(item => item.role === 'окраина')
+    .concat(settlement.districts.filter(item => item.role !== 'окраина'));
+  const globalCandidates = [
+    ...candidateTiles.map(entry => ({ x: entry.tile.x, y: entry.tile.y })),
+    ...outskirts.map(item => ({ x: item.x, y: item.y })),
+  ].filter((point, index, list) => list.findIndex(other => other.x === point.x && other.y === point.y) === index);
+
+  for (const point of globalCandidates) {
+    const preferredX = 6 + hashSeed(`${world.config.seed}:кладбище:${cemetery.id}:${point.x}:${point.y}:x`) % Math.max(1, mapSize - plotSize - 12);
+    const preferredY = 6 + hashSeed(`${world.config.seed}:кладбище:${cemetery.id}:${point.x}:${point.y}:y`) % Math.max(1, mapSize - plotSize - 12);
+    const slot = findFreeCemeterySlot(world, cemetery.id, point.x, point.y, preferredX, preferredY, plotSize, mapSize);
+    if (!slot) continue;
+    cemetery.globalX = point.x;
+    cemetery.globalY = point.y;
+    cemetery.localX = slot.x + Math.floor(plotSize / 2);
+    cemetery.localY = slot.y + Math.floor(plotSize / 2);
+    if (!districtCoordinates.has(`${point.x}:${point.y}`)) cemetery.history.push(`Кладбище вынесено за жилую застройку поселения ${settlement.name}.`);
+    return;
+  }
+}
+
+function cemeteryPlacementConflicts(world: WorldState, cemetery: Cemetery): boolean {
+  const plotSize = Math.max(6, Math.min(14, 6 + Math.ceil(Math.sqrt(Math.max(1, cemetery.burialIds.length)))));
+  const x = cemetery.localX - Math.floor(plotSize / 2);
+  const y = cemetery.localY - Math.floor(plotSize / 2);
+  return !cemeteryRectAvailable(world, cemetery.id, cemetery.globalX, cemetery.globalY, x, y, plotSize, world.config.localMapSize ?? 128);
+}
+
+function findFreeCemeterySlot(
+  world: WorldState,
+  cemeteryId: number,
+  globalX: number,
+  globalY: number,
+  preferredX: number,
+  preferredY: number,
+  plotSize: number,
+  mapSize: number,
+): { x: number; y: number } | undefined {
+  const clamp = (value: number) => Math.max(3, Math.min(mapSize - plotSize - 3, value));
+  const startX = clamp(preferredX), startY = clamp(preferredY);
+  if (cemeteryRectAvailable(world, cemeteryId, globalX, globalY, startX, startY, plotSize, mapSize)) return { x: startX, y: startY };
+  for (let radius = 2; radius < mapSize; radius += 2) {
+    for (let dy = -radius; dy <= radius; dy += 2) {
+      for (let dx = -radius; dx <= radius; dx += 2) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const x = clamp(startX + dx), y = clamp(startY + dy);
+        if (cemeteryRectAvailable(world, cemeteryId, globalX, globalY, x, y, plotSize, mapSize)) return { x, y };
+      }
+    }
+  }
+  return undefined;
+}
+
+function cemeteryRectAvailable(
+  world: WorldState,
+  cemeteryId: number,
+  globalX: number,
+  globalY: number,
+  x: number,
+  y: number,
+  size: number,
+  mapSize: number,
+): boolean {
+  if (x < 2 || y < 2 || x + size >= mapSize - 2 || y + size >= mapSize - 2) return false;
+  const overlaps = (rx: number, ry: number, rw: number, rh: number, gap = 1) => x - gap < rx + rw && x + size + gap > rx && y - gap < ry + rh && y + size + gap > ry;
+  for (const building of world.buildings) {
+    if (building.globalX !== globalX || building.globalY !== globalY) continue;
+    if (overlaps(building.localX, building.localY, building.localWidth, building.localHeight, 2)) return false;
+  }
+  for (const project of world.constructionProjects) {
+    if (project.globalX !== globalX || project.globalY !== globalY || project.stage === 'завершено' || project.stage === 'заброшено') continue;
+    if (overlaps(project.localX, project.localY, project.localWidth, project.localHeight, 2)) return false;
+  }
+  for (const field of world.fields) {
+    if (field.globalX !== globalX || field.globalY !== globalY) continue;
+    if (field.cells.some(cell => cell.x >= x - 1 && cell.x < x + size + 1 && cell.y >= y - 1 && cell.y < y + size + 1)) return false;
+  }
+  for (const other of world.cemeteries) {
+    if (other.id === cemeteryId || other.globalX !== globalX || other.globalY !== globalY) continue;
+    const otherSize = Math.max(6, Math.min(14, 6 + Math.ceil(Math.sqrt(Math.max(1, other.burialIds.length)))));
+    if (overlaps(other.localX - Math.floor(otherSize / 2), other.localY - Math.floor(otherSize / 2), otherSize, otherSize, 3)) return false;
+  }
+  return true;
 }
 
 export function archiveCharacter(world: WorldState, indexes: WorldIndexes | undefined, character: Character, context: DeathContext, rng: RNG): BurialRecord {

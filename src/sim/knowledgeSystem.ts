@@ -293,7 +293,15 @@ export function registerWorldEventKnowledge(world: WorldState, event: WorldEvent
   for (const witness of witnesses) addFactToCharacter(world, witness, fact.id, 'свидетель', 96, Math.min(100, 25 + event.importance * 13));
   if (origin && (options.createRumor ?? event.importance >= 2)) createRumor(world, fact, origin.id, new RNG(`${world.config.seed}:слух-события:${event.id}`));
   if (!options.historicalSeed && origin && event.importance >= 3) reportImportantFact(world, fact, origin, witnesses[0]);
-  trimKnowledgeCollections(world);
+  const tick = worldTick(world);
+  const overBufferedLimit = world.knowledgeFacts.length > MAX_FACTS * 1.12
+    || world.memories.length > MAX_MEMORIES * 1.12
+    || world.rumors.length > MAX_RUMORS * 1.12
+    || world.messages.length > MAX_MESSAGES * 1.12;
+  if (overBufferedLimit && world.simulation.lastKnowledgeTrimTick !== tick) {
+    trimKnowledgeCollections(world);
+    world.simulation.lastKnowledgeTrimTick = tick;
+  }
   return fact;
 }
 
@@ -633,6 +641,7 @@ export function advanceKnowledgeSystem(
       loseDeadSecrets(world);
       decayRumors(world, tick);
       trimKnowledgeCollections(world);
+      world.simulation.lastKnowledgeTrimTick = tick;
     }
     return { confirmedMonsterThreats: deliveredMessages || options.maintenance !== false ? confirmedThreats(world) : [], deliveredMessages, spreadRumors };
   } finally {

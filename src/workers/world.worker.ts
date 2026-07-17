@@ -2,7 +2,7 @@
 import type { SimulationProfile, SimulationProgress, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage } from '../lib/worldWorkerProtocol';
 import { generateHistoricalWorld } from '../sim/historicalEngine';
-import { advanceOneMonth, createSimulationEngine, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
+import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 
 const scope = self as DedicatedWorkerGlobalScope;
@@ -47,10 +47,10 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   const startedAt = performance.now();
   const world = generateHistoricalWorld(message.config, (phase, completed, total, detail) => {
     const operation: SimulationProgress['operation'] = phase.includes('История') || phase.includes('истории') || phase.includes('эпох') || phase.includes('Связывание') ? 'история' : 'генерация';
-    const capped = Math.min(94, completed / Math.max(1, total) * 94);
-    post({ id: message.id, type: 'progress', progress: progressMessage(operation, phase, capped, 100, startedAt, { detail }) });
+    const scaled = Math.min(97, completed / Math.max(1, total) * 97);
+    post({ id: message.id, type: 'progress', progress: progressMessage(operation, phase, scaled, 100, startedAt, { detail }) });
   });
-  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Индексируем созданный мир', 95, 100, startedAt) });
+  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Индексируем созданный мир', 98, 100, startedAt) });
   engine = createSimulationEngine(world);
   const totalMs = performance.now() - startedAt;
   const profile: SimulationProfile = {
@@ -59,7 +59,7 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   };
   lastProfile = profile;
   activeOperationId = undefined;
-  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Передаём мир приложению', 98, 100, startedAt) });
+  post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Передаём мир приложению', 99, 100, startedAt) });
   post({ id: message.id, type: 'complete', world, profile });
   // Главный поток уже получил structured-clone копию. Не держим второй
   // полный мир и его индексы во время тяжёлого первого сохранения.
@@ -73,17 +73,18 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
   const startedAt = performance.now();
   const startTasks = engine.processedTasks;
   resetSimulationProfiler(engine);
-  const fastForward = message.months >= 24;
+  const fastForward = message.months >= 12;
   let movingAverageMs = 0;
   let lastPhase = 'Подготовка планировщика';
+  let completedMonths = 0;
 
   post({ id: message.id, type: 'progress', progress: progressMessage('симуляция', lastPhase, 0, message.months, startedAt, { year: engine.world.year, month: engine.world.month }) });
 
-  for (let step = 0; step < message.months; step += 1) {
+  while (completedMonths < message.months) {
     if (cancelRequestedFor === message.id) {
       const elapsed = performance.now() - startedAt;
       const profile: SimulationProfile = {
-        operation: 'симуляция', months: step, totalMs: elapsed, simulationMs: elapsed, indexedEntities: countIndexedEntities(engine.indexes),
+        operation: 'симуляция', months: completedMonths, totalMs: elapsed, simulationMs: elapsed, indexedEntities: countIndexedEntities(engine.indexes),
         processedTasks: engine.processedTasks - startTasks, activeRegions: engine.world.simulation.activeRegionKeys.length,
         sleepingRegions: engine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
         fastForward, exactMonths: engine.exactMonths, coarseMonths: engine.coarseMonths, phaseTimings: simulationPhaseProfile(engine),
@@ -96,21 +97,23 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
     }
 
     const monthStarted = performance.now();
-    advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward });
+    const monthStep = fastForward ? Math.min(message.months - completedMonths, monthsToNextQuarter(engine.world.month)) : 1;
+    advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward, monthStep });
     const monthMs = performance.now() - monthStarted;
-    movingAverageMs = movingAverageMs ? movingAverageMs * .72 + monthMs * .28 : monthMs;
-    const completed = step + 1;
-    const etaMs = Math.max(0, movingAverageMs * (message.months - completed));
+    const normalizedMonthMs = monthMs / monthStep;
+    movingAverageMs = movingAverageMs ? movingAverageMs * .72 + normalizedMonthMs * .28 : normalizedMonthMs;
+    completedMonths += monthStep;
+    const etaMs = Math.max(0, movingAverageMs * (message.months - completedMonths));
     post({
       id: message.id,
       type: 'progress',
       progress: {
-        operation: 'симуляция', phase: lastPhase, completed, total: message.months, percent: completed / message.months * 100,
+        operation: 'симуляция', phase: lastPhase, completed: completedMonths, total: message.months, percent: completedMonths / message.months * 100,
         elapsedMs: performance.now() - startedAt, etaMs, year: engine.world.year, month: engine.world.month,
         detail: `Активных регионов: ${engine.world.simulation.activeRegionKeys.length} · в очереди: ${engine.world.simulation.queuedActions.length}`,
       },
     });
-    if (completed % 2 === 0 || completed === message.months) await yieldToWorker();
+    await yieldToWorker();
   }
 
   const simulationMs = performance.now() - startedAt;
