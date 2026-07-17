@@ -90,9 +90,13 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
         fastForward, exactMonths: engine.exactMonths, coarseMonths: engine.coarseMonths, phaseTimings: simulationPhaseProfile(engine),
       };
       lastProfile = profile;
+      const world = engine.world;
       activeOperationId = undefined;
       cancelRequestedFor = undefined;
-      post({ id: message.id, type: 'cancelled', world: engine.world, profile });
+      post({ id: message.id, type: 'cancelled', world, profile });
+      // После передачи частичного результата главный поток владеет миром.
+      // Worker будет заново инициализирован перед следующим ходом.
+      engine = undefined;
       return;
     }
 
@@ -125,8 +129,12 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
   };
   lastProfile = profile;
   engine.world.simulation.lastProfile = profile;
+  const world = engine.world;
   activeOperationId = undefined;
-  post({ id: message.id, type: 'complete', world: engine.world, profile });
+  post({ id: message.id, type: 'complete', world, profile });
+  // Сохранение идёт в главном потоке. Освобождаем вторую полную копию мира,
+  // чтобы мобильный браузер не держал одновременно Worker, React и сериализацию.
+  engine = undefined;
 }
 
 scope.onmessage = event => {

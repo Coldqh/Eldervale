@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview",
+    "test:watchdog": "npx --yes tsx@4.20.6 scripts/worker-watchdog-smoke.ts",
     "test:sim": "npx --yes tsx@4.20.6 scripts/simulation-smoke.ts",
     "test:battle": "npx --yes tsx@4.20.6 scripts/battle-smoke.ts",
     "test:long": "npx --yes tsx@4.20.6 scripts/simulation-long-smoke.ts",
-    "test:perf": "npx --yes tsx@4.20.6 scripts/simulation-performance.ts"
+    "test:perf": "npx --yes tsx@4.20.6 scripts/simulation-performance.ts",
+    "test:ci": "npm run build && npm run test:watchdog && npm run test:sim && npm run test:battle && npm run test:long && npm run test:perf"
   },
   "dependencies": {
     "react": "19.2.7",

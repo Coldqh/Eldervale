@@ -3,10 +3,13 @@ import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from '
 import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
+import { createInactivityWatchdog, workerInactivityTimeout, type InactivityWatchdog, type WorkerOperation } from './workerWatchdog';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
-  ? Command extends { id: number }
-    ? Omit<Command, 'id'>
+  ? Command extends { id: number; action: infer Action }
+    ? Action extends 'cancel'
+      ? never
+      : Omit<Command, 'id'>
     : never
   : never;
 
@@ -25,9 +28,31 @@ interface PendingRequest {
   reject: (error: Error) => void;
   onProgress?: (progress: SimulationProgress) => void;
   action: WorldWorkerCommandInput['action'];
+  watchdog: InactivityWatchdog;
 }
 
 const pending = new Map<number, PendingRequest>();
+
+function operationLabel(action: PendingRequest['action']): string {
+  if (action === 'initialize') return 'загрузка мира';
+  if (action === 'generate') return 'генерация мира';
+  if (action === 'advance') return 'симуляция мира';
+  if (action === 'snapshot') return 'получение снимка';
+  return 'обновление фокуса';
+}
+
+function resetWorker(error: Error): void {
+  const activeWorker = worker;
+  worker = undefined;
+  activeWorker?.terminate();
+  for (const request of pending.values()) {
+    request.watchdog.stop();
+    request.reject(error);
+  }
+  pending.clear();
+  currentOperationId = undefined;
+  workerHasWorld = false;
+}
 
 function getWorker(): Worker | undefined {
   if (typeof Worker === 'undefined') return undefined;
@@ -37,27 +62,23 @@ function getWorker(): Worker | undefined {
     const request = pending.get(event.data.id);
     if (!request) return;
     if (event.data.type === 'progress') {
+      request.watchdog.touch();
       request.onProgress?.(event.data.progress);
       return;
     }
+    request.watchdog.stop();
     pending.delete(event.data.id);
     if (currentOperationId === event.data.id) currentOperationId = undefined;
     if (event.data.type === 'error') request.reject(new Error(event.data.error));
     else {
       if (request.action === 'initialize') workerHasWorld = true;
-      if (request.action === 'generate') workerHasWorld = false;
+      if (request.action === 'generate' || request.action === 'advance') workerHasWorld = false;
       if (event.data.world) lastKnownWorld = event.data.world;
       request.resolve({ world: event.data.world, profile: event.data.profile, cancelled: event.data.type === 'cancelled' });
     }
   };
-  worker.onerror = () => {
-    for (const request of pending.values()) request.reject(new Error('Фоновая симуляция остановилась'));
-    pending.clear();
-    currentOperationId = undefined;
-    workerHasWorld = false;
-    worker?.terminate();
-    worker = undefined;
-  };
+  worker.onerror = event => resetWorker(new Error(event.message || 'Фоновая симуляция остановилась'));
+  worker.onmessageerror = () => resetWorker(new Error('Браузер не смог прочитать ответ фоновой симуляции'));
   return worker;
 }
 
@@ -67,8 +88,19 @@ function runWorker(command: WorldWorkerCommandInput, onProgress?: (progress: Sim
   const id = nextId++;
   if (command.action === 'generate' || command.action === 'advance') currentOperationId = id;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress, action: command.action });
-    activeWorker.postMessage({ ...command, id } as WorldWorkerCommand);
+    const watchdog = createInactivityWatchdog(
+      workerInactivityTimeout(command.action as WorkerOperation),
+      () => {
+        if (!pending.has(id)) return;
+        resetWorker(new Error(`Фоновая операция «${operationLabel(command.action)}» слишком долго не отвечает. Движок перезапущен, сохранённый мир не изменён.`));
+      },
+    );
+    pending.set(id, { resolve, reject, onProgress, action: command.action, watchdog });
+    try {
+      activeWorker.postMessage({ ...command, id } as WorldWorkerCommand);
+    } catch (error) {
+      resetWorker(error instanceof Error ? error : new Error('Не удалось передать данные фоновой симуляции'));
+    }
   });
 }
 
@@ -152,11 +184,13 @@ export async function advanceWorldInBackground(months: number, onProgress?: (pro
 
 export async function setWorldFocusInBackground(focus?: { x: number; y: number; level?: number; radius?: number }): Promise<void> {
   pendingFocus = focus ? { x: focus.x, y: focus.y, level: focus.level ?? 0, radius: focus.radius ?? 1 } : {};
-  await runWorker({ action: 'setFocus', ...(pendingFocus ?? {}) });
+  if (typeof Worker === 'undefined') await runFallback({ action: 'setFocus', ...(pendingFocus ?? {}) });
+  else if (workerHasWorld) await runWorker({ action: 'setFocus', ...(pendingFocus ?? {}) });
   if (lastKnownWorld) lastKnownWorld.simulation.observerFocus = focus ? { x: focus.x, y: focus.y, level: focus.level ?? 0, radius: focus.radius ?? 1 } : undefined;
 }
 
 export async function snapshotWorldInBackground(): Promise<WorldState | undefined> {
+  if (typeof Worker !== 'undefined' && !workerHasWorld) return lastKnownWorld;
   return (await runWorker({ action: 'snapshot' })).world;
 }
 
