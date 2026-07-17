@@ -1,6 +1,6 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
+export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
 export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type SocialContextKind = 'family' | 'household' | 'neighbors' | 'work' | 'market' | 'faith' | 'army' | 'court' | 'travel' | 'crime';
@@ -9,6 +9,74 @@ export type LocalGround = 'grass' | 'dirt' | 'sand' | 'water' | 'mud' | 'snow' |
 export type LocalFeature = 'tree' | 'bush' | 'rock' | 'reeds' | 'wall' | 'door' | 'field' | 'tilled-soil' | 'seedlings' | 'crop' | 'ripe-crop' | 'construction-foundation' | 'construction-frame' | 'construction-wall' | 'scaffold' | 'rubble' | 'looted' | 'fire' | 'trash' | 'blood' | 'body' | 'bones' | 'grave' | 'cemetery' | 'chest' | 'stairs-down' | 'stairs-up' | 'bridge' | 'herb' | 'berry' | 'mushroom' | 'animal-trail' | 'tent' | 'campfire' | 'latrine' | 'palisade' | 'hitching-post';
 export type LocalEffectKind = 'burn' | 'rubble' | 'looted' | 'blood' | 'body' | 'lost-item' | 'camp' | 'grave' | 'repaired';
 
+
+
+export type BiologicalSex = 'female' | 'male';
+export type LifeStage = 'младенец' | 'ребёнок' | 'подросток' | 'взрослый' | 'пожилой' | 'старый';
+export type HealthConditionKind = 'болезнь' | 'травма' | 'инфекция' | 'хроническое состояние' | 'осложнение родов';
+export type HealthConditionStatus = 'активно' | 'выздоровление' | 'вылечено' | 'хроническое' | 'смерть';
+export type PregnancyStatus = 'беременность' | 'роды' | 'завершено' | 'потеря';
+export type EpidemicStatus = 'зарождение' | 'распространение' | 'спад' | 'завершено';
+
+export interface CharacterHealthProfile {
+  lifeStage: LifeStage;
+  frailty: number;
+  immunity: number;
+  fertility: number;
+  activeConditionIds: number[];
+  pregnancyId?: number;
+  chronicConditions: string[];
+  lastHealthTick: number;
+}
+
+export interface HealthCondition {
+  id: number;
+  characterId: number;
+  settlementId: number;
+  kind: HealthConditionKind;
+  diseaseId?: string;
+  name: string;
+  severity: number;
+  contagiousness: number;
+  startedTick: number;
+  expectedEndTick: number;
+  status: HealthConditionStatus;
+  treated: boolean;
+  careQuality: number;
+  sourceCharacterId?: number;
+  cause: string;
+  history: string[];
+}
+
+export interface Pregnancy {
+  id: number;
+  parentAId: number;
+  parentBId: number;
+  gestatingParentId: number;
+  settlementId: number;
+  conceivedTick: number;
+  dueTick: number;
+  status: PregnancyStatus;
+  risk: number;
+  childId?: number;
+  history: string[];
+}
+
+export interface Epidemic {
+  id: number;
+  diseaseId: string;
+  name: string;
+  settlementId: number;
+  startTick: number;
+  endTick?: number;
+  status: EpidemicStatus;
+  infectedEstimate: number;
+  severeEstimate: number;
+  deaths: number;
+  recovered: number;
+  transmission: number;
+  history: string[];
+}
 
 export type ItemCategory = 'еда' | 'напиток' | 'семена' | 'сырьё' | 'топливо' | 'инструмент' | 'одежда' | 'броня' | 'оружие' | 'краситель' | 'мебель' | 'лекарство' | 'предмет быта';
 export type BuildingType = 'house' | 'tenement' | 'manor' | 'barracks' | 'monastery' | 'warehouse' | 'farm' | 'mill' | 'bakery' | 'tavern' | 'inn' | 'brewery' | 'winery' | 'blacksmith' | 'carpenter' | 'weaver' | 'tailor' | 'dyehouse' | 'tannery' | 'cobbler' | 'armorer' | 'toolmaker' | 'kiln' | 'quarry' | 'market' | 'shop' | 'bathhouse' | 'healer' | 'temple' | 'guildhall' | 'stable' | 'fishery' | 'mine' | 'cemetery' | 'castle' | 'arsenal' | 'watchtower' | 'siegeWorkshop' | 'townHall' | 'courthouse' | 'prison' | 'fireStation' | 'school' | 'shelter' | 'public';
@@ -949,6 +1017,7 @@ export interface SimulationRuntimeState {
   stateMachineVersion?: 1;
   socialSystemVersion?: 1;
   physicalArmyVersion?: 1;
+  healthSystemVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1045,6 +1114,7 @@ export interface Settlement {
 }
 
 export interface Character {
+  sex?: BiologicalSex;
   id: number;
   name: string;
   species: Species;
@@ -1100,6 +1170,7 @@ export interface Character {
   courtFactionId?: number;
   politicalInfluence?: number;
   mind?: CharacterMind;
+  healthProfile?: CharacterHealthProfile;
 }
 
 export interface Relationship {
@@ -1600,7 +1671,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 20;
+  version: 21;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1661,6 +1732,9 @@ export interface WorldState {
   stateCrises: StateCrisis[];
   diplomaticAgreements: DiplomaticAgreement[];
   socialObligations: SocialObligation[];
+  healthConditions: HealthCondition[];
+  pregnancies: Pregnancy[];
+  epidemics: Epidemic[];
   decisions: DecisionRecord[];
   stateDeltas: StateDelta[];
   territoryHistory: TerritoryChange[];

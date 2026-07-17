@@ -21,6 +21,7 @@ import { normalizeKingdomCapitals } from './kingdomState';
 import { initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { ensureCharacterMind, initializeMindSystem, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { initializeSocialSystem } from './socialSystem';
+import { initializeHealthSystem } from './healthSystem';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -112,6 +113,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeStateMachine(world, new RNG(`${config.seed}:государственная-машина-v1`));
   onProgress?.('Семьи, связи и личные обязательства', 99.8, 100, 'связываем домохозяйства, работу, дружбу, долги и придворные сети');
   initializeSocialSystem(world);
+  onProgress?.('Здоровье, возраст и демография', 99.9, 100, 'назначаем возрастные этапы, иммунитет и базовые риски');
+  initializeHealthSystem(world);
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
   const landmarkEventIds = [...world.events]
     .sort((a, b) => b.importance - a.importance || b.year - a.year || b.id - a.id)
@@ -135,7 +138,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 20;
+  world.version = 21;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

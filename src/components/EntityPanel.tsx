@@ -343,7 +343,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Тип', settlementTypeLabel(entity.type))}{row('Население', `${entity.population} жителей`)}{row('Жилая вместимость', `${entity.residentialCapacity} мест`)}
     {row('Домохозяйства', entity.households)}{row('Глобальные квадраты', `${entity.districts.length} · ${entity.districts.map((item: any) => item.name).join(', ')}`)}{row('Ресурс', entity.resource)}
     {row('Благосостояние', `${entity.prosperity}%`)}{row('Защита', `${entity.defense}%`)}{row('Запасы пищи', entity.food)}
-    {row('Беспорядки', `${entity.unrest}%`)}{row('Нехватка', entity.shortages.join(', ') || 'нет')}{row('Повреждения', `${entity.damaged}%`)}
+    {row('Беспорядки', `${entity.unrest}%`)}{row('Нехватка', entity.shortages.join(', ') || 'нет')}{row('Болезни', world.epidemics.filter(item => item.settlementId === entity.id && item.status !== 'завершено').map(item => `${item.name}: около ${item.infectedEstimate} больных, ${item.status}`).join('; ') || 'нет активных вспышек')}{row('Повреждения', `${entity.damaged}%`)}
     {row('Пути', links(world, entity.tradeRouteIds.map((id: number) => ({ kind: 'tradeRoute' as const, id })), onSelect))}
     {row('Здания', links(world, (entity.buildingIds ?? []).slice(0, 30).map((id: number) => ({ kind: 'building' as const, id })), onSelect))}
     {row('Домохозяйства', links(world, (entity.householdIds ?? []).slice(0, 24).map((id: number) => ({ kind: 'household' as const, id })), onSelect))}
@@ -356,7 +356,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
   if (ref.kind === 'character') {
     const relationships = world.relationships.filter(relation => entity.relationshipIds.includes(relation.id)).slice(0, 10);
     return <>
-      {row('Состояние', entity.alive ? `${entity.age} лет` : `умер в ${entity.deathYear} году`)}{row('Вид', speciesLabel(entity.species))}
+      {row('Состояние', entity.alive ? `${entity.age} лет` : `умер в ${entity.deathYear} году`)}{row('Вид', speciesLabel(entity.species))}{row('Пол', entity.sex === 'female' ? 'женский' : entity.sex === 'male' ? 'мужской' : 'не указан')}
       {row('Профессия', professionLabel(entity.profession))}{row('Рабочее место', entity.workplace)}{row('Домашний район', entity.homeDistrict ?? 'не закреплён')}{row('Родина', link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
       {row('Домохозяйство', entity.householdId ? link(getTitle(world, { kind: 'household', id: entity.householdId }), { kind: 'household', id: entity.householdId }, onSelect) : 'не закреплено')}
       {row('Дом', entity.homeBuildingId ? link(getTitle(world, { kind: 'building', id: entity.homeBuildingId }), { kind: 'building', id: entity.homeBuildingId }, onSelect) : 'нет постоянного жилья')}
@@ -366,7 +366,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Супруг', entity.spouseId ? link(getTitle(world, { kind: 'character', id: entity.spouseId }), { kind: 'character', id: entity.spouseId }, onSelect) : 'нет')}
       {row('Родители', links(world, entity.parentIds.map((id: number) => ({ kind: 'character' as const, id })), onSelect))}
       {row('Дети', links(world, entity.childIds.slice(0, 12).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}
-      {row('Известность', entity.renown)}{row('Здоровье', `${entity.health}%`)}{row('Богатство', `${Math.round(entity.wealth)} крон`)}{row('Верность', `${entity.loyalty}%`)}
+      {row('Известность', entity.renown)}{row('Здоровье', `${entity.health}%`)}{entity.healthProfile && row('Состояние тела', `${entity.healthProfile.lifeStage} · хрупкость ${Math.round(entity.healthProfile.frailty)}% · иммунитет ${Math.round(entity.healthProfile.immunity)}%`)}{row('Богатство', `${Math.round(entity.wealth)} крон`)}{row('Верность', `${entity.loyalty}%`)}
       {row('Цель', entity.ambition)}{row('Титулы', entity.titles.join(', ') || 'нет')}{row('Политическое влияние', `${Math.round(entity.politicalInfluence ?? 0)}%`)}
       {entity.mind && row('Черты', Object.entries(entity.mind.traits).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).map(([key, value]) => `${mindLabel(key)} ${Math.round(Number(value))}`).join(', '))}
       {entity.mind && row('Ценности', Object.entries(entity.mind.values).sort((a: any, b: any) => Number(b[1]) - Number(a[1])).map(([key, value]) => `${mindLabel(key)} ${Math.round(Number(value))}`).join(', '))}
@@ -380,7 +380,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Земельные титулы', links(world, (entity.nobleTitleIds ?? []).map((id: number) => ({ kind: 'nobleTitle' as const, id })), onSelect))}
       {row('Придворные должности', links(world, (entity.courtOfficeIds ?? []).map((id: number) => ({ kind: 'courtOffice' as const, id })), onSelect))}
       {row('Группировка', entity.courtFactionId ? link(getTitle(world, { kind: 'courtFaction', id: entity.courtFactionId }), { kind: 'courtFaction', id: entity.courtFactionId }, onSelect) : 'не состоит')}
-      {row('Травмы', entity.injuries.join(', ') || 'нет')}
+      {row('Травмы', entity.injuries.join(', ') || 'нет')}{entity.healthProfile && row('Активные болезни и травмы', entity.healthProfile.activeConditionIds.map((id: number) => world.healthConditions.find(item => item.id === id)).filter(Boolean).map((item: any) => `${item.name} ${Math.round(item.severity)}%${item.treated ? ' · лечится' : ''}`).join('; ') || 'нет')}{entity.healthProfile?.pregnancyId && row('Беременность', (() => { const pregnancy = world.pregnancies.find(item => item.id === entity.healthProfile?.pregnancyId); return pregnancy ? `срок ${Math.max(0, pregnancy.dueTick - (world.year * 12 + world.month - 1))} мес. · риск ${Math.round(pregnancy.risk)}%` : 'данные не найдены'; })())}
       {entity.schedule && row('Распорядок', `подъём ${entity.schedule.wakeHour}:00, работа ${entity.schedule.workStartHour}:00–${entity.schedule.workEndHour}:00, сон ${entity.schedule.sleepHour}:00, выходной день ${entity.schedule.restDay}; сейчас ${entity.schedule.currentActivity}`)}
       {entity.needs && row('Потребности', `голод ${Math.round(entity.needs.hunger)}%, жажда ${Math.round(entity.needs.thirst)}%, усталость ${Math.round(entity.needs.rest)}%, холод ${Math.round(entity.needs.warmth)}%, безопасность ${Math.round(entity.needs.safety)}%, общение ${Math.round(entity.needs.social)}%`)}
       {row('Личный кошелёк', `${Math.round((entity.wallet ?? 0) * 10) / 10} крон`)}

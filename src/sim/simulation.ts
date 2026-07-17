@@ -23,6 +23,7 @@ import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordD
 import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
 import { advancePhysicalArmySystem, ensureArmyOutsideSettlements, nextArmyFieldStep } from './physicalArmy';
+import { advanceHealthSystem } from './healthSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -179,10 +180,14 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
       character.workplace = workplaceFor(character.profession);
     }
     const settlement = indexes.settlementById.get(character.settlementId);
-    const hungerRisk = settlement?.shortages.includes('пища') ? .035 : 0;
-    const mortality = character.age < 45 ? .002 : character.age < 65 ? .01 : character.age < 85 ? .055 : .16;
-    if (rng.chance(mortality + hungerRisk + (100 - character.health) / 1500)) {
-      deaths.push({ character, cause: hungerRisk ? 'болезнь и нехватка пищи' : 'возраст, болезнь или старая травма', settlement });
+    const hungerRisk = settlement?.shortages.includes('пища') ? .028 : 0;
+    const speciesAge = character.species === 'elf' ? character.age / 2.8 : character.species === 'dwarf' ? character.age / 1.45 : character.species === 'orc' ? character.age / .82 : character.age;
+    const mortality = speciesAge < 2 ? .006 : speciesAge < 45 ? .0015 : speciesAge < 65 ? .007 : speciesAge < 82 ? .034 : speciesAge < 96 ? .11 : .28;
+    const frailtyRisk = (character.healthProfile?.frailty ?? 20) / 5000;
+    const healthRisk = Math.max(0, 55 - character.health) / 2200;
+    if (rng.chance(mortality + hungerRisk + frailtyRisk + healthRisk)) {
+      const activeCondition = character.healthProfile?.activeConditionIds.map(id => world.healthConditions.find(item => item.id === id)).find(item => item && (item.status === 'активно' || item.status === 'выздоровление'));
+      deaths.push({ character, cause: hungerRisk ? 'голод и истощение' : activeCondition?.name ?? (speciesAge >= 65 ? 'старость и ослабление организма' : 'внезапное ухудшение здоровья'), settlement });
     }
   }
   if (deaths.length) {
@@ -201,51 +206,6 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
     const localResidents = residents(indexes, settlement.id);
     settlement.population = localResidents.length;
     const adults = localResidents.filter(character => character.age >= 18 && character.age <= 48);
-    const couples = adults
-      .filter(character => character.spouseId && character.id < character.spouseId)
-      .map(character => [character, indexes.characterById.get(character.spouseId!)] as const)
-      .filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]?.alive && pair[1]?.settlementId === settlement.id));
-    const potential: readonly (readonly [Character, Character])[] = couples.length
-      ? couples
-      : adults.map((character, index) => [character, adults[index + 1]] as const).filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]));
-    const spareHousing = Math.max(0, settlement.residentialCapacity - settlement.population);
-    const births = Math.min(8, spareHousing, Math.floor(potential.length / 5 * (settlement.food > 35 ? 1 : .2) * rng.next()));
-    for (let index = 0; index < births; index += 1) {
-      const [parentA, parentB] = rng.pick(potential);
-      const child: Character = {
-        id: world.nextIds.character++, name: personName(rng, parentA.species), species: parentA.species, age: 0, birthYear: world.year, alive: true,
-        settlementId: settlement.id, kingdomId: settlement.kingdomId, dynastyId: parentA.dynastyId ?? parentB.dynastyId, profession: 'child', workplace: 'дом семьи', homeDistrict: parentA.homeDistrict ?? settlement.districts[0]?.name, renown: 0, health: rng.int(70, 100), wealth: 0, loyalty: rng.int(35, 85),
-        ambition: 'найти своё место в мире', parentIds: [parentA.id, parentB.id], childIds: [], relationshipIds: [], titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0,
-        biography: [`Родился в ${settlement.name} в ${world.year} году.`], householdId: parentA.householdId ?? parentB.householdId,
-        homeBuildingId: parentA.homeBuildingId ?? parentB.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
-        needs: { hunger: 8, thirst: 8, rest: 8, warmth: 8, safety: 8, social: 12, lastUpdatedTick: world.year * 12 + world.month - 1 },
-        schedule: { wakeHour: 7, workStartHour: 0, workEndHour: 0, sleepHour: 21, restDay: 1 + (world.nextIds.character % 7), currentActivity: 'живёт в семье и учится' },
-        wallet: 0, equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 28, condition: 72, socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: world.year * 12 + world.month - 1 }, knowledge: { factIds: [], memoryIds: [], opinions: [], detailed: false, lastGossipTick: world.year * 12 + world.month - 1 },
-      };
-      parentA.childIds.push(child.id);
-      parentB.childIds.push(child.id);
-      world.characters.push(child);
-      if (child.householdId) {
-        const household = indexes.householdById.get(child.householdId) ?? world.households.find(item => item.id === child.householdId);
-        if (household) {
-          if (!household.memberIds.includes(child.id)) household.memberIds.push(child.id);
-          const home = ensureHouseholdPhysicalCapacity(world, household, rng, indexes);
-          child.homeBuildingId = home?.id;
-          child.homeDistrict = home?.districtName ?? child.homeDistrict;
-        }
-      }
-      addResidentToIndexes(indexes, child);
-      addRelationship(world, indexes, parentA, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
-      addRelationship(world, indexes, parentB, child, 'родство', rng.int(65, 100), 'родитель и ребёнок');
-      if (child.dynastyId) world.dynasties.find(dynasty => dynasty.id === child.dynastyId)?.memberIds.push(child.id);
-      if (rng.chance(.12)) addEvent(world, {
-        kind: 'birth', title: `Родился ${child.name}`, description: `В семье ${parentA.name} и ${parentB.name} родился ребёнок.`, cause: 'семейная жизнь и достаточные запасы',
-        consequences: child.dynastyId ? ['у династии появился новый наследник'] : ['семья стала больше'],
-        entityRefs: [{ kind: 'character', id: child.id }, { kind: 'character', id: parentA.id }, { kind: 'settlement', id: settlement.id }], importance: child.dynastyId ? 2 : 1,
-      });
-    }
-    settlement.population = residents(indexes, settlement.id).length;
-
     const unmarried = adults.filter(character => !character.spouseId && character.age <= 60);
     if (unmarried.length >= 2 && rng.chance(.2)) {
       const a = rng.pick(unmarried);
@@ -896,6 +856,7 @@ export function advanceOneMonth(
   if (schedule.runHousing) {
     runPhase(engine, 'Строительство и переселения', onPhase, () => advanceHousing(world, rng, indexes));
   }
+  runPhase(engine, 'Здоровье, болезни, беременность и лечение', onPhase, () => advanceHealthSystem(world, rng, indexes, { fastForward, elapsedMonths: monthStep }));
 
   if (schedule.ecologySettlementIds.size || schedule.runSeasonalEcology) runPhase(engine, schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы', onPhase, () => advanceEcology(world, rng, indexes, {
     settlementIds: schedule.ecologySettlementIds, activeSettlementIds: schedule.activeSettlementIds, updateAnimals: schedule.runSeasonalEcology,
