@@ -25,6 +25,7 @@ import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
 import { advancePhysicalArmySystem, ensureArmyOutsideSettlements, nextArmyFieldStep } from './physicalArmy';
 import { advanceHealthSystem } from './healthSystem';
 import { releaseWarPrisoners, resolveSpatialArmyBattle } from './battleSystem';
+import { advanceCultureSystem } from './cultureSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -875,6 +876,7 @@ export function advanceOneMonth(
   }));
 
   if (world.month === 1) {
+    runPhase(engine, 'Культура, вера, языки и образование', onPhase, () => advanceCultureSystem(world, new RNG(`${world.config.seed}:культура:${world.year}`), indexes));
     runPhase(engine, 'Медленное расширение границ', onPhase, () => advanceModernTerritories(world, new RNG(`${world.config.seed}:современные-границы:${world.year}`)));
   }
 

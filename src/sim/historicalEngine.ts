@@ -22,6 +22,7 @@ import { initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStat
 import { ensureCharacterMind, initializeMindSystem, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { initializeSocialSystem } from './socialSystem';
 import { initializeHealthSystem } from './healthSystem';
+import { initializeCultureSystem } from './cultureSystem';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -115,6 +116,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeSocialSystem(world);
   onProgress?.('Здоровье, возраст и демография', 99.9, 100, 'назначаем возрастные этапы, иммунитет и базовые риски');
   initializeHealthSystem(world);
+  onProgress?.('Культуры, языки, вера и образование', 99.95, 100, 'формируем традиции, языки, храмы, школы, грамотность и культурные общины');
+  initializeCultureSystem(world, new RNG(`${config.seed}:культура-вера-образование-v1`));
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
   const landmarkEventIds = [...world.events]
     .sort((a, b) => b.importance - a.importance || b.year - a.year || b.id - a.id)
@@ -138,7 +141,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 22;
+  world.version = 23;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

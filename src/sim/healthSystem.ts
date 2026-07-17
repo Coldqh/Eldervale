@@ -9,6 +9,7 @@ import { archiveCharactersBatch } from './mortality';
 import { personName } from './names';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
+import { ensureCharacterCultureProfile } from './cultureSystem';
 
 const HEALTH_VERSION = 1;
 const MAX_ACTIVE_CONDITIONS = 1_800;
@@ -399,6 +400,7 @@ function createChild(world: WorldState, rng: RNG, indexes: WorldIndexes, pregnan
     knowledge: { factIds: [], memoryIds: [], opinions: [], detailed: false, lastGossipTick: tick },
     healthProfile: { lifeStage: 'младенец', frailty: rng.int(18, 42), immunity: rng.int(28, 72), fertility: rng.int(35, 92), activeConditionIds: [], chronicConditions: [], lastHealthTick: tick },
   };
+  ensureCharacterCultureProfile(world, child, rng);
   parentA.childIds.push(child.id); parentB.childIds.push(child.id); world.characters.push(child); addResidentToIndexes(indexes, child);
   if (child.householdId) {
     const household = indexes.householdById.get(child.householdId);

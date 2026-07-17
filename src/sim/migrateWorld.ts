@@ -23,17 +23,18 @@ import { initializeMindSystem } from './mindSystem';
 import { initializeSocialSystem } from './socialSystem';
 import { initializeHealthSystem } from './healthSystem';
 import { initializeBattleSystem } from './battleSystem';
+import { initializeCultureSystem } from './cultureSystem';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-22`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-23`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 22;
+  localized.version = 23;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -64,6 +65,10 @@ export function migrateWorld(input: unknown): WorldState {
   localized.rumors ??= [];
   localized.messages ??= [];
   localized.settlementKnowledge ??= [];
+  localized.cultures ??= [];
+  localized.languages ??= [];
+  localized.religions ??= [];
+  localized.settlementCultures ??= [];
   localized.settlementGovernments ??= [];
   localized.districtCivicStates ??= [];
   localized.civicPatrols ??= [];
@@ -104,6 +109,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 20) localized.simulation.performanceCoreVersion = undefined;
   if (sourceVersion < 21) localized.simulation.healthSystemVersion = undefined;
   if (sourceVersion < 22) localized.simulation.battleSystemVersion = undefined;
+  if (sourceVersion < 23) localized.simulation.cultureSystemVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -241,6 +247,10 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.memory = Math.max(0, ...localized.memories.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.rumor = Math.max(0, ...localized.rumors.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.message = Math.max(0, ...localized.messages.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.culture = Math.max(0, ...localized.cultures.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.language = Math.max(0, ...localized.languages.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.religion = Math.max(0, ...localized.religions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.settlementCulture = Math.max(0, ...localized.settlementCultures.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.settlementGovernment = Math.max(0, ...localized.settlementGovernments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.districtCivic = Math.max(0, ...localized.districtCivicStates.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.patrol = Math.max(0, ...localized.civicPatrols.map((item: any) => item.id ?? 0)) + 1;
@@ -287,6 +297,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeSocialSystem(localized as WorldState);
   initializeHealthSystem(localized as WorldState);
   initializeBattleSystem(localized as WorldState);
+  initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }

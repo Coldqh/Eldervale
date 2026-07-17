@@ -42,6 +42,9 @@ function shape(key: string, kind: EntityKind | 'terrain' | 'corpse' | 'grave', s
   if (kind === 'diplomaticAgreement') return <><path d="M5 11c4-5 8-5 11 0l3 4 8-6"/><path d="M5 21c4 5 8 5 11 0l3-4 8 6"/><circle className="texture-cut" cx="16" cy="16" r="3"/></>;
   if (kind === 'kingdom' || kind === 'dynasty') return <><path d="m5 10 6 5 5-10 5 10 6-5-3 17H8z"/><path className="texture-cut" d="M9 22h14"/></>;
   if (kind === 'war' || kind === 'battleRecord') return <><path d="m7 5 18 22M25 5 7 27"/><path className="texture-cut" d="m5 9 4-4m14 0 4 4M5 23l4 4m14 0 4-4"/></>;
+  if (kind === 'culture') return <><circle cx="16" cy="16" r="10"/><path className="texture-cut" d="M16 7v18M7 16h18M10 10l12 12m0-12L10 22"/></>;
+  if (kind === 'language') return <><path d="M5 6h10c2 0 3 1 3 3v18c-1-2-3-3-6-3H5z"/><path d="M27 6H17c-2 0-3 1-3 3v18c1-2 3-3 6-3h7z"/><path className="texture-cut" d="M8 11h6m-6 5h6m4-5h6m-6 5h6"/></>;
+  if (kind === 'religion') return <><circle cx="16" cy="16" r="11"/><path className="texture-cut" d="M16 7v18M9 14h14"/><circle className="texture-cut" cx="16" cy="16" r="3"/></>;
   if (kind === 'knowledgeFact') return <><circle cx="16" cy="16" r="10"/><path className="texture-cut" d="M16 9v8m0 5v1M9 16h14"/></>;
   if (kind === 'rumor') return <><path d="M4 11c5-6 9 6 14 0s8 1 10-3M4 18c5-6 9 6 14 0s8 1 10-3M4 25c5-6 9 6 14 0s8 1 10-3"/></>;
   if (kind === 'message') return <><path d="M4 8h24v17H4z"/><path className="texture-cut" d="m5 10 11 8 11-8M5 24l8-8m14 8-8-8"/></>;

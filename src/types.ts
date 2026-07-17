@@ -1,7 +1,7 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
-export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'battleRecord' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
+export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'battleRecord' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement' | 'culture' | 'language' | 'religion';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type SocialContextKind = 'family' | 'household' | 'neighbors' | 'work' | 'market' | 'faith' | 'army' | 'court' | 'travel' | 'crime';
 export type RelationshipStatus = 'distant' | 'stable' | 'close' | 'strained' | 'hostile' | 'broken';
@@ -231,6 +231,94 @@ export interface SettlementKnowledge {
 }
 
 
+
+export type EducationLevel = 'нет' | 'семейное' | 'начальное' | 'ученичество' | 'учёное' | 'духовное';
+
+export interface LanguageKnowledge {
+  languageId: number;
+  fluency: number;
+}
+
+export interface CharacterCultureProfile {
+  cultureId: number;
+  nativeLanguageId: number;
+  languages: LanguageKnowledge[];
+  religionId: number;
+  devotion: number;
+  literacy: number;
+  education: EducationLevel;
+  culturalOpenness: number;
+  lastUpdatedTick: number;
+}
+
+export interface CultureDefinition {
+  id: number;
+  name: string;
+  species: Species;
+  languageId: number;
+  parentCultureId?: number;
+  traditions: string[];
+  taboos: string[];
+  holidays: string[];
+  clothingStyle: string;
+  namingStyle: string;
+  marriageCustom: string;
+  burialCustom: string;
+  openness: number;
+  cohesion: number;
+  prestige: number;
+  settlementIds: number[];
+  history: string[];
+}
+
+export interface LanguageDefinition {
+  id: number;
+  name: string;
+  script: string;
+  parentLanguageId?: number;
+  dialectOfCultureId?: number;
+  difficulty: number;
+  prestige: number;
+  commonPhrases: string[];
+  history: string[];
+}
+
+export interface ReligionDefinition {
+  id: number;
+  name: string;
+  parentReligionId?: number;
+  doctrines: string[];
+  taboos: string[];
+  holyDays: string[];
+  clergyTitle: string;
+  tolerance: number;
+  conversionPressure: number;
+  authority: number;
+  settlementIds: number[];
+  history: string[];
+}
+
+export interface CulturalShare {
+  id: number;
+  share: number;
+}
+
+export interface SettlementCultureState {
+  id: number;
+  settlementId: number;
+  dominantCultureId: number;
+  cultureShares: CulturalShare[];
+  dominantReligionId: number;
+  religionShares: CulturalShare[];
+  literacy: number;
+  educationAccess: number;
+  schoolCapacity: number;
+  templeCapacity: number;
+  culturalTension: number;
+  activeFestival?: string;
+  lastUpdatedYear: number;
+  history: string[];
+}
 
 export type CrimeType = 'кража' | 'грабёж' | 'нападение' | 'убийство' | 'поджог' | 'контрабанда' | 'мошенничество' | 'взлом' | 'браконьерство';
 export type CrimeStatus = 'совершено' | 'расследуется' | 'подозреваемый найден' | 'передано в суд' | 'раскрыто' | 'не раскрыто';
@@ -1019,6 +1107,7 @@ export interface SimulationRuntimeState {
   physicalArmyVersion?: 1;
   healthSystemVersion?: 1;
   battleSystemVersion?: 1;
+  cultureSystemVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1067,6 +1156,9 @@ export interface Kingdom {
   aggression: number;
   culture: string;
   religion: string;
+  cultureId?: number;
+  religionId?: number;
+  officialLanguageId?: number;
   foundedYear: number;
   enemies: number[];
   claims: number[];
@@ -1112,6 +1204,7 @@ export interface Settlement {
   householdIds: number[];
   establishmentIds: number[];
   economy: SettlementEconomy;
+  cultureStateId?: number;
 }
 
 export interface Character {
@@ -1174,6 +1267,7 @@ export interface Character {
   healthProfile?: CharacterHealthProfile;
   capturedByKingdomId?: number;
   prisonerOfBattleId?: number;
+  cultureProfile?: CharacterCultureProfile;
 }
 
 
@@ -1723,7 +1817,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 22;
+  version: 23;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1770,6 +1864,10 @@ export interface WorldState {
   rumors: Rumor[];
   messages: Message[];
   settlementKnowledge: SettlementKnowledge[];
+  cultures: CultureDefinition[];
+  languages: LanguageDefinition[];
+  religions: ReligionDefinition[];
+  settlementCultures: SettlementCultureState[];
   settlementGovernments: SettlementGovernment[];
   districtCivicStates: DistrictCivicState[];
   civicPatrols: CivicPatrol[];
