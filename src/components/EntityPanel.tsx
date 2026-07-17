@@ -6,7 +6,7 @@ import {
 import { TextureIcon } from './TextureIcon';
 
 const labels: Record<EntityKind, string> = {
-  kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', monster: 'Существо',
+  kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', battleRecord: 'Сражение', monster: 'Существо',
   artifact: 'Артефакт', book: 'Книга', dungeon: 'Подземелье', war: 'Война', dynasty: 'Династия', tradeRoute: 'Торговый путь',
   animalPopulation: 'Популяция животных', ingredient: 'Природный ресурс', recipe: 'Алхимический рецепт',
   building: 'Здание', household: 'Домохозяйство', establishment: 'Заведение', item: 'Предмет', productionRecipe: 'Производственный рецепт', field: 'Поле', constructionProject: 'Строительный проект',
@@ -37,7 +37,7 @@ export function EntityPanel({ world, selected, onSelect }: { world: WorldState; 
 function getEntity(world: WorldState, ref: EntityRef): any {
   const map: Record<EntityKind, any[]> = {
     kingdom: world.kingdoms, settlement: world.settlements, character: world.characters, army: world.armies, monster: world.monsters,
-    artifact: world.artifacts, book: world.books, dungeon: world.dungeons, war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
+    artifact: world.artifacts, book: world.books, dungeon: world.dungeons, battleRecord: world.battleRecords ?? [], war: world.wars, dynasty: world.dynasties, tradeRoute: world.tradeRoutes,
     animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes,
     building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects,
     cemetery: world.cemeteries ?? [], burial: world.burials ?? [], travelingMerchant: world.travelingMerchants ?? [], militaryUnit: world.militaryUnits ?? [], supplyWagon: world.supplyWagons ?? [], knowledgeFact: world.knowledgeFacts ?? [], rumor: world.rumors ?? [], message: world.messages ?? [], settlementGovernment: world.settlementGovernments ?? [], districtCivic: world.districtCivicStates ?? [], patrol: world.civicPatrols ?? [], crime: world.crimes ?? [], courtCase: world.courtCases ?? [], fireIncident: world.fireIncidents ?? [], kingdomGovernment: world.kingdomGovernments ?? [], nobleTitle: world.nobleTitles ?? [], vassalContract: world.vassalContracts ?? [], courtOffice: world.courtOffices ?? [], courtFaction: world.courtFactions ?? [], royalOrder: world.royalOrders ?? [], stateCrisis: world.stateCrises ?? [], diplomaticAgreement: world.diplomaticAgreements ?? [],
@@ -56,6 +56,7 @@ export function getTitle(world: WorldState, ref: EntityRef): string {
       ?? world.burials?.find(item => item.subjectKind === 'character' && item.subjectId === entity.headCharacterId);
     return `Домохозяйство ${head?.name ?? `№${entity.id}`}`;
   }
+  if (ref.kind === 'battleRecord') return `Сражение №${entity.id}`;
   if (ref.kind === 'knowledgeFact') return entity.statement ?? `Знание №${entity.id}`;
   if (ref.kind === 'rumor') return entity.text ?? `Слух №${entity.id}`;
   if (ref.kind === 'message') return `${entity.kind} №${entity.id}`;
@@ -165,6 +166,13 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     const sender = entity.senderCharacterId ? world.characters.find(item => item.id === entity.senderCharacterId) : undefined;
     const recipient = entity.recipientCharacterId ? world.characters.find(item => item.id === entity.recipientCharacterId) : undefined;
     return <>{row('Тип', entity.kind)}{row('Состояние', entity.status)}{row('Надёжность', `${Math.round(entity.reliability)}%`)}{row('Печать', entity.sealed ? 'запечатано' : 'открыто')}{row('Отправитель', sender ? link(sender.name, { kind: 'character', id: sender.id }, onSelect) : 'не указан')}{row('Получатель', recipient ? link(recipient.name, { kind: 'character', id: recipient.id }, onSelect) : entity.recipientKingdomId ? link(getTitle(world, { kind: 'kingdom', id: entity.recipientKingdomId }), { kind: 'kingdom', id: entity.recipientKingdomId }, onSelect) : 'не указан')}{row('Маршрут', <>{link(getTitle(world, { kind: 'settlement', id: entity.fromSettlementId }), { kind: 'settlement', id: entity.fromSettlementId }, onSelect)} → {link(getTitle(world, { kind: 'settlement', id: entity.toSettlementId }), { kind: 'settlement', id: entity.toSettlementId }, onSelect)}</>)}{row('Отправлено', `${Math.floor(entity.departedTick / 12)}.${String(entity.departedTick % 12 + 1).padStart(2, '0')}`)}{row('Ожидаемое прибытие', `${Math.floor(entity.arrivalTick / 12)}.${String(entity.arrivalTick % 12 + 1).padStart(2, '0')}`)}{row('Сведения', links(world, entity.knowledgeFactIds.map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect))}{row('История', entity.history.join(' '))}</>;
+  }
+  if (ref.kind === 'battleRecord') {
+    const attacker = world.armies.find(item => item.id === entity.attackerArmyId);
+    const defender = world.armies.find(item => item.id === entity.defenderArmyId);
+    const winner = entity.winnerArmyId ? world.armies.find(item => item.id === entity.winnerArmyId) : undefined;
+    const unitLines = (states: any[]) => states.map(state => `${getTitle(world, { kind: 'militaryUnit', id: state.unitId })}: ${state.role}, ${state.remainingCount}/${state.initialCount}, мораль ${Math.round(state.morale)}%, ${state.routed ? 'бежало' : 'держало строй'}`).join('; ');
+    return <>{row('Дата', `${entity.year}.${String(entity.month).padStart(2, '0')}`)}{row('Место', entity.settlementId ? link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect) : `квадрат ${entity.globalX}:${entity.globalY}`)}{row('Атакующие', attacker ? link(attacker.name, { kind: 'army', id: attacker.id }, onSelect) : 'армия распущена')}{row('Защитники', defender ? link(defender.name, { kind: 'army', id: defender.id }, onSelect) : 'армия распущена')}{row('Победитель', winner ? link(winner.name, { kind: 'army', id: winner.id }, onSelect) : 'не определён')}{row('Раунды', entity.rounds)}{row('Потери атакующих', `${entity.attackerDead} погибших · ${entity.attackerWounded} раненых · ${entity.attackerCaptured} пленных`)}{row('Потери защитников', `${entity.defenderDead} погибших · ${entity.defenderWounded} раненых · ${entity.defenderCaptured} пленных`)}{row('Пленные', links(world, entity.prisonerIds.slice(0, 40).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Раненые', links(world, entity.woundedIds.slice(0, 40).map((id: number) => ({ kind: 'character' as const, id })), onSelect))}{row('Трофеи', links(world, entity.lootedItemIds.slice(0, 30).map((id: number) => ({ kind: 'item' as const, id })), onSelect))}{row('Строй атакующих', unitLines(entity.attackerUnitStates))}{row('Строй защитников', unitLines(entity.defenderUnitStates))}{row('Ход боя', entity.history.join(' '))}</>;
   }
   if (ref.kind === 'army') {
     const kingdom = world.kingdoms.find(item => item.id === entity.kingdomId);
@@ -387,6 +395,8 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {entity.equipment && row('Одежда', `${entity.equipment.socialTier} · ${entity.equipment.material} · ${entity.equipment.color} · состояние ${Math.round(entity.equipment.condition)}%`)}
       {entity.equipment && row('Экипировка', links(world, Object.values(entity.equipment.equippedItemIds ?? {}).filter((id): id is number => typeof id === 'number').map(id => ({ kind: 'item' as const, id })), onSelect))}
       {entity.serviceStatus && entity.serviceStatus !== 'гражданский' && row('Военная служба', `${entity.serviceStatus}${entity.militaryRole ? ` · ${entity.militaryRole}` : ''}`)}
+      {entity.serviceStatus === 'пленник' && row('Военный плен', entity.capturedByKingdomId ? link(getTitle(world, { kind: 'kingdom', id: entity.capturedByKingdomId }), { kind: 'kingdom', id: entity.capturedByKingdomId }, onSelect) : 'неизвестная сторона')}
+      {entity.prisonerOfBattleId && row('Пленён в', link(getTitle(world, { kind: 'battleRecord', id: entity.prisonerOfBattleId }), { kind: 'battleRecord', id: entity.prisonerOfBattleId }, onSelect))}
       {entity.militaryUnitId && row('Подразделение', link(getTitle(world, { kind: 'militaryUnit', id: entity.militaryUnitId }), { kind: 'militaryUnit', id: entity.militaryUnitId }, onSelect))}
       {typeof entity.militaryExperience === 'number' && row('Военный опыт', `${Math.round(entity.militaryExperience)}%`)}
       {(entity.servicePayArrears ?? 0) > 0 && row('Невыплаченное жалование', `${Math.round(entity.servicePayArrears)} крон`)}

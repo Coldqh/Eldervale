@@ -24,6 +24,7 @@ import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisi
 import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
 import { advancePhysicalArmySystem, ensureArmyOutsideSettlements, nextArmyFieldStep } from './physicalArmy';
 import { advanceHealthSystem } from './healthSystem';
+import { releaseWarPrisoners, resolveSpatialArmyBattle } from './battleSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -380,23 +381,26 @@ function resolveMonsterBattle(world: WorldState, army: WorldState['armies'][numb
 }
 
 function resolveBattle(world: WorldState, armyId: number, settlementId: number, rng: RNG, indexes: WorldIndexes): void {
-  const army = world.armies.find(item => item.id === armyId)!;
-  const target = indexes.settlementById.get(settlementId)!;
+  const army = world.armies.find(item => item.id === armyId);
+  const target = indexes.settlementById.get(settlementId);
+  if (!army || !target) return;
   const war = world.wars.find(item => item.active && item.attackerId === army.kingdomId && item.defenderId === target.kingdomId);
   if (!war) { army.status = 'recovering'; return; }
-  const defenderArmy = world.armies.find(item => item.kingdomId === target.kingdomId)!;
-  const attackPower = army.strength * (army.morale / 100) * (.65 + army.supplies / 180) * rng.int(80, 125) / 100;
-  const defensePower = (defenderArmy.strength * (defenderArmy.morale / 100) + target.defense * 3.2) * rng.int(80, 125) / 100;
-  const attackLoss = Math.max(8, Math.round(defensePower / 14));
-  const defenseLoss = Math.max(8, Math.round(attackPower / 15));
-  const actualAttackLoss = applyArmyCasualties(world, indexes, army, attackLoss, `погибли в сражении за ${target.name}`, rng, army.x, army.y);
-  const actualDefenseLoss = applyArmyCasualties(world, indexes, defenderArmy, defenseLoss, `погибли при обороне ${target.name}`, rng, army.x, army.y);
-  synchronizeArmyStrength(world, army);
-  synchronizeArmyStrength(world, defenderArmy);
-  war.attackerLosses += actualAttackLoss;
-  war.defenderLosses += actualDefenseLoss;
+  const defenderArmy = world.armies.find(item => item.kingdomId === target.kingdomId && item.id !== army.id);
+  if (!defenderArmy) { army.status = 'recovering'; return; }
+
+  army.status = 'battle';
+  defenderArmy.status = 'battle';
+  defenderArmy.x = army.x;
+  defenderArmy.y = army.y;
+  const outcome = resolveSpatialArmyBattle(world, army, defenderArmy, war, target, rng, indexes);
+  const attackLosses = outcome.attackerDead + outcome.attackerWounded + outcome.attackerCaptured;
+  const defenseLosses = outcome.defenderDead + outcome.defenderWounded + outcome.defenderCaptured;
+  war.attackerLosses += attackLosses;
+  war.defenderLosses += defenseLosses;
   war.battles += 1;
-  const won = attackPower > defensePower;
+  const won = outcome.attackerWon;
+
   if (won) {
     const oldKingdom = target.kingdomId;
     target.kingdomId = army.kingdomId;
@@ -416,26 +420,33 @@ function resolveBattle(world: WorldState, armyId: number, settlementId: number, 
       route.controlledByKingdomIds = [...new Set([fromKingdom, toKingdom].filter((id): id is number => typeof id === 'number'))];
       route.history.push(`После захвата ${target.name} контроль над путём изменился.`);
     }
-    war.history.push(`${target.name} пал после сражения. Потери: ${actualAttackLoss} и ${actualDefenseLoss}.`);
+    war.history.push(`${target.name} пал после сражения №${outcome.record.id}. Потери сторон: ${attackLosses} и ${defenseLosses}.`);
     addEvent(world, {
-      kind: 'battle', title: `Пал ${target.name}`, description: `${army.name} захватило поселение.`, cause: `поход в рамках войны: ${war.cause}`,
-      consequences: ['граница государства изменилась', 'жители получили нового правителя', 'городские постройки повреждены'],
-      entityRefs: [{ kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'war', id: war.id }, { kind: 'kingdom', id: oldKingdom }, { kind: 'kingdom', id: army.kingdomId }], importance: 5,
+      kind: 'battle', title: `Пал ${target.name}`, description: `${army.name} захватило поселение после ${outcome.record.rounds} раундов боя.`, cause: `поход в рамках войны: ${war.cause}`,
+      conditions: [`подразделения атакующих сохранили строй`, `защитники потеряли ${outcome.defenderCaptured} воинов пленными`],
+      decision: 'командиры ввели фронт, фланги, стрелков и резерв в бой', outcome: 'оборона была сломлена и поселение занято',
+      consequences: ['граница государства изменилась', 'раненые требуют лечения', 'пленные ожидают обмена или мира', 'победитель получил часть обоза'],
+      entityRefs: [{ kind: 'battleRecord', id: outcome.record.id }, { kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'army', id: defenderArmy.id }, { kind: 'war', id: war.id }, { kind: 'kingdom', id: oldKingdom }, { kind: 'kingdom', id: army.kingdomId }], importance: 5,
     });
   } else {
-    war.history.push(`${target.name} удержал стены. Атакующие потеряли ${actualAttackLoss} воинов.`);
+    war.history.push(`${target.name} удержал стены в сражении №${outcome.record.id}. Потери сторон: ${attackLosses} и ${defenseLosses}.`);
     addEvent(world, {
-      kind: 'battle', title: `${target.name} удержал стены`, description: `${army.name} было отброшено.`, cause: `оборона спорной территории в войне: ${war.cause}`,
-      consequences: ['армия отступила', 'мораль атакующих упала', 'защитники понесли потери'],
-      entityRefs: [{ kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'war', id: war.id }], importance: 4,
+      kind: 'battle', title: `${target.name} удержал стены`, description: `${army.name} потеряло строй и было отброшено после ${outcome.record.rounds} раундов.`, cause: `оборона спорной территории в войне: ${war.cause}`,
+      conditions: ['защитникам помогли укрепления', `атакующие потеряли пленными ${outcome.attackerCaptured}`],
+      decision: 'командир защитников удержал фронт и ввёл резерв', outcome: 'атакующая армия отступила',
+      consequences: ['армия отступила', 'раненые эвакуируются в лагерь', 'на поле остались тела и брошенное имущество'],
+      entityRefs: [{ kind: 'battleRecord', id: outcome.record.id }, { kind: 'settlement', id: target.id }, { kind: 'army', id: army.id }, { kind: 'army', id: defenderArmy.id }, { kind: 'war', id: war.id }], importance: 4,
     });
   }
-  addBattlefieldEffects(world, army.x, army.y, actualAttackLoss + actualDefenseLoss, rng, army.id, target.id);
+
+  addBattlefieldEffects(world, army.x, army.y, outcome.attackerDead + outcome.defenderDead, rng, army.id, target.id);
+  for (let index = 0; index < Math.min(8, outcome.record.lootedItemIds.length); index += 1) addLocalEffect(world, army.x, army.y, 'lost-item', 'Брошенное имущество после сражения', rng, { kind: 'battleRecord', id: outcome.record.id });
   army.status = 'recovering';
+  defenderArmy.status = 'recovering';
   army.targetSettlementId = undefined;
   army.targetKingdomId = undefined;
-  army.morale = Math.max(25, army.morale + (won ? 8 : -16));
-  army.campaignHistory.push(won ? `Захватило ${target.name}.` : `Отступило от ${target.name}.`);
+  army.campaignHistory.push(won ? `Захватило ${target.name} в сражении №${outcome.record.id}.` : `Отступило от ${target.name} после сражения №${outcome.record.id}.`);
+  defenderArmy.campaignHistory.push(won ? `Потеряло ${target.name} в сражении №${outcome.record.id}.` : `Удержало ${target.name} в сражении №${outcome.record.id}.`);
   if (war.battles >= 2 && rng.chance(.28 + war.battles * .08)) endWar(world, war, won ? war.attackerId : war.defenderId);
 }
 
@@ -448,6 +459,7 @@ function endWar(world: WorldState, war: War, victorId: number): void {
   const victor = world.kingdoms.find(item => item.id === victorId)!;
   war.peaceTerms = victorId === attacker.id ? `${defender.name} признало захваченные земли и выплатило часть казны` : `${attacker.name} отказалось от притязаний и отвело войско`;
   war.history.push(`Мир заключён: ${war.peaceTerms}.`);
+  releaseWarPrisoners(world, war);
   attacker.enemies = attacker.enemies.filter(id => id !== defender.id);
   defender.enemies = defender.enemies.filter(id => id !== attacker.id);
   setDiplomacy(world, attacker.id, defender.id, -32, 'напряжение', 'свежая память о войне');

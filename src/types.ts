@@ -1,7 +1,7 @@
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy';
-export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
+export type EntityKind = 'kingdom' | 'settlement' | 'character' | 'army' | 'battleRecord' | 'monster' | 'artifact' | 'book' | 'dungeon' | 'war' | 'dynasty' | 'tradeRoute' | 'animalPopulation' | 'ingredient' | 'recipe' | 'building' | 'household' | 'establishment' | 'item' | 'productionRecipe' | 'field' | 'constructionProject' | 'cemetery' | 'burial' | 'travelingMerchant' | 'militaryUnit' | 'supplyWagon' | 'knowledgeFact' | 'rumor' | 'message' | 'settlementGovernment' | 'districtCivic' | 'crime' | 'courtCase' | 'fireIncident' | 'patrol' | 'kingdomGovernment' | 'nobleTitle' | 'vassalContract' | 'courtOffice' | 'courtFaction' | 'royalOrder' | 'stateCrisis' | 'diplomaticAgreement';
 export type RelationKind = 'родство' | 'дружба' | 'любовь' | 'верность' | 'долг' | 'страх' | 'соперничество' | 'ненависть';
 export type SocialContextKind = 'family' | 'household' | 'neighbors' | 'work' | 'market' | 'faith' | 'army' | 'court' | 'travel' | 'crime';
 export type RelationshipStatus = 'distant' | 'stable' | 'close' | 'strained' | 'hostile' | 'broken';
@@ -1018,6 +1018,7 @@ export interface SimulationRuntimeState {
   socialSystemVersion?: 1;
   physicalArmyVersion?: 1;
   healthSystemVersion?: 1;
+  battleSystemVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1171,7 +1172,10 @@ export interface Character {
   politicalInfluence?: number;
   mind?: CharacterMind;
   healthProfile?: CharacterHealthProfile;
+  capturedByKingdomId?: number;
+  prisonerOfBattleId?: number;
 }
+
 
 export interface Relationship {
   id: number;
@@ -1212,7 +1216,7 @@ export interface Dynasty {
 
 export type MilitaryRole = 'ополченец' | 'пехотинец' | 'лучник' | 'арбалетчик' | 'копейщик' | 'всадник' | 'рыцарь' | 'сержант' | 'офицер' | 'командир';
 export type MilitaryUnitType = 'ополчение' | 'пехота' | 'стрелки' | 'копейщики' | 'конница' | 'рыцари' | 'штаб';
-export type ServiceStatus = 'гражданский' | 'резерв' | 'гарнизон' | 'поход' | 'ранен' | 'дезертир' | 'ветеран';
+export type ServiceStatus = 'гражданский' | 'резерв' | 'гарнизон' | 'поход' | 'ранен' | 'пленник' | 'дезертир' | 'ветеран';
 
 export interface MilitaryUnit {
   id: number;
@@ -1340,6 +1344,54 @@ export interface Army {
   logistics: ArmyLogistics;
   monthlyPayroll: number;
   readiness: number;
+}
+
+
+
+export type BattlePhase = 'сближение' | 'перестрелка' | 'схватка' | 'бегство' | 'последствия';
+export type BattleUnitRole = 'front' | 'flank' | 'reserve' | 'missile';
+
+export interface BattleUnitState {
+  unitId: number;
+  armyId: number;
+  role: BattleUnitRole;
+  initialCount: number;
+  remainingCount: number;
+  morale: number;
+  cohesion: number;
+  fatigue: number;
+  casualties: number;
+  wounded: number;
+  captured: number;
+  routed: boolean;
+}
+
+export interface BattleRecord {
+  id: number;
+  warId?: number;
+  year: number;
+  month: number;
+  globalX: number;
+  globalY: number;
+  settlementId?: number;
+  attackerArmyId: number;
+  defenderArmyId: number;
+  phase: BattlePhase;
+  rounds: number;
+  winnerArmyId?: number;
+  attackerUnitStates: BattleUnitState[];
+  defenderUnitStates: BattleUnitState[];
+  attackerDead: number;
+  defenderDead: number;
+  attackerWounded: number;
+  defenderWounded: number;
+  attackerCaptured: number;
+  defenderCaptured: number;
+  prisonerIds: number[];
+  woundedIds: number[];
+  lootedItemIds: number[];
+  destroyedWagonIds: number[];
+  history: string[];
 }
 
 export interface Monster {
@@ -1671,7 +1723,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 21;
+  version: 22;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1685,6 +1737,7 @@ export interface WorldState {
   relationships: Relationship[];
   dynasties: Dynasty[];
   armies: Army[];
+  battleRecords: BattleRecord[];
   militaryUnits: MilitaryUnit[];
   supplyWagons: SupplyWagon[];
   armyCamps: ArmyCamp[];

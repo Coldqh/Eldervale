@@ -176,6 +176,18 @@ function processActiveConditions(world: WorldState, rng: RNG, indexes: WorldInde
       condition.history.push(`Состояние завершилось в ${world.year}.${String(world.month).padStart(2, '0')}.`);
       profile.activeConditionIds = profile.activeConditionIds.filter(id => id !== condition.id);
       character.health = Math.min(100, character.health + Math.max(2, care * .04));
+      if (condition.kind === 'травма' && character.serviceStatus === 'ранен') {
+        const hasOtherTrauma = profile.activeConditionIds.some(id => {
+          const activeCondition = world.healthConditions.find(item => item.id === id);
+          return activeCondition?.kind === 'травма' && activeCondition.status !== 'вылечено' && activeCondition.status !== 'смерть';
+        });
+        if (!hasOtherTrauma) {
+          const army = world.armies.find(item => item.soldierIds.includes(character.id));
+          character.serviceStatus = army ? (army.status === 'garrison' || army.status === 'recovering' ? 'гарнизон' : 'поход') : 'ветеран';
+          if (army) army.logistics.wounded = Math.max(0, army.logistics.wounded - 1);
+          character.biography.push(`Вернулся в строй после лечения в ${world.year} году.`);
+        }
+      }
       const epidemic = condition.diseaseId ? world.epidemics.find(item => item.diseaseId === condition.diseaseId && item.settlementId === condition.settlementId && item.status !== 'завершено') : undefined;
       if (epidemic) epidemic.recovered += 1;
     } else if (condition.severity < 30) condition.status = 'выздоровление';
@@ -330,6 +342,19 @@ function detectPhysicalInjuries(world: WorldState, rng: RNG, indexes: WorldIndex
     });
     if (condition && !character.injuries.includes(condition.name)) character.injuries.push(condition.name);
   }
+}
+
+
+export function addBattleInjury(world: WorldState, character: Character, settlementId: number, severity: number, cause: string, rng: RNG): HealthCondition | undefined {
+  if (world.simulation.healthSystemVersion !== HEALTH_VERSION || !character.healthProfile) initializeHealthSystem(world);
+  const names = severity >= 70 ? ['тяжёлая рубленая рана', 'пробитие доспеха', 'раздробление кости']
+    : severity >= 45 ? ['глубокая рана', 'перелом', 'повреждение сустава']
+      : ['сильный ушиб', 'рассечение', 'растяжение'];
+  const condition = createCondition(world, character, settlementId, {
+    kind: 'травма', name: rng.pick(names), severity: clamp(severity), contagiousness: 0, duration: rng.int(2, severity >= 65 ? 10 : 6), cause, treated: false,
+  });
+  if (condition && !character.injuries.includes(condition.name)) character.injuries.push(condition.name);
+  return condition;
 }
 
 function createCondition(

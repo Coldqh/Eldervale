@@ -12,13 +12,13 @@ const groups: { kind: EntityKind; label: string }[] = [
   { kind: 'kingdomGovernment', label: 'Государственная власть' }, { kind: 'nobleTitle', label: 'Титулы и владения' }, { kind: 'vassalContract', label: 'Вассальные договоры' }, { kind: 'courtOffice', label: 'Двор и должности' }, { kind: 'courtFaction', label: 'Придворные группировки' }, { kind: 'royalOrder', label: 'Государственные приказы' }, { kind: 'stateCrisis', label: 'Мятежи и кризисы' }, { kind: 'diplomaticAgreement', label: 'Договоры и посольства' },
   { kind: 'settlementGovernment', label: 'Местная власть' }, { kind: 'districtCivic', label: 'Районы и службы' }, { kind: 'patrol', label: 'Патрули' }, { kind: 'crime', label: 'Преступления' }, { kind: 'courtCase', label: 'Судебные дела' }, { kind: 'fireIncident', label: 'Пожары' },
   { kind: 'knowledgeFact', label: 'Знания' }, { kind: 'rumor', label: 'Слухи' }, { kind: 'message', label: 'Письма и донесения' },
-  { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'travelingMerchant', label: 'Странствующие торговцы' }, { kind: 'army', label: 'Армии' }, { kind: 'militaryUnit', label: 'Военные подразделения' }, { kind: 'supplyWagon', label: 'Военные обозы' }, { kind: 'war', label: 'Войны' },
+  { kind: 'tradeRoute', label: 'Торговые пути' }, { kind: 'travelingMerchant', label: 'Странствующие торговцы' }, { kind: 'army', label: 'Армии' }, { kind: 'militaryUnit', label: 'Военные подразделения' }, { kind: 'supplyWagon', label: 'Военные обозы' }, { kind: 'battleRecord', label: 'Сражения' }, { kind: 'war', label: 'Войны' },
 ];
 
 function listFor(world: WorldState, kind: EntityKind): any[] {
   const lists: Record<EntityKind, any[]> = {
     character: world.characters, settlement: world.settlements, kingdom: world.kingdoms, monster: world.monsters,
-    artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, war: world.wars,
+    artifact: world.artifacts, book: world.books, dungeon: world.dungeons, army: world.armies, battleRecord: world.battleRecords, war: world.wars,
     dynasty: world.dynasties, tradeRoute: world.tradeRoutes, animalPopulation: world.animalPopulations, ingredient: world.ingredients, recipe: world.alchemyRecipes, building: world.buildings, household: world.households, establishment: world.establishments, item: world.items, productionRecipe: world.productionRecipes, field: world.fields, constructionProject: world.constructionProjects, cemetery: world.cemeteries, burial: world.burials, travelingMerchant: world.travelingMerchants, militaryUnit: world.militaryUnits, supplyWagon: world.supplyWagons, knowledgeFact: world.knowledgeFacts, rumor: world.rumors, message: world.messages, settlementGovernment: world.settlementGovernments, districtCivic: world.districtCivicStates, patrol: world.civicPatrols, crime: world.crimes, courtCase: world.courtCases, fireIncident: world.fireIncidents, kingdomGovernment: world.kingdomGovernments, nobleTitle: world.nobleTitles, vassalContract: world.vassalContracts, courtOffice: world.courtOffices, courtFaction: world.courtFactions, royalOrder: world.royalOrders, stateCrisis: world.stateCrises, diplomaticAgreement: world.diplomaticAgreements,
   };
   return lists[kind];
@@ -50,7 +50,7 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
 }
 
 function rune(kind: EntityKind): string {
-  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', field: '▥', constructionProject: '▧', cemetery: '†', burial: '✝', travelingMerchant: '♢', militaryUnit: '♞', supplyWagon: '▰', knowledgeFact: '◈', rumor: '≈', message: '✉', settlementGovernment: '⚖', districtCivic: '▦', patrol: '♙', crime: '!', courtCase: '§', fireIncident: '♨', kingdomGovernment: '♛', nobleTitle: '♜', vassalContract: '⌘', courtOffice: '⚜', courtFaction: '◉', royalOrder: '✒', stateCrisis: '⚑', diplomaticAgreement: '☞' } as Record<EntityKind, string>)[kind];
+  return ({ monster: '△', book: '▤', artifact: '✦', settlement: '⌂', dynasty: '♜', tradeRoute: '⌁', war: '⚔', battleRecord: '⚔', army: '♙', dungeon: '▣', kingdom: '♛', character: '◇', animalPopulation: '◌', ingredient: '❧', recipe: '⚗', building: '▦', household: '⌂', establishment: '☕', item: '◆', productionRecipe: '⚒', field: '▥', constructionProject: '▧', cemetery: '†', burial: '✝', travelingMerchant: '♢', militaryUnit: '♞', supplyWagon: '▰', knowledgeFact: '◈', rumor: '≈', message: '✉', settlementGovernment: '⚖', districtCivic: '▦', patrol: '♙', crime: '!', courtCase: '§', fireIncident: '♨', kingdomGovernment: '♛', nobleTitle: '♜', vassalContract: '⌘', courtOffice: '⚜', courtFaction: '◉', royalOrder: '✒', stateCrisis: '⚑', diplomaticAgreement: '☞' } as Record<EntityKind, string>)[kind];
 }
 
 function subtitle(kind: EntityKind, item: any): string {
@@ -73,6 +73,7 @@ function subtitle(kind: EntityKind, item: any): string {
   if (kind === 'army') return `${item.soldierIds?.length ?? item.strength} воинов · готовность ${Math.round(item.readiness ?? 0)}% · ${armyStatusLabel(item.status)}`;
   if (kind === 'militaryUnit') return `${item.type} · ${item.memberIds.length} бойцов · подготовка ${Math.round(item.training)}%`;
   if (kind === 'supplyWagon') return `${item.wagonCount} повозок · ${item.horseCount} лошадей · ${item.status}`;
+  if (kind === 'battleRecord') return `${item.year}.${String(item.month).padStart(2, '0')} · погибло ${item.attackerDead + item.defenderDead} · ранено ${item.attackerWounded + item.defenderWounded} · пленных ${item.attackerCaptured + item.defenderCaptured}`;
   if (kind === 'war') return item.active ? `${item.goal} · война продолжается` : `окончена в ${item.endYear} году`;
   if (kind === 'dynasty') return `${item.memberIds.length} членов · престиж ${item.prestige}`;
   if (kind === 'travelingMerchant') return `${item.status} · ${Math.round(item.cash)} крон · ${item.routeSettlementIds.length} остановки`;

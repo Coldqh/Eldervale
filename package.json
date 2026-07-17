@@ -1,13 +1,14 @@
 {
   "name": "eldervale",
   "private": true,
-  "version": "3.5.0",
+  "version": "3.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview",
     "test:sim": "npx --yes tsx@4.20.6 scripts/simulation-smoke.ts",
+    "test:battle": "npx --yes tsx@4.20.6 scripts/battle-smoke.ts",
     "test:long": "npx --yes tsx@4.20.6 scripts/simulation-long-smoke.ts",
     "test:perf": "npx --yes tsx@4.20.6 scripts/simulation-performance.ts"
   },

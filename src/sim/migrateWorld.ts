@@ -22,17 +22,18 @@ import { initializeDecisionCore } from './decisionCore';
 import { initializeMindSystem } from './mindSystem';
 import { initializeSocialSystem } from './socialSystem';
 import { initializeHealthSystem } from './healthSystem';
+import { initializeBattleSystem } from './battleSystem';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-21`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-22`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 21;
+  localized.version = 22;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -83,6 +84,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.epidemics ??= [];
   localized.decisions ??= [];
   localized.stateDeltas ??= [];
+  localized.battleRecords ??= [];
   localized.militaryUnits ??= [];
   localized.supplyWagons ??= [];
   localized.armyCamps ??= [];
@@ -101,6 +103,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 19) localized.simulation.physicalArmyVersion = undefined;
   if (sourceVersion < 20) localized.simulation.performanceCoreVersion = undefined;
   if (sourceVersion < 21) localized.simulation.healthSystemVersion = undefined;
+  if (sourceVersion < 22) localized.simulation.battleSystemVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -255,6 +258,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.socialObligation = Math.max(0, ...localized.socialObligations.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.decision = Math.max(0, ...localized.decisions.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.stateDelta = Math.max(0, ...localized.stateDeltas.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.battleRecord = Math.max(0, ...localized.battleRecords.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.militaryUnit = Math.max(0, ...localized.militaryUnits.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.supplyWagon = Math.max(0, ...localized.supplyWagons.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.armyCamp = Math.max(0, ...localized.armyCamps.map((item: any) => item.id ?? 0)) + 1;
@@ -282,6 +286,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeStateMachine(localized as WorldState, new RNG(`${localized.config.seed}:переход-государственная-машина-v1`));
   initializeSocialSystem(localized as WorldState);
   initializeHealthSystem(localized as WorldState);
+  initializeBattleSystem(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }
