@@ -5,6 +5,8 @@ import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 import { latestEventId, nextImportantEventId } from '../lib/nextEvent';
+import { advanceDailyLife, initializeDailyLife } from '../sim/dailyLife';
+import { RNG } from '../sim/rng';
 
 const scope = self as DedicatedWorkerGlobalScope;
 let engine: SimulationEngine | undefined;
@@ -32,6 +34,7 @@ function progressMessage(
 async function initialize(message: Extract<WorldWorkerCommand, { action: 'initialize' }>): Promise<void> {
   const startedAt = performance.now();
   post({ id: message.id, type: 'progress', progress: progressMessage('загрузка', 'Построение индексов мира', 0, 1, startedAt) });
+  initializeDailyLife(message.world);
   engine = createSimulationEngine(message.world);
   const profile: SimulationProfile = {
     operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(engine.indexes),
@@ -53,6 +56,7 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   });
   post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Индексируем созданный мир', 98, 100, startedAt) });
   engine = createSimulationEngine(world);
+  advanceDailyLife(world, new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`), engine.indexes, { recordEvents: false });
   const totalMs = performance.now() - startedAt;
   const profile: SimulationProfile = {
     operation: 'генерация', totalMs, simulationMs: totalMs, indexedEntities: countIndexedEntities(engine.indexes), processedTasks: 0,
@@ -105,6 +109,7 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
     const monthStarted = performance.now();
     const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(engine.world.month)) : 1;
     advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward, monthStep });
+    advanceDailyLife(engine.world, new RNG(`${engine.world.config.seed}:повседневность:${engine.world.year}:${engine.world.month}`), engine.indexes, { elapsedMonths: monthStep });
     const monthMs = performance.now() - monthStarted;
     const normalizedMonthMs = monthMs / monthStep;
     movingAverageMs = movingAverageMs ? movingAverageMs * .72 + normalizedMonthMs * .28 : normalizedMonthMs;

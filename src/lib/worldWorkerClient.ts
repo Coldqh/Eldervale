@@ -5,6 +5,8 @@ import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimu
 import { countIndexedEntities } from '../sim/indexes';
 import { createInactivityWatchdog, workerInactivityTimeout, type InactivityWatchdog, type WorkerOperation } from './workerWatchdog';
 import { latestEventId, nextImportantEventId } from './nextEvent';
+import { advanceDailyLife, initializeDailyLife } from '../sim/dailyLife';
+import { RNG } from '../sim/rng';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
   ? Command extends { id: number; action: infer Action }
@@ -109,6 +111,7 @@ function runWorker(command: WorldWorkerCommandInput, onProgress?: (progress: Sim
 async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
   const startedAt = performance.now();
   if (command.action === 'initialize') {
+    initializeDailyLife(command.world);
     fallbackEngine = createSimulationEngine(command.world);
     return { profile: { operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() } };
   }
@@ -120,6 +123,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       onProgress?.({ operation, phase, completed: scaled, total: 100, percent: scaled, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
     });
     fallbackEngine = createSimulationEngine(world);
+    advanceDailyLife(world, new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`), fallbackEngine.indexes, { recordEvents: false });
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };
     fallbackProfile = profile;
     return { world, profile };
@@ -141,6 +145,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       let phase = 'Симуляция мира';
       const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
       advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward, monthStep });
+      advanceDailyLife(fallbackEngine.world, new RNG(`${fallbackEngine.world.config.seed}:повседневность:${fallbackEngine.world.year}:${fallbackEngine.world.month}`), fallbackEngine.indexes, { elapsedMonths: monthStep });
       const monthMs = performance.now() - monthStart;
       const normalizedMonthMs = monthMs / monthStep;
       average = average ? average * .72 + normalizedMonthMs * .28 : normalizedMonthMs;

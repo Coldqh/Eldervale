@@ -24,7 +24,7 @@ const MAX_LOCAL_RECOVERY_BYTES = 4 * 1024 * 1024;
 
 const entityCollections = [
   'kingdoms', 'settlements', 'characters', 'relationships', 'dynasties', 'armies', 'battleRecords', 'militaryUnits', 'supplyWagons', 'armyCamps', 'armyCampStructures', 'armyLocalPositions', 'monsters', 'cemeteries', 'burials', 'animalPopulations',
-  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'cultures', 'languages', 'religions', 'settlementCultures', 'settlementGovernments', 'districtCivicStates', 'civicPatrols', 'crimes', 'courtCases', 'fireIncidents', 'kingdomGovernments', 'nobleTitles', 'vassalContracts', 'courtOffices', 'courtFactions', 'royalOrders', 'stateCrises', 'diplomaticAgreements', 'socialObligations', 'healthConditions', 'pregnancies', 'epidemics', 'decisions', 'stateDeltas', 'events', 'localMapChanges',
+  'ingredients', 'alchemyRecipes', 'artifacts', 'books', 'dungeons', 'wars', 'tradeRoutes', 'territoryHistory', 'buildings', 'households', 'establishments', 'fields', 'constructionProjects', 'items', 'productionRecipes', 'employments', 'shipments', 'travelingMerchants', 'marketTransactions', 'knowledgeFacts', 'memories', 'rumors', 'messages', 'settlementKnowledge', 'cultures', 'languages', 'religions', 'settlementCultures', 'settlementGovernments', 'districtCivicStates', 'civicPatrols', 'crimes', 'courtCases', 'fireIncidents', 'kingdomGovernments', 'nobleTitles', 'vassalContracts', 'courtOffices', 'courtFactions', 'royalOrders', 'stateCrises', 'diplomaticAgreements', 'socialObligations', 'healthConditions', 'pregnancies', 'epidemics', 'decisions', 'stateDeltas', 'events', 'localMapChanges', 'dailyRoutines', 'personalLifeEvents',
 ] as const;
 
 type EntityCollection = typeof entityCollections[number];
@@ -474,7 +474,7 @@ async function partitionWorld(
 ): Promise<StoredRecord[]> {
   const records: StoredRecord[] = [];
   const total = Math.ceil(world.tiles.length / TILE_CHUNK_SIZE)
-    + entityCollections.reduce((sum, collection) => sum + Math.ceil((world[collection] as unknown[]).length / ENTITY_CHUNK_SIZE), 0);
+    + entityCollections.reduce((sum, collection) => sum + Math.ceil(((world[collection] ?? []) as unknown[]).length / ENTITY_CHUNK_SIZE), 0);
   let completed = 0;
   const push = async (record: StoredRecord, collection: string) => {
     records.push(record);
@@ -488,7 +488,7 @@ async function partitionWorld(
     await push(makeRecord(slotId, 'tiles', order, data), 'карта');
   }
   for (const collection of entityCollections) {
-    const items = world[collection] as unknown[];
+    const items = (world[collection] ?? []) as unknown[];
     for (let start = 0; start < items.length; start += ENTITY_CHUNK_SIZE) {
       const order = start / ENTITY_CHUNK_SIZE;
       const data = items.slice(start, start + ENTITY_CHUNK_SIZE);

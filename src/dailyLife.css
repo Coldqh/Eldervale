@@ -1,0 +1,134 @@
+.personal-life-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(216, 190, 126, .18);
+}
+
+.personal-life-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.personal-life-heading h3,
+.personal-life-feed h3 {
+  margin: 3px 0 0;
+}
+
+.personal-life-heading > small {
+  color: var(--muted, #9d9b8f);
+  white-space: nowrap;
+}
+
+.daily-routine-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.daily-routine-stop {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(216, 190, 126, .16);
+  border-radius: 10px;
+  background: rgba(9, 15, 11, .55);
+}
+
+.daily-routine-stop > span {
+  display: block;
+  margin-bottom: 5px;
+  color: #d8be7e;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.daily-routine-stop strong,
+.daily-routine-stop small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.daily-routine-stop strong {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.daily-routine-stop small {
+  margin-top: 5px;
+  color: var(--muted, #9d9b8f);
+  font-size: 11px;
+}
+
+.personal-life-feed {
+  margin-top: 16px;
+}
+
+.personal-life-event {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-left: 2px solid rgba(216, 190, 126, .35);
+  background: rgba(255, 255, 255, .025);
+}
+
+.personal-life-event time,
+.personal-life-event small {
+  color: var(--muted, #9d9b8f);
+  font-size: 11px;
+}
+
+.personal-life-event p,
+.personal-life-empty {
+  margin: 0;
+  color: var(--muted, #b0aea3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.daily-phase-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.daily-phase-tabs button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(216, 190, 126, .18);
+  border-radius: 8px;
+  background: rgba(10, 17, 12, .72);
+  color: #aaa99e;
+}
+
+.daily-phase-tabs button.active {
+  border-color: rgba(216, 190, 126, .58);
+  background: rgba(216, 190, 126, .13);
+  color: #f0ddb0;
+}
+
+.local-day-summary {
+  color: #d8be7e;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .daily-routine-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-phase-tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .daily-phase-tabs button {
+    padding: 0 4px;
+    font-size: 11px;
+  }
+}

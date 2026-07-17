@@ -1,4 +1,4 @@
-const VERSION = '3.7.0';
+const VERSION = '3.8.0';
 const CACHE = `eldervale-app-${VERSION}`;
 const ROOT = '/Eldervale/';
 const CORE = [
@@ -101,66 +101,53 @@ async function cacheApplicationShell() {
 }
 
 function extractLocalAssets(html) {
-  const urls = new Set();
-  const pattern = /(?:src|href)=["']([^"']+)["']/gi;
+  const assets = new Set();
+  const pattern = /(?:src|href)=["']([^"']+)["']/g;
   for (const match of html.matchAll(pattern)) {
-    try {
-      const url = new URL(match[1], self.location.origin + ROOT);
-      if (url.origin === self.location.origin && url.pathname.startsWith(ROOT)) urls.add(url.href);
-    } catch {
-      // Невалидная ссылка не участвует в кэше.
-    }
+    const value = match[1];
+    if (!value || value.startsWith('http') || value.startsWith('data:')) continue;
+    assets.add(new URL(value, self.location.origin + ROOT).toString());
   }
-  return [...urls];
+  return [...assets];
 }
 
 function isIconOrManifest(pathname) {
   return pathname.endsWith('.png') || pathname.endsWith('.svg') || pathname.endsWith('.ico') || pathname.endsWith('.webmanifest');
 }
 
-async function networkFirstNavigation(request) {
-  try {
-    const response = await fetch(request, { cache: 'no-store' });
-    if (response.ok) {
-      const cache = await caches.open(CACHE);
-      await cache.put(ROOT, response.clone());
-    }
-    return response;
-  } catch {
-    return (await caches.match(ROOT)) || Response.error();
-  }
-}
-
-async function networkFirst(request, cacheResponse = true) {
-  try {
-    const response = await fetch(request, { cache: 'no-store' });
-    if (cacheResponse && response.ok) {
-      const cache = await caches.open(CACHE);
-      await cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    return (await caches.match(request)) || Response.error();
-  }
-}
-
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok) {
-    const cache = await caches.open(CACHE);
-    await cache.put(request, response.clone());
-  }
+  if (response.ok) (await caches.open(CACHE)).put(request, response.clone());
   return response;
 }
 
 async function staleWhileRevalidate(request) {
-  const cache = await caches.open(CACHE);
-  const cached = await cache.match(request);
+  const cached = await caches.match(request);
   const network = fetch(request).then(async response => {
-    if (response.ok) await cache.put(request, response.clone());
+    if (response.ok) await (await caches.open(CACHE)).put(request, response.clone());
     return response;
   }).catch(() => undefined);
-  return cached || await network || Response.error();
+  return cached ?? await network ?? new Response('Офлайн-копия недоступна', { status: 503 });
+}
+
+async function networkFirst(request, fallbackToRoot = true) {
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response.ok) await (await caches.open(CACHE)).put(request, response.clone());
+    return response;
+  } catch {
+    return await caches.match(request) ?? (fallbackToRoot ? await caches.match(ROOT) : undefined) ?? new Response('Сеть недоступна', { status: 503 });
+  }
+}
+
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response.ok) await (await caches.open(CACHE)).put(ROOT, response.clone());
+    return response;
+  } catch {
+    return await caches.match(ROOT) ?? new Response('Eldervale ещё не подготовлен для офлайн-запуска', { status: 503 });
+  }
 }

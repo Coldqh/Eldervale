@@ -5,6 +5,7 @@ import { EntityPanel } from './EntityPanel';
 import { Encyclopedia } from './Encyclopedia';
 import { HistoricalAtlas } from './HistoricalAtlas';
 import { LocalMapViewer } from './LocalMapViewer';
+import { PersonalLifePanel } from './PersonalLifePanel';
 
 export type WorldView = 'map' | 'archive' | 'chronicle' | 'atlas' | 'local';
 export interface LocalPosition { x: number; y: number; level: number }
@@ -100,7 +101,7 @@ function monthName(month: number) { return ['Глубокая зима', 'Поз
 function layerLabel(layer: MapLayer) { return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', ecology: 'Природа', trade: 'Торговля' } as const)[layer]; }
 
 function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect, onOpenLocal }: { world: WorldState; selected: EntityRef; canGoBack: boolean; onBack: () => void; onClose: () => void; onSelect: (ref: EntityRef) => void; onOpenLocal: (x: number, y: number, level?: number) => void }) {
-  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}>←</button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}>×</button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} /></div></section></div>;
+  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}>←</button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}>×</button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} />{selected.kind === 'character' && <PersonalLifePanel world={world} characterId={selected.id} />}</div></section></div>;
 }
 
 function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: number } | undefined {

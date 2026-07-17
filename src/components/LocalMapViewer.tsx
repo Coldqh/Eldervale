@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EntityRef, LocalFeature, LocalGround, LocalMapData, LocalMarker, WorldState } from '../types';
+import type { DayPhase } from '../dailyLifeTypes';
 import { generateLocalMap, localCellSummary } from '../lib/localMap';
+import { applyDailyLifePhaseToMap, DAY_PHASES, dayPhaseLabel } from '../sim/dailyLife';
 import { paintFeature as paintTextureFeature, paintLocalCell, paintMarker as paintTextureMarker } from '../lib/texturePaint';
 import { TextureIcon } from './TextureIcon';
+import '../dailyLife.css';
 
 const groundColors: Record<LocalGround, string> = {
   grass: '#617853', dirt: '#745e43', sand: '#a58a5f', water: '#244d59', mud: '#4b5d50', snow: '#aeb7b3', stone: '#656862', road: '#8a7352', floor: '#8c7c64', ash: '#423f3a',
@@ -28,11 +31,13 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
   onSelect: (ref: EntityRef) => void;
 }) {
   const [level, setLevel] = useState(initialLevel);
+  const [phase, setPhase] = useState<DayPhase>('day');
   const [zoom, setZoom] = useState(1);
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | undefined>(undefined);
-  const map = useMemo(() => generateLocalMap(world, globalX, globalY, level), [world, globalX, globalY, level]);
-  const summary = useMemo(() => selectedCell ? localCellSummary(map, selectedCell.x, selectedCell.y) : { title: 'Выбери клетку', lines: ['Первое нажатие показывает содержимое клетки. Повторное открывает главную сущность.'], markers: [] }, [map, selectedCell]);
+  const baseMap = useMemo(() => generateLocalMap(world, globalX, globalY, level), [world, globalX, globalY, level]);
+  const map = useMemo(() => applyDailyLifePhaseToMap(world, baseMap, phase), [world, baseMap, phase]);
+  const summary = useMemo(() => selectedCell ? localCellSummary(map, selectedCell.x, selectedCell.y) : { title: 'Выбери клетку', lines: [`Сейчас: ${dayPhaseLabel(phase).toLowerCase()}. Жители находятся там, куда их привёл распорядок дня.`], markers: [] }, [map, selectedCell, phase]);
 
   useEffect(() => {
     if (!map.availableLevels.includes(level)) setLevel(0);
@@ -40,6 +45,8 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
     setZoom(1);
     setSelectedCell(undefined);
   }, [map.key]);
+
+  useEffect(() => { setSelectedCell(undefined); }, [phase]);
 
   const move = (dx: number, dy: number) => {
     const x = globalX + dx;
@@ -63,9 +70,12 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
     <header className="local-map-header">
       <div className="local-map-title">
         <button className="window-control local-back" onClick={onBack} aria-label="Вернуться к глобальной карте">←</button>
-        <div><span className="eyebrow">Локальная карта квадрата {globalX}:{globalY}</span><h1>{map.title}</h1><p>{map.subtitle}</p></div>
+        <div><span className="eyebrow">Локальная карта квадрата {globalX}:{globalY}</span><h1>{map.title}</h1><p>{map.subtitle}</p><small className="local-day-summary">{dayPhaseLabel(phase)} · жители перемещены по распорядку</small></div>
       </div>
       <div className="local-map-header-actions">
+        {level === 0 && <div className="daily-phase-tabs" aria-label="Время суток">
+          {DAY_PHASES.map(item => <button key={item} className={phase === item ? 'active' : ''} onClick={() => setPhase(item)}>{dayPhaseLabel(item)}</button>)}
+        </div>}
         <div className="local-levels" aria-label="Уровни местности">
           {map.availableLevels.map(item => <button key={item} className={level === item ? 'active' : ''} onClick={() => setLevel(item)}>{item === 0 ? 'Поверхность' : `Подземный ${Math.abs(item)}`}</button>)}
         </div>
@@ -85,13 +95,13 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
           <div className="local-zoom-controls"><button onClick={() => setZoom(value => Math.max(LOCAL_MIN_ZOOM, value / 1.35))}>−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => setZoom(value => Math.min(LOCAL_MAX_ZOOM, value * 1.35))}>＋</button><button onClick={() => { setZoom(1); setCamera({ x: 0, y: 0 }); }}>Центр</button></div>
         </div>
         <LocalCanvas map={map} zoom={zoom} camera={camera} onViewport={value => { setZoom(value.zoom); setCamera(value.camera); }} selected={selectedCell} onSelectCell={handleCellTap} />
-        <div className="local-map-footnote"><span>Перетаскивай карту одним пальцем, растягивай двумя. Максимальный масштаб показывает клетки почти вплотную.</span><span>База восстанавливается из seed, история хранится отдельными изменениями: {world.localMapChanges.filter(effect => effect.globalX === globalX && effect.globalY === globalY).length}</span></div>
+        <div className="local-map-footnote"><span>Перетаскивай карту одним пальцем, растягивай двумя. Переключай время суток, чтобы увидеть путь жителей.</span><span>Личных бытовых событий в мире: {(world.personalLifeEvents ?? []).length}</span></div>
       </div>
 
       <aside className={`window-card local-inspector ${selectedCell ? 'is-open' : ''}`}>
         <div className="local-inspector-grip" aria-hidden="true" />
         <button className="local-inspector-close" onClick={() => setSelectedCell(undefined)} aria-label="Закрыть информацию о клетке">×</button>
-        <div className="local-inspector-heading"><span className="eyebrow">{selectedCell ? `Клетка ${selectedCell.x}:${selectedCell.y}` : 'Локальная карта'}</span><h2>{summary.title}</h2></div>
+        <div className="local-inspector-heading"><span className="eyebrow">{selectedCell ? `Клетка ${selectedCell.x}:${selectedCell.y}` : dayPhaseLabel(phase)}</span><h2>{summary.title}</h2></div>
         <div className="local-inspector-lines">{summary.lines.map(line => <p key={line}>{line}</p>)}</div>
         {summary.markers.length > 0 && <div className="local-marker-list">
           <h3>Существа и объекты</h3>
@@ -320,10 +330,6 @@ function drawLocalMap(canvas: HTMLCanvasElement, map: LocalMapData, zoom: number
     ctx.lineWidth = Math.max(1.5, cellSize * .13);
     ctx.strokeRect(ox + selected.x * cellSize + 1, oy + selected.y * cellSize + 1, Math.max(1, cellSize - 2), Math.max(1, cellSize - 2));
   }
-}
-
-function drawFeature(ctx: CanvasRenderingContext2D, feature: LocalFeature, x: number, y: number, size: number) {
-  paintTextureFeature(ctx, feature, x, y, size);
 }
 
 function markerVisualSize(marker: LocalMarker, cellSize: number): number {
