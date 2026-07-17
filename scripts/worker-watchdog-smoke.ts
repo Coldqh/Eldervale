@@ -35,6 +35,7 @@ assert.equal(workerInactivityTimeout('snapshot'), 60_000);
 assert.equal(workerInactivityTimeout('initialize'), 120_000);
 assert.equal(workerInactivityTimeout('generate'), 120_000);
 assert.equal(workerInactivityTimeout('advance'), 120_000);
+assert.equal(workerInactivityTimeout('advanceUntilEvent'), 120_000);
 
 const clock = new FakeClock();
 let timeouts = 0;

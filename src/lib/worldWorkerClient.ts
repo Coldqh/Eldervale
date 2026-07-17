@@ -4,6 +4,7 @@ import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 import { createInactivityWatchdog, workerInactivityTimeout, type InactivityWatchdog, type WorkerOperation } from './workerWatchdog';
+import { latestEventId, nextImportantEventId } from './nextEvent';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
   ? Command extends { id: number; action: infer Action }
@@ -37,6 +38,7 @@ function operationLabel(action: PendingRequest['action']): string {
   if (action === 'initialize') return 'загрузка мира';
   if (action === 'generate') return 'генерация мира';
   if (action === 'advance') return 'симуляция мира';
+  if (action === 'advanceUntilEvent') return 'поиск следующего события';
   if (action === 'snapshot') return 'получение снимка';
   return 'обновление фокуса';
 }
@@ -72,9 +74,9 @@ function getWorker(): Worker | undefined {
     if (event.data.type === 'error') request.reject(new Error(event.data.error));
     else {
       if (request.action === 'initialize') workerHasWorld = true;
-      if (request.action === 'generate' || request.action === 'advance') workerHasWorld = false;
+      if (request.action === 'generate' || request.action === 'advance' || request.action === 'advanceUntilEvent') workerHasWorld = false;
       if (event.data.world) lastKnownWorld = event.data.world;
-      request.resolve({ world: event.data.world, profile: event.data.profile, cancelled: event.data.type === 'cancelled' });
+      request.resolve({ world: event.data.world, profile: event.data.profile, cancelled: event.data.type === 'cancelled', stoppedOnEventId: event.data.stoppedOnEventId, limitReached: event.data.limitReached });
     }
   };
   worker.onerror = event => resetWorker(new Error(event.message || 'Фоновая симуляция остановилась'));
@@ -86,7 +88,7 @@ function runWorker(command: WorldWorkerCommandInput, onProgress?: (progress: Sim
   const activeWorker = getWorker();
   if (!activeWorker) return runFallback(command, onProgress);
   const id = nextId++;
-  if (command.action === 'generate' || command.action === 'advance') currentOperationId = id;
+  if (command.action === 'generate' || command.action === 'advance' || command.action === 'advanceUntilEvent') currentOperationId = id;
   return new Promise((resolve, reject) => {
     const watchdog = createInactivityWatchdog(
       workerInactivityTimeout(command.action as WorkerOperation),
@@ -122,36 +124,41 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     fallbackProfile = profile;
     return { world, profile };
   }
-  if (command.action === 'advance') {
+  if (command.action === 'advance' || command.action === 'advanceUntilEvent') {
     if (!fallbackEngine) throw new Error('Мир не загружен в движок симуляции');
     fallbackCancelled = false;
     let average = 0;
     const startTasks = fallbackEngine.processedTasks;
     resetSimulationProfiler(fallbackEngine);
-    const fastForward = command.months >= 12;
+    const targetMonths = command.action === 'advance' ? command.months : Math.max(1, command.maxMonths);
+    const fastForward = command.action === 'advance' && command.months >= 12;
+    const baselineEventId = command.action === 'advanceUntilEvent' ? latestEventId(fallbackEngine.world.events) : 0;
+    let stoppedOnEventId: number | undefined;
     let completedMonths = 0;
-    while (completedMonths < command.months) {
+    while (completedMonths < targetMonths) {
       if (fallbackCancelled) return { world: fallbackEngine.world, cancelled: true };
       const monthStart = performance.now();
       let phase = 'Симуляция мира';
-      const monthStep = fastForward ? Math.min(command.months - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
+      const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
       advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward, monthStep });
       const monthMs = performance.now() - monthStart;
       const normalizedMonthMs = monthMs / monthStep;
       average = average ? average * .72 + normalizedMonthMs * .28 : normalizedMonthMs;
       completedMonths += monthStep;
-      onProgress?.({ operation: 'симуляция', phase, completed: completedMonths, total: command.months, percent: completedMonths / command.months * 100, elapsedMs: performance.now() - startedAt, etaMs: average * (command.months - completedMonths), year: fallbackEngine.world.year, month: fallbackEngine.world.month });
+      if (command.action === 'advanceUntilEvent') stoppedOnEventId = nextImportantEventId(fallbackEngine.world.events, baselineEventId, command.minImportance);
+      onProgress?.({ operation: 'симуляция', phase: stoppedOnEventId ? 'Найдено новое событие' : phase, completed: completedMonths, total: targetMonths, percent: completedMonths / targetMonths * 100, elapsedMs: performance.now() - startedAt, etaMs: average * (targetMonths - completedMonths), year: fallbackEngine.world.year, month: fallbackEngine.world.month });
+      if (stoppedOnEventId) break;
       await new Promise<void>(resolve => setTimeout(resolve, 0));
     }
     const profile: SimulationProfile = {
-      operation: 'симуляция', months: command.months, totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt,
+      operation: 'симуляция', months: completedMonths, totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt,
       indexedEntities: countIndexedEntities(fallbackEngine.indexes), processedTasks: fallbackEngine.processedTasks - startTasks,
       activeRegions: fallbackEngine.world.simulation.activeRegionKeys.length, sleepingRegions: fallbackEngine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
       fastForward, exactMonths: fallbackEngine.exactMonths, coarseMonths: fallbackEngine.coarseMonths, phaseTimings: simulationPhaseProfile(fallbackEngine),
     };
     fallbackProfile = profile;
     fallbackEngine.world.simulation.lastProfile = profile;
-    return { world: fallbackEngine.world, profile };
+    return { world: fallbackEngine.world, profile, stoppedOnEventId, limitReached: command.action === 'advanceUntilEvent' && !stoppedOnEventId };
   }
   if (command.action === 'snapshot') return { world: fallbackEngine?.world, profile: fallbackProfile };
   if (command.action === 'setFocus') {
@@ -178,6 +185,17 @@ export async function generateWorldInBackground(config: WorldConfig, onProgress?
 export async function advanceWorldInBackground(months: number, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
   if (getWorker() && !workerHasWorld && lastKnownWorld) await initializeWorldInBackground(lastKnownWorld);
   const result = await runWorker({ action: 'advance', months }, onProgress);
+  if (result.world) lastKnownWorld = result.world;
+  return result;
+}
+
+export async function advanceToNextEventInBackground(
+  maxMonths = 24,
+  minImportance = 2,
+  onProgress?: (progress: SimulationProgress) => void,
+): Promise<WorldWorkerResult> {
+  if (getWorker() && !workerHasWorld && lastKnownWorld) await initializeWorldInBackground(lastKnownWorld);
+  const result = await runWorker({ action: 'advanceUntilEvent', maxMonths: Math.max(1, Math.floor(maxMonths)), minImportance: Math.max(1, Math.floor(minImportance)) }, onProgress);
   if (result.world) lastKnownWorld = result.world;
   return result;
 }

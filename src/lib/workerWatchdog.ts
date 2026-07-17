@@ -1,4 +1,4 @@
-export type WorkerOperation = 'initialize' | 'generate' | 'advance' | 'snapshot' | 'setFocus';
+export type WorkerOperation = 'initialize' | 'generate' | 'advance' | 'advanceUntilEvent' | 'snapshot' | 'setFocus';
 
 export interface WatchdogClock {
   set(handler: () => void, timeoutMs: number): unknown;

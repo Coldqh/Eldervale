@@ -6,7 +6,14 @@ export type StorageOperation =
   | 'прочитать снимки'
   | 'восстановить снимок';
 
-let lastAlertKey: string | undefined;
+export const WORLD_STORAGE_ERROR_EVENT = 'eldervale-storage-error';
+
+export interface StorageFailureDetail {
+  operation: StorageOperation;
+  message: string;
+}
+
+let lastEventKey: string | undefined;
 
 export function reportWorldStorageFailure(operation: StorageOperation, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause || 'неизвестная ошибка');
@@ -15,11 +22,14 @@ export function reportWorldStorageFailure(operation: StorageOperation, cause: un
 
   if (typeof window !== 'undefined') {
     const key = `${operation}:${detail}`;
-    if (lastAlertKey !== key) {
-      lastAlertKey = key;
-      window.setTimeout(() => {
-        window.alert(`${error.message}. Сохранённые миры не удалены. Проверь свободное место и разрешение браузера на хранение данных.`);
-      }, 0);
+    if (lastEventKey !== key) {
+      lastEventKey = key;
+      window.dispatchEvent(new CustomEvent<StorageFailureDetail>(WORLD_STORAGE_ERROR_EVENT, {
+        detail: {
+          operation,
+          message: `${error.message}. Сохранённые миры не удалены. Проверь свободное место и разрешение браузера на хранение данных.`,
+        },
+      }));
     }
   }
 

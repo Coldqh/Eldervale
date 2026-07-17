@@ -4,6 +4,7 @@ import type { WorldWorkerCommand, WorldWorkerMessage } from '../lib/worldWorkerP
 import { generateHistoricalWorld } from '../sim/historicalEngine';
 import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
+import { latestEventId, nextImportantEventId } from '../lib/nextEvent';
 
 const scope = self as DedicatedWorkerGlobalScope;
 let engine: SimulationEngine | undefined;
@@ -66,21 +67,24 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   engine = undefined;
 }
 
-async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' }>): Promise<void> {
+async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' | 'advanceUntilEvent' }>): Promise<void> {
   if (!engine) throw new Error('Мир не загружен в движок симуляции');
   activeOperationId = message.id;
   cancelRequestedFor = undefined;
   const startedAt = performance.now();
   const startTasks = engine.processedTasks;
   resetSimulationProfiler(engine);
-  const fastForward = message.months >= 12;
+  const targetMonths = message.action === 'advance' ? message.months : Math.max(1, message.maxMonths);
+  const fastForward = message.action === 'advance' && message.months >= 12;
+  const baselineEventId = message.action === 'advanceUntilEvent' ? latestEventId(engine.world.events) : 0;
+  let stoppedOnEventId: number | undefined;
   let movingAverageMs = 0;
-  let lastPhase = 'Подготовка планировщика';
+  let lastPhase = message.action === 'advanceUntilEvent' ? 'Ищем следующее важное событие' : 'Подготовка планировщика';
   let completedMonths = 0;
 
-  post({ id: message.id, type: 'progress', progress: progressMessage('симуляция', lastPhase, 0, message.months, startedAt, { year: engine.world.year, month: engine.world.month }) });
+  post({ id: message.id, type: 'progress', progress: progressMessage('симуляция', lastPhase, 0, targetMonths, startedAt, { year: engine.world.year, month: engine.world.month }) });
 
-  while (completedMonths < message.months) {
+  while (completedMonths < targetMonths) {
     if (cancelRequestedFor === message.id) {
       const elapsed = performance.now() - startedAt;
       const profile: SimulationProfile = {
@@ -93,36 +97,41 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
       const world = engine.world;
       activeOperationId = undefined;
       cancelRequestedFor = undefined;
-      post({ id: message.id, type: 'cancelled', world, profile });
-      // После передачи частичного результата главный поток владеет миром.
-      // Worker будет заново инициализирован перед следующим ходом.
+      post({ id: message.id, type: 'cancelled', world, profile, stoppedOnEventId, limitReached: false });
       engine = undefined;
       return;
     }
 
     const monthStarted = performance.now();
-    const monthStep = fastForward ? Math.min(message.months - completedMonths, monthsToNextQuarter(engine.world.month)) : 1;
+    const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(engine.world.month)) : 1;
     advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward, monthStep });
     const monthMs = performance.now() - monthStarted;
     const normalizedMonthMs = monthMs / monthStep;
     movingAverageMs = movingAverageMs ? movingAverageMs * .72 + normalizedMonthMs * .28 : normalizedMonthMs;
     completedMonths += monthStep;
-    const etaMs = Math.max(0, movingAverageMs * (message.months - completedMonths));
+    if (message.action === 'advanceUntilEvent') {
+      stoppedOnEventId = nextImportantEventId(engine.world.events, baselineEventId, message.minImportance);
+    }
+    const etaMs = Math.max(0, movingAverageMs * (targetMonths - completedMonths));
     post({
       id: message.id,
       type: 'progress',
       progress: {
-        operation: 'симуляция', phase: lastPhase, completed: completedMonths, total: message.months, percent: completedMonths / message.months * 100,
+        operation: 'симуляция', phase: stoppedOnEventId ? 'Найдено новое событие' : lastPhase,
+        completed: completedMonths, total: targetMonths, percent: completedMonths / targetMonths * 100,
         elapsedMs: performance.now() - startedAt, etaMs, year: engine.world.year, month: engine.world.month,
-        detail: `Активных регионов: ${engine.world.simulation.activeRegionKeys.length} · в очереди: ${engine.world.simulation.queuedActions.length}`,
+        detail: stoppedOnEventId
+          ? `Событие №${stoppedOnEventId}`
+          : `Активных регионов: ${engine.world.simulation.activeRegionKeys.length} · в очереди: ${engine.world.simulation.queuedActions.length}`,
       },
     });
+    if (stoppedOnEventId) break;
     await yieldToWorker();
   }
 
   const simulationMs = performance.now() - startedAt;
   const profile: SimulationProfile = {
-    operation: 'симуляция', months: message.months, totalMs: simulationMs, simulationMs, indexedEntities: countIndexedEntities(engine.indexes),
+    operation: 'симуляция', months: completedMonths, totalMs: simulationMs, simulationMs, indexedEntities: countIndexedEntities(engine.indexes),
     processedTasks: engine.processedTasks - startTasks, activeRegions: engine.world.simulation.activeRegionKeys.length,
     sleepingRegions: engine.world.simulation.sleepingRegionCount, generatedAt: Date.now(),
     fastForward, exactMonths: engine.exactMonths, coarseMonths: engine.coarseMonths, phaseTimings: simulationPhaseProfile(engine),
@@ -131,9 +140,14 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
   engine.world.simulation.lastProfile = profile;
   const world = engine.world;
   activeOperationId = undefined;
-  post({ id: message.id, type: 'complete', world, profile });
-  // Сохранение идёт в главном потоке. Освобождаем вторую полную копию мира,
-  // чтобы мобильный браузер не держал одновременно Worker, React и сериализацию.
+  post({
+    id: message.id,
+    type: 'complete',
+    world,
+    profile,
+    stoppedOnEventId,
+    limitReached: message.action === 'advanceUntilEvent' && !stoppedOnEventId,
+  });
   engine = undefined;
 }
 
@@ -148,7 +162,7 @@ scope.onmessage = event => {
     try {
       if (message.action === 'initialize') await initialize(message);
       else if (message.action === 'generate') await generate(message);
-      else if (message.action === 'advance') await advance(message);
+      else if (message.action === 'advance' || message.action === 'advanceUntilEvent') await advance(message);
       else if (message.action === 'setFocus') {
         if (engine) engine.world.simulation.observerFocus = typeof message.x === 'number' && typeof message.y === 'number' ? { x: message.x, y: message.y, level: message.level ?? 0, radius: message.radius ?? 1 } : undefined;
         post({ id: message.id, type: 'complete' });
