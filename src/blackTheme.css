@@ -1,0 +1,257 @@
+/* Eldervale — pure black interface theme. Loaded after every base style. */
+:root {
+  color: #f1eee8;
+  background: #000;
+  color-scheme: dark;
+  --ink: #000;
+  --panel: rgba(5, 5, 5, .97);
+  --panel-2: rgba(12, 12, 12, .96);
+  --line: rgba(255, 255, 255, .10);
+  --line-strong: rgba(255, 255, 255, .24);
+  --gold: #c7ad73;
+  --gold-pale: #eee3c9;
+  --moss: #a5a5a5;
+  --muted: #8e8e8e;
+  --danger: #d5655e;
+}
+
+html,
+body,
+#root,
+.app-shell,
+.loading-screen,
+.fatal-screen {
+  background: #000 !important;
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 50% -18%, rgba(255, 255, 255, .055), transparent 42%),
+    linear-gradient(180deg, #060606 0%, #000 72%) !important;
+}
+
+.app-shell {
+  background-color: #000 !important;
+  background-image:
+    linear-gradient(rgba(255,255,255,.010) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.008) 1px, transparent 1px) !important;
+}
+
+.topbar,
+.left-panel,
+.right-panel,
+.map-stage,
+.map-toolbar,
+.stats-ribbon,
+.time-controls,
+.workspace-view,
+.window-card,
+.local-map-header,
+.local-canvas-window,
+.local-inspector,
+.settings-panel,
+.settings-sheet,
+.archive-workspace,
+.chronicle-workspace,
+.atlas-workspace,
+.world-workspace,
+.world-library,
+.world-slot-card,
+.loading-card,
+.fatal-card,
+.modal-card,
+.dialog-card,
+.drawer,
+.bottom-sheet {
+  background-color: rgba(4, 4, 4, .97) !important;
+  background-image: none !important;
+  border-color: var(--line) !important;
+  box-shadow: none;
+}
+
+.topbar {
+  background: rgba(0, 0, 0, .94) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+}
+
+.left-panel,
+.right-panel {
+  background: rgba(3, 3, 3, .98) !important;
+}
+
+.map-stage,
+.map-toolbar,
+.stats-ribbon,
+.time-controls {
+  background: #050505 !important;
+}
+
+.map-wrap {
+  background: radial-gradient(circle at center, #151515 0%, #020202 78%) !important;
+}
+
+.map-wrap::before {
+  opacity: .10 !important;
+  mix-blend-mode: screen !important;
+}
+
+.map-vignette {
+  box-shadow: inset 0 0 100px rgba(0,0,0,.82), inset 0 0 24px rgba(0,0,0,.92) !important;
+}
+
+.search-box,
+.layer-tabs,
+.ghost-button,
+.icon-button,
+.time-controls button,
+.primary-button,
+.secondary-button,
+.window-control,
+.local-levels button,
+.local-neighbours button,
+.local-zoom-controls button,
+.daily-phase-tabs button,
+.daily-routine-stop,
+.personal-life-event,
+.chip,
+.entity-rune,
+input,
+select,
+textarea {
+  background: #0a0a0a !important;
+  border-color: var(--line) !important;
+  color: #e9e6df !important;
+  box-shadow: none !important;
+}
+
+button:hover,
+.ghost-button:hover,
+.icon-button:hover,
+.time-controls button:hover,
+.local-levels button:hover,
+.local-neighbours button:hover,
+.local-zoom-controls button:hover {
+  background: #151515 !important;
+  border-color: var(--line-strong) !important;
+}
+
+button:disabled {
+  color: #555 !important;
+  background: #050505 !important;
+  opacity: .72;
+}
+
+.primary-button,
+.primary-mini,
+.time-controls .primary-mini,
+.chip.active,
+.layer-tabs button.active,
+.local-levels button.active,
+.daily-phase-tabs button.active {
+  background: linear-gradient(180deg, #24211a, #11100d) !important;
+  border-color: rgba(199, 173, 115, .42) !important;
+  color: var(--gold-pale) !important;
+}
+
+.entity-card:hover,
+.event-item:hover,
+.history-link:hover,
+.local-marker-card:hover,
+.world-slot-card:hover {
+  background: rgba(255,255,255,.045) !important;
+}
+
+.brand small,
+.world-clock strong,
+.entity-card small,
+.stat-row > span,
+.history-link span,
+.event-item time,
+.event-item small,
+.empty-state p,
+.local-map-footnote,
+.local-inspector-lines,
+.local-marker-card small,
+.personal-life-heading > small,
+.personal-life-event time,
+.personal-life-event small,
+.personal-life-event p,
+.personal-life-empty,
+.daily-routine-stop small {
+  color: #858585 !important;
+}
+
+.brand strong,
+.panel-title h2,
+.panel-title h3,
+.entity-panel h2,
+.entity-card strong,
+.stat-row > strong,
+.event-item strong,
+.local-map-title h1,
+.local-inspector-heading h2,
+.local-marker-card strong,
+.daily-routine-stop strong {
+  color: #ece8df !important;
+}
+
+.eyebrow,
+.world-clock span,
+.search-box span,
+.entity-rune,
+.inline-link,
+.local-day-summary,
+.daily-routine-stop > span {
+  color: var(--gold) !important;
+}
+
+.entity-card,
+.event-item,
+.history-link,
+.stat-row,
+.personal-life-panel,
+.personal-life-event,
+.daily-routine-stop {
+  border-color: rgba(255,255,255,.075) !important;
+}
+
+.modal-backdrop,
+.dialog-backdrop,
+.sheet-backdrop {
+  background: rgba(0, 0, 0, .84) !important;
+  backdrop-filter: blur(12px);
+}
+
+.local-map-canvas {
+  background: #020202 !important;
+  border-color: var(--line) !important;
+}
+
+.local-map-toolbar,
+.local-inspector,
+.local-map-header {
+  background: #050505 !important;
+}
+
+.local-marker-card,
+.personal-life-event {
+  background: #090909 !important;
+}
+
+.daily-routine-stop {
+  background: #080808 !important;
+}
+
+::-webkit-scrollbar-track {
+  background: #030303;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #282828 !important;
+  border-radius: 999px;
+}
+
+::selection {
+  background: rgba(199, 173, 115, .35);
+  color: #fff;
+}

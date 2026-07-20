@@ -4,6 +4,7 @@ import App from './App';
 import { APP_VERSION } from './version';
 import { initializePwaInstall } from './lib/pwaInstall';
 import './styles.css';
+import './blackTheme.css';
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Error }> {
   state: { error?: Error } = {};
