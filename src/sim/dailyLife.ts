@@ -25,16 +25,20 @@ export function advanceDailyLife(
   world: WorldState,
   rng: RNG,
   indexes: WorldIndexes,
-  options: { elapsedMonths?: number; recordEvents?: boolean } = {},
+  options: { elapsedMonths?: number; recordEvents?: boolean; forceCharacterIds?: readonly number[] } = {},
 ): void {
   initializeDailyLife(world);
   const tick = worldTick(world);
   const settlementIds = selectDetailedSettlements(world, indexes, tick);
-  const targets = settlementIds
+  const forcedTargets = [...new Set(options.forceCharacterIds ?? [])]
+    .map(characterId => indexes.characterById.get(characterId))
+    .filter((character): character is Character => Boolean(character?.alive && !isAwayWithArmy(character)));
+  const forcedIds = new Set(forcedTargets.map(character => character.id));
+  const regularTargets = settlementIds
     .flatMap(settlementId => residents(indexes, settlementId))
-    .filter(character => character.alive && !isAwayWithArmy(character))
-    .sort((a, b) => detailScore(world, b) - detailScore(world, a) || a.id - b.id)
-    .slice(0, MAX_DETAILED_CHARACTERS);
+    .filter(character => character.alive && !isAwayWithArmy(character) && !forcedIds.has(character.id))
+    .sort((a, b) => detailScore(world, b) - detailScore(world, a) || a.id - b.id);
+  const targets = [...forcedTargets, ...regularTargets].slice(0, MAX_DETAILED_CHARACTERS);
 
   const refreshedIds = new Set(targets.map(character => character.id));
   const newRoutines = targets.map(character => buildDailyRoutine(world, character, tick));
@@ -166,6 +170,11 @@ function buildDailyRoutine(world: WorldState, character: Character, tick: number
   const barracks = buildings.find(item => item.type === 'barracks');
   const market = buildings.find(item => item.type === 'market' || item.type === 'shop' || Boolean(item.establishmentId && ['рынок', 'лавка', 'продовольственная лавка', 'одежная лавка', 'оружейная лавка'].includes(world.establishments.find(establishment => establishment.id === item.establishmentId)?.type ?? '')));
   const tavern = buildings.find(item => item.type === 'tavern' || item.type === 'inn');
+  const townHall = buildings.find(item => item.type === 'townHall' || item.type === 'courthouse');
+  const castle = buildings.find(item => item.type === 'castle' || item.type === 'manor');
+  const primaryGoal = [...(character.mind?.goals ?? [])]
+    .filter(goal => goal.status === 'active' || goal.status === 'blocked')
+    .sort((a, b) => b.priority - a.priority || b.updatedTick - a.updatedTick)[0];
 
   const morning = home
     ? stopAtBuilding(world, character, 'morning', home, character.age < 14 ? 'просыпается в семье и завтракает' : 'просыпается, ест и готовится к делам', 'home')
@@ -178,6 +187,16 @@ function buildDailyRoutine(world: WorldState, character: Character, tick: number
     day = stopAtBuilding(world, character, 'day', healer, 'получает лечение и отдыхает', 'healer');
   } else if (character.age < 14 && school) {
     day = stopAtBuilding(world, character, 'day', school, 'учится вместе с другими детьми', 'school');
+  } else if (primaryGoal?.kind === 'serve_faith' && temple) {
+    day = stopAtBuilding(world, character, 'day', temple, 'служит вере и укрепляет связи с прихожанами', 'temple');
+  } else if (primaryGoal?.kind === 'gain_power' && (townHall || castle)) {
+    day = stopAtBuilding(world, character, 'day', townHall ?? castle!, 'ищет поддержку, должность и политические связи', 'work');
+  } else if (primaryGoal?.kind === 'protect_home' && barracks) {
+    day = stopAtBuilding(world, character, 'day', barracks, 'готовится защищать поселение и помогает страже', 'barracks');
+  } else if (primaryGoal?.kind === 'explore' && (tavern || market)) {
+    day = stopAtBuilding(world, character, 'day', tavern ?? market!, 'собирает сведения о дорогах и готовится к путешествию', tavern ? 'tavern' : 'market');
+  } else if (primaryGoal?.kind === 'revenge' && (tavern || market)) {
+    day = stopAtBuilding(world, character, 'day', tavern ?? market!, 'расспрашивает людей и ищет след виновника', tavern ? 'tavern' : 'market');
   } else if (character.profession === 'priest' && temple) {
     day = stopAtBuilding(world, character, 'day', temple, 'служит в храме и принимает прихожан', 'temple');
   } else if (['гарнизон', 'резерв'].includes(character.serviceStatus ?? '') && barracks) {
@@ -265,6 +284,7 @@ function createRoutineEvents(world: WorldState, rng: RNG, indexes: WorldIndexes,
     if (!character) continue;
     const day = routine.stops.find(stop => stop.phase === 'day')!;
     const evening = routine.stops.find(stop => stop.phase === 'evening')!;
+    advanceGoalFromRoutine(world, character, day, evening, elapsedMonths);
     const roll = hashSeed(`${world.config.seed}:личное-событие:${routine.tick}:${character.id}`) % 100;
 
     if (character.health < 48 && roll < 65) {
@@ -293,6 +313,48 @@ function createRoutineEvents(world: WorldState, rng: RNG, indexes: WorldIndexes,
       addPersonalEvent(world, character.id, character.childIds.slice(0, 3), 'evening', 'family', `${character.name} провёл вечер с семьёй`, 'Домочадцы ели вместе и обсуждали дела дома.', character.settlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 0);
     }
   }
+}
+
+
+function advanceGoalFromRoutine(
+  world: WorldState,
+  character: Character,
+  day: DailyRoutineStop,
+  evening: DailyRoutineStop,
+  elapsedMonths: number,
+): void {
+  const goal = [...(character.mind?.goals ?? [])]
+    .filter(item => item.status === 'active' || item.status === 'blocked')
+    .sort((a, b) => b.priority - a.priority || b.updatedTick - a.updatedTick)[0];
+  if (!goal) return;
+  const before = goal.progress ?? 0;
+  let gain = 0;
+  if (goal.kind === 'survive') gain = day.placeKind === 'healer' || evening.placeKind === 'home' ? 4 : 1;
+  else if (goal.kind === 'feed_family') gain = day.placeKind === 'work' || day.placeKind === 'market' ? 3 : 1;
+  else if (goal.kind === 'earn_wealth') gain = day.placeKind === 'work' ? 3 : day.placeKind === 'market' ? 2 : .5;
+  else if (goal.kind === 'gain_power') gain = day.activity.includes('поддерж') || day.activity.includes('политичес') ? 3 : 1;
+  else if (goal.kind === 'protect_home') gain = day.placeKind === 'barracks' ? 3 : 1;
+  else if (goal.kind === 'serve_faith') gain = day.placeKind === 'temple' || evening.placeKind === 'temple' ? 3 : 1;
+  else if (goal.kind === 'revenge') gain = day.activity.includes('след') || day.activity.includes('расспраш') ? 2 : .5;
+  else if (goal.kind === 'escape_justice') gain = character.legalStatus === 'сбежал' ? 5 : character.legalStatus === 'разыскивается' ? 2 : .5;
+  else if (goal.kind === 'master_craft') gain = day.placeKind === 'work' ? 3 : 1;
+  else if (goal.kind === 'explore') gain = day.activity.includes('дорог') || day.activity.includes('путешеств') ? 3 : .75;
+  goal.progress = clamp(Math.max(before, before + gain * Math.max(1, elapsedMonths)));
+  goal.updatedTick = worldTick(world);
+  const crossed = [25, 50, 75, 100].find(value => before < value && goal.progress >= value);
+  if (!crossed) return;
+  addPersonalEvent(
+    world,
+    character.id,
+    [],
+    'evening',
+    'goal',
+    crossed >= 100 ? `${character.name} достиг важной жизненной цели` : `${character.name} продвинулся к своей цели`,
+    `${goal.reason}. Прогресс: ${Math.round(goal.progress)}%.`,
+    character.settlementId,
+    [{ kind: 'character', id: character.id }, ...(goal.targetRef ? [goal.targetRef] : [])],
+    crossed >= 100 ? 2 : 1,
+  );
 }
 
 function processMeetings(world: WorldState, rng: RNG, indexes: WorldIndexes, routines: DailyRoutine[]): void {

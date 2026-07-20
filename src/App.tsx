@@ -5,13 +5,15 @@ import { WorldSetup } from './components/WorldSetup';
 import { SettingsPanel } from './components/SettingsPanel';
 import { AppDialog, type AppDialogState } from './components/AppDialog';
 import { WorldWorkspace, type LocalPosition, type WorldView } from './components/WorldWorkspace';
-import { cancelWorldOperation, setWorldFocusInBackground } from './lib/worldWorkerClient';
+import { cancelWorldOperation, setWatchedCharactersInBackground, setWorldFocusInBackground } from './lib/worldWorkerClient';
 import { forceUpdate } from './lib/appUpdate';
 import { useWorldController } from './hooks/useWorldController';
+import { useWatchedCharacters } from './hooks/useWatchedCharacters';
 import './styles.css';
 
 export default function App() {
   const controller = useWorldController();
+  const watchedCharacters = useWatchedCharacters(controller.world, controller.activeSlotId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [entityStack, setEntityStack] = useState<EntityRef[]>([]);
   const [layer, setLayer] = useState<MapLayer>('terrain');
@@ -30,6 +32,10 @@ export default function App() {
   useEffect(() => {
     void setWorldFocusInBackground(view === 'local' && localPosition ? { ...localPosition, radius: 1 } : undefined);
   }, [view, localPosition?.x, localPosition?.y, localPosition?.level]);
+
+  useEffect(() => {
+    void setWatchedCharactersInBackground(watchedCharacters.ids);
+  }, [watchedCharacters.ids.join(',')]);
 
   const openEntity = useCallback((ref: EntityRef) => {
     setEntityStack(current => {
@@ -102,7 +108,9 @@ export default function App() {
       localPosition={localPosition} setLocalPosition={setLocalPosition} selected={selected} canGoBack={entityStack.length > 1} busy={controller.busy}
       onSelect={openEntity} onBackEntity={backEntity} onCloseEntity={closeEntity} onOpenLocal={openLocal}
       onNewWorld={() => controller.setSetupOpen(true)} onSettings={() => setSettingsOpen(true)} onExport={exportWorld} onImport={() => importRef.current?.click()}
+      watchedCharacterIds={watchedCharacters.ids} onToggleWatch={watchedCharacters.toggle}
       onAdvance={months => void controller.advance(months)} onAdvanceToNextEvent={() => void controller.advanceToNextEvent().then(eventId => { if (eventId) setView('chronicle'); })}
+      onAdvanceCharacter={characterId => void controller.advanceToNextCharacterEvent(characterId).then(event => { if (event) setView('stories'); })}
     />
     <input ref={importRef} hidden type="file" accept="application/json" onChange={(event: ChangeEvent<HTMLInputElement>) => { void controller.importWorld(event.target.files?.[0]); event.currentTarget.value = ''; }} />
     {settingsOpen && <SettingsPanel world={controller.world} update={controller.updateState} performance={controller.performanceProfile} storage={controller.storageProfile} slots={controller.worldSlots} activeSlotId={controller.activeSlotId} snapshots={controller.worldSnapshots} onSwitchWorld={(slotId: string) => void controller.switchWorld(slotId)} onRenameWorld={requestRename} onDeleteWorld={requestDelete} onDuplicateWorld={(slotId: string) => void controller.duplicateSlot(slotId)} onCreateSnapshot={() => void controller.makeSnapshot()} onRestoreSnapshot={requestRestore} onCheck={() => void controller.runUpdateCheck()} onForceUpdate={() => void forceUpdate(controller.updateState.remoteVersion)} onClose={() => setSettingsOpen(false)} />}

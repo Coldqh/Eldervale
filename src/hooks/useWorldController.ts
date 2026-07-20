@@ -5,7 +5,7 @@ import {
   listWorldSnapshots, loadWorld, loadWorldSlot, renameWorldSlot, restoreWorldSnapshot, saveWorld,
 } from '../lib/worldStorage';
 import {
-  advanceToNextEventInBackground, advanceWorldInBackground, generateWorldInBackground, initializeWorldInBackground,
+  advanceToNextCharacterEventInBackground, advanceToNextEventInBackground, advanceWorldInBackground, generateWorldInBackground, initializeWorldInBackground,
 } from '../lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from '../lib/appUpdate';
 import { migrateWorld } from '../sim/migrateWorld';
@@ -206,6 +206,28 @@ export function useWorldController() {
     }
   };
 
+
+  const advanceToNextCharacterEvent = async (characterId: number) => {
+    if (!world || busy) return undefined;
+    const character = world.characters.find(item => item.id === characterId);
+    setLoadingText(`Ищем следующий шаг истории: ${character?.name ?? `житель №${characterId}`}`);
+    setBusy(true);
+    setProgress(undefined);
+    const started = performance.now();
+    try {
+      const result = await advanceToNextCharacterEventInBackground(characterId, 36, setProgress);
+      await finishSimulation(result, started);
+      if (result.limitReached) setNotice({ title: 'Личная история не изменилась', message: 'За 36 месяцев не появилось новой личной записи, памяти или исторического события. Мир сохранён в достигнутой дате.' });
+      return result.stoppedOnCharacterEvent;
+    } catch (error) {
+      showError(error, 'Поиск личного события остановился.');
+      return undefined;
+    } finally {
+      setProgress(undefined);
+      setBusy(false);
+    }
+  };
+
   const importWorld = async (file?: File) => {
     if (!file || busy) return false;
     setBusy(true);
@@ -319,7 +341,7 @@ export function useWorldController() {
   return {
     world, booting, setupOpen, setSetupOpen, busy, loadingText, progress, performanceProfile, storageProfile,
     activeSlotId, worldSlots, worldSnapshots, updateState, notice, setNotice, worldOpenedToken,
-    runUpdateCheck, refreshStorage, generate, advance, advanceToNextEvent, importWorld, switchWorld, renameSlot,
+    runUpdateCheck, refreshStorage, generate, advance, advanceToNextEvent, advanceToNextCharacterEvent, importWorld, switchWorld, renameSlot,
     removeSlot, duplicateSlot, makeSnapshot, restoreSnapshot,
   };
 }

@@ -6,14 +6,15 @@ import { Encyclopedia } from './Encyclopedia';
 import { HistoricalAtlas } from './HistoricalAtlas';
 import { LocalMapViewer } from './LocalMapViewer';
 import { PersonalLifePanel } from './PersonalLifePanel';
+import { CharacterStoryPanel, LiveStoriesView } from './LiveStoriesView';
 
-export type WorldView = 'map' | 'archive' | 'chronicle' | 'atlas' | 'local';
+export type WorldView = 'map' | 'archive' | 'chronicle' | 'stories' | 'atlas' | 'local';
 export interface LocalPosition { x: number; y: number; level: number }
 
 export function WorldWorkspace({
   world, view, setView, layer, setLayer, localPosition, setLocalPosition, selected, canGoBack, busy,
   onSelect, onBackEntity, onCloseEntity, onOpenLocal, onNewWorld, onSettings, onExport, onImport,
-  onAdvance, onAdvanceToNextEvent,
+  watchedCharacterIds, onToggleWatch, onAdvance, onAdvanceToNextEvent, onAdvanceCharacter,
 }: {
   world: WorldState;
   view: WorldView;
@@ -33,8 +34,11 @@ export function WorldWorkspace({
   onSettings: () => void;
   onExport: () => void;
   onImport: () => void;
+  watchedCharacterIds: number[];
+  onToggleWatch: (characterId: number) => void;
   onAdvance: (months: number) => void;
   onAdvanceToNextEvent: () => void;
+  onAdvanceCharacter: (characterId: number) => void;
 }) {
   const stats = useMemo(() => ({
     population: world.characters.length,
@@ -52,6 +56,7 @@ export function WorldWorkspace({
         <ViewButton active={view === 'map'} icon="⌾" label="Карта" disabled={busy} onClick={() => setView('map')} />
         <ViewButton active={view === 'archive'} icon="⌕" label="Архив" disabled={busy} onClick={() => setView('archive')} />
         <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" disabled={busy} onClick={() => setView('chronicle')} />
+        <ViewButton active={view === 'stories'} icon="✦" label={`Истории${watchedCharacterIds.length ? ` ${watchedCharacterIds.length}` : ''}`} disabled={busy} onClick={() => setView('stories')} />
         <ViewButton active={view === 'atlas'} icon="◫" label="Атлас" disabled={busy} onClick={() => setView('atlas')} />
         {localPosition && <ViewButton active={view === 'local'} icon="▦" label="Местность" disabled={busy} onClick={() => setView('local')} />}
       </nav>
@@ -81,6 +86,7 @@ export function WorldWorkspace({
 
       {view === 'local' && localPosition && <LocalMapViewer world={world} globalX={localPosition.x} globalY={localPosition.y} initialLevel={localPosition.level} onMove={(x: number, y: number, level = 0) => setLocalPosition({ x, y, level })} onBack={() => setView('map')} onSelect={onSelect} />}
       {view === 'archive' && <section className="workspace-view archive-workspace scrollable-tab"><div className="workspace-heading"><div><span className="eyebrow">Архив мира</span><h1>Всё, что существует</h1></div><p>Выбери личность, государство, книгу, чудовище или другое связанное звено мира.</p></div><div className="window-card archive-window"><Encyclopedia world={world} onSelect={onSelect} /></div></section>}
+      {view === 'stories' && <LiveStoriesView world={world} watchedCharacterIds={watchedCharacterIds} busy={busy} onSelect={onSelect} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} />}
       {view === 'atlas' && <HistoricalAtlas world={world} onSelect={onSelect} onClose={() => setView('map')} />}
       {view === 'chronicle' && <section className="workspace-view chronicle-workspace scrollable-tab">
         <div className="workspace-heading"><div><span className="eyebrow">Живая хроника</span><h1>Последние события</h1></div><p>Войны, смерти, книги, нападения и решения правителей в одном потоке.</p></div>
@@ -89,8 +95,8 @@ export function WorldWorkspace({
       </section>}
     </main>
 
-    <nav className="mobile-nav"><ViewButton active={view === 'archive'} icon="⌕" label="Архив" disabled={busy} onClick={() => setView('archive')} /><ViewButton active={view === 'map' || view === 'atlas' || view === 'local'} icon="⌾" label="Карта" disabled={busy} onClick={() => setView('map')} /><ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" disabled={busy} onClick={() => setView('chronicle')} /></nav>
-    {selected && <EntityWindow world={world} selected={selected} canGoBack={canGoBack} onBack={onBackEntity} onClose={onCloseEntity} onSelect={onSelect} onOpenLocal={onOpenLocal} />}
+    <nav className="mobile-nav"><ViewButton active={view === 'archive'} icon="⌕" label="Архив" disabled={busy} onClick={() => setView('archive')} /><ViewButton active={view === 'map' || view === 'atlas' || view === 'local'} icon="⌾" label="Карта" disabled={busy} onClick={() => setView('map')} /><ViewButton active={view === 'stories'} icon="✦" label="Истории" disabled={busy} onClick={() => setView('stories')} /><ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" disabled={busy} onClick={() => setView('chronicle')} /></nav>
+    {selected && <EntityWindow world={world} selected={selected} canGoBack={canGoBack} busy={busy} watched={selected.kind === 'character' && watchedCharacterIds.includes(selected.id)} onBack={onBackEntity} onClose={onCloseEntity} onSelect={onSelect} onOpenLocal={onOpenLocal} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} />}
   </div>;
 }
 
@@ -100,8 +106,8 @@ function Stat({ value, label }: { value: string | number; label: string }) { ret
 function monthName(month: number) { return ['Глубокая зима', 'Поздняя зима', 'Оттепель', 'Посев', 'Зелень', 'Высокое солнце', 'Жатва', 'Золотой месяц', 'Туманы', 'Листопад', 'Первые морозы', 'Долгая ночь'][month - 1]; }
 function layerLabel(layer: MapLayer) { return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', ecology: 'Природа', trade: 'Торговля' } as const)[layer]; }
 
-function EntityWindow({ world, selected, canGoBack, onBack, onClose, onSelect, onOpenLocal }: { world: WorldState; selected: EntityRef; canGoBack: boolean; onBack: () => void; onClose: () => void; onSelect: (ref: EntityRef) => void; onOpenLocal: (x: number, y: number, level?: number) => void }) {
-  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}>←</button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}>×</button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} />{selected.kind === 'character' && <PersonalLifePanel world={world} characterId={selected.id} />}</div></section></div>;
+function EntityWindow({ world, selected, canGoBack, busy, watched, onBack, onClose, onSelect, onOpenLocal, onToggleWatch, onAdvanceCharacter }: { world: WorldState; selected: EntityRef; canGoBack: boolean; busy: boolean; watched: boolean; onBack: () => void; onClose: () => void; onSelect: (ref: EntityRef) => void; onOpenLocal: (x: number, y: number, level?: number) => void; onToggleWatch: (characterId: number) => void; onAdvanceCharacter: (characterId: number) => void }) {
+  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}>←</button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}>×</button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} />{selected.kind === 'character' && <><CharacterStoryPanel world={world} characterId={selected.id} watched={watched} busy={busy} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} onSelect={onSelect} /><PersonalLifePanel world={world} characterId={selected.id} /></>}</div></section></div>;
 }
 
 function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: number } | undefined {

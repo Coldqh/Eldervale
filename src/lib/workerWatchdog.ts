@@ -1,4 +1,4 @@
-export type WorkerOperation = 'initialize' | 'generate' | 'advance' | 'advanceUntilEvent' | 'snapshot' | 'setFocus';
+export type WorkerOperation = 'initialize' | 'generate' | 'advance' | 'advanceUntilEvent' | 'advanceUntilCharacterEvent' | 'snapshot' | 'setFocus' | 'setWatchedCharacters';
 
 export interface WatchdogClock {
   set(handler: () => void, timeoutMs: number): unknown;
@@ -16,7 +16,7 @@ const defaultClock: WatchdogClock = {
 };
 
 export function workerInactivityTimeout(action: WorkerOperation): number {
-  if (action === 'setFocus') return 15_000;
+  if (action === 'setFocus' || action === 'setWatchedCharacters') return 15_000;
   if (action === 'snapshot') return 60_000;
   return 120_000;
 }

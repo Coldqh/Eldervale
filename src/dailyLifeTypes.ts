@@ -2,7 +2,7 @@ import type { EntityRef } from './types';
 
 export type DayPhase = 'morning' | 'day' | 'evening' | 'night';
 export type DailyPlaceKind = 'home' | 'work' | 'market' | 'tavern' | 'temple' | 'healer' | 'school' | 'prison' | 'barracks' | 'street';
-export type PersonalLifeEventKind = 'routine' | 'meeting' | 'work' | 'family' | 'need' | 'faith' | 'health' | 'conflict';
+export type PersonalLifeEventKind = 'routine' | 'meeting' | 'work' | 'family' | 'need' | 'faith' | 'health' | 'conflict' | 'goal';
 
 export interface DailyRoutineStop {
   phase: DayPhase;
