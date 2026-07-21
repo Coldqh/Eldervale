@@ -395,6 +395,7 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
   const employed = new Set<number>();
   const workerCounts = new Map<number, number>();
   const travelingCharacterIds = new Set((world.travelingMerchants ?? []).map(merchant => merchant.characterId));
+  const servingCharacterIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
   for (const contract of world.employments) {
     const establishment = indexes.establishmentById.get(contract.establishmentId);
     if (!aliveIds.has(contract.characterId) || !establishment?.active) contract.active = false;
@@ -410,7 +411,9 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
     const totalVacancies = vacancies.reduce((sum, establishment) => sum + Math.max(0, (capacityById.get(establishment.id) ?? 2) - (workerCounts.get(establishment.id) ?? 0)), 0);
     if (!totalVacancies) continue;
     const unemployed = (indexes.residentsBySettlement.get(settlement.id) ?? []).filter(character => character.age >= 14 && character.age <= 75
-      && !employed.has(character.id) && !travelingCharacterIds.has(character.id) && !character.titles.some(title => /король|правитель|вождь/i.test(title)))
+      && !employed.has(character.id) && !travelingCharacterIds.has(character.id) && !servingCharacterIds.has(character.id)
+      && (character.serviceStatus === undefined || character.serviceStatus === 'гражданский')
+      && !character.titles.some(title => /король|правитель|вождь/i.test(title)))
       .sort((a, b) => a.id - b.id)
       .slice(0, Math.min(totalVacancies * 5, 240));
     for (const character of unemployed) {
@@ -460,7 +463,8 @@ function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndex
     if (merchant.status === 'в пути' && merchant.arrivalTick > tick) continue;
     if (merchant.status === 'в пути') {
       merchant.currentSettlementId = merchant.nextSettlementId ?? merchant.currentSettlementId;
-      if (character.settlementId !== merchant.currentSettlementId) moveResidentInIndexes(indexes, character, merchant.currentSettlementId);
+      // currentSettlementId хранит физическую остановку торговца. settlementId персонажа
+      // остаётся его постоянным местом жительства, иначе путешествие разрывает домохозяйство.
       merchant.status = 'торгует';
       merchant.history.push(`Прибыл в ${indexes.settlementById.get(merchant.currentSettlementId)?.name ?? 'поселение'} в ${world.year}.${String(world.month).padStart(2, '0')}.`);
     }
@@ -498,6 +502,84 @@ function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndex
       merchant.history.push(`Ограблен на пути в ${world.year}.${String(world.month).padStart(2, '0')}.`);
     } else merchant.status = 'в пути';
     merchant.arrivalTick = tick + Math.max(1, Math.ceil(distance / 3));
+  }
+}
+
+
+export function synchronizeEmploymentLinks(world: WorldState, indexes?: WorldIndexes): void {
+  const characterById = indexes?.characterById ?? new Map(world.characters.map(character => [character.id, character]));
+  const establishmentById = indexes?.establishmentById ?? new Map(world.establishments.map(establishment => [establishment.id, establishment]));
+  const buildingById = indexes?.buildingById ?? new Map(world.buildings.map(building => [building.id, building]));
+  const servingIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
+  const travelingIds = new Set((world.travelingMerchants ?? []).map(merchant => merchant.characterId));
+  const prisonerIds = new Set((world.settlementGovernments ?? []).flatMap(government => government.prisonerIds ?? []));
+  const activeByCharacter = new Map<number, EmploymentContract>();
+  const validWorkersByEstablishment = new Map<number, Set<number>>();
+
+  const clearCharacterContract = (character: Character | undefined, contract: EmploymentContract, establishment?: Establishment): void => {
+    if (!character) return;
+    if (character.employmentContractId === contract.id) character.employmentContractId = undefined;
+    if (character.employerEstablishmentId === contract.establishmentId) character.employerEstablishmentId = undefined;
+    if (establishment && character.workplaceBuildingId === establishment.buildingId) character.workplaceBuildingId = undefined;
+  };
+
+  for (const contract of [...world.employments].sort((a, b) => a.id - b.id)) {
+    if (!contract.active) continue;
+    const character = characterById.get(contract.characterId);
+    const establishment = establishmentById.get(contract.establishmentId);
+    const building = establishment ? buildingById.get(establishment.buildingId) : undefined;
+    const unavailable = !character?.alive || !establishment?.active || !building
+      || character.settlementId !== establishment.settlementId
+      || building.settlementId !== establishment.settlementId
+      || servingIds.has(contract.characterId)
+      || travelingIds.has(contract.characterId)
+      || prisonerIds.has(contract.characterId)
+      || (character.serviceStatus !== undefined && character.serviceStatus !== 'гражданский');
+    if (unavailable || activeByCharacter.has(contract.characterId)) {
+      contract.active = false;
+      clearCharacterContract(character, contract, establishment);
+      continue;
+    }
+
+    activeByCharacter.set(contract.characterId, contract);
+    const workers = validWorkersByEstablishment.get(establishment.id) ?? new Set<number>();
+    workers.add(character.id);
+    validWorkersByEstablishment.set(establishment.id, workers);
+    character.employmentContractId = contract.id;
+    character.employerEstablishmentId = establishment.id;
+    character.workplaceBuildingId = building.id;
+    character.workplace = establishment.name;
+  }
+
+  for (const establishment of world.establishments) {
+    const valid = validWorkersByEstablishment.get(establishment.id) ?? new Set<number>();
+    for (const workerId of establishment.workerIds ?? []) {
+      const worker = characterById.get(workerId);
+      const active = activeByCharacter.get(workerId);
+      if (!worker?.alive || worker.settlementId !== establishment.settlementId || servingIds.has(workerId) || travelingIds.has(workerId) || prisonerIds.has(workerId)) continue;
+      if (!active || active.establishmentId === establishment.id) valid.add(workerId);
+    }
+    const owner = characterById.get(establishment.ownerCharacterId);
+    if (owner?.alive && owner.settlementId === establishment.settlementId && !servingIds.has(owner.id) && !travelingIds.has(owner.id) && !prisonerIds.has(owner.id)) valid.add(owner.id);
+    establishment.workerIds = [...valid].sort((a, b) => a - b);
+  }
+
+  const establishmentWorkersByBuilding = new Map<number, Set<number>>();
+  for (const establishment of world.establishments) {
+    const workers = establishmentWorkersByBuilding.get(establishment.buildingId) ?? new Set<number>();
+    establishment.workerIds.forEach(id => workers.add(id));
+    establishmentWorkersByBuilding.set(establishment.buildingId, workers);
+  }
+  for (const building of world.buildings) {
+    const valid = establishmentWorkersByBuilding.get(building.id) ?? new Set<number>();
+    for (const workerId of building.workerIds ?? []) {
+      const worker = characterById.get(workerId);
+      const active = activeByCharacter.get(workerId);
+      if (!worker?.alive || worker.settlementId !== building.settlementId || servingIds.has(workerId) || travelingIds.has(workerId) || prisonerIds.has(workerId)) continue;
+      const activeBuildingId = active ? establishmentById.get(active.establishmentId)?.buildingId : undefined;
+      if (!active || activeBuildingId === building.id) valid.add(workerId);
+    }
+    building.workerIds = [...valid].sort((a, b) => a - b);
   }
 }
 

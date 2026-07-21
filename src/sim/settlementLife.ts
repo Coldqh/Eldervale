@@ -79,7 +79,9 @@ export function advanceSettlementLife(
     const economy = economySettlementIds.has(settlement.id);
     const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
     if (!government) continue;
-    if (active || economy) {
+    const currentLeader = indexes.characterById.get(government.leaderCharacterId);
+    const missingLeader = !currentLeader?.alive || currentLeader.settlementId !== settlement.id || currentLeader.legalStatus === 'заключён';
+    if (active || economy || missingLeader) {
       updateCivicRoster(world, settlement, government, indexes);
       updateHomelessness(world, settlement, government, indexes);
       updateDistrictConditions(world, settlement, government, active ? elapsedMonths : Math.max(6, elapsedMonths), indexes);
@@ -182,6 +184,28 @@ function ensureFutureCivicProjects(world: WorldState, settlement: Settlement, rn
     const exists = world.buildings.some(item => item.settlementId === settlement.id && item.type === type)
       || world.constructionProjects.some(item => item.settlementId === settlement.id && item.buildingType === type && item.stage !== 'заброшено');
     if (!exists && rng.chance(.12)) requestConstructionProject(world, settlement, type, `поселению требуется ${definition.label}`, rng);
+  }
+}
+
+export function synchronizeSettlementGovernmentLeaders(world: WorldState, indexes: WorldIndexes): void {
+  for (const government of world.settlementGovernments) {
+    const settlement = indexes.settlementById.get(government.settlementId);
+    if (!settlement) continue;
+    const current = world.characters.find(character => character.id === government.leaderCharacterId);
+    if (current?.alive && current.settlementId === settlement.id && current.legalStatus !== 'заключён') continue;
+    const allLiving = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
+    const successor = allLiving
+      .filter(character => character.age >= 16 && character.legalStatus !== 'заключён')
+      .sort((a, b) => leadershipScore(b) - leadershipScore(a) || a.id - b.id)[0]
+      ?? allLiving.sort((a, b) => b.age - a.age || a.id - b.id)[0];
+    const previousId = government.leaderCharacterId;
+    government.leaderCharacterId = successor?.id ?? 0;
+    if (successor) {
+      successor.visualRole = successor.titles.length ? successor.visualRole ?? 'official' : 'mayor';
+      government.history.push(`В ${world.year} году ${successor.name} возглавил местное управление после выбытия руководителя ${previousId}.`);
+    } else {
+      government.activeDecision = 'поселение обезлюдело, управление не действует';
+    }
   }
 }
 

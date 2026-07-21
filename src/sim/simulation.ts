@@ -5,7 +5,7 @@ import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
 import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
-import { advanceLivingEconomy, detailedPopulationContext } from './livingEconomy';
+import { advanceLivingEconomy, detailedPopulationContext, synchronizeEmploymentLinks } from './livingEconomy';
 import { advanceMilitaryInfrastructure, applyArmyCasualties, synchronizeArmyStrength } from './militaryInfrastructure';
 import { normalizeKingdomCapitals } from './kingdomState';
 import type { WorldIndexes } from './indexes';
@@ -17,7 +17,7 @@ import { prepareMonthSchedule, worldTick } from './scheduler';
 import { advanceModernTerritories, captureTerritoryAroundSettlement } from './territory';
 import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
 import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
-import { advanceSettlementLife } from './settlementLife';
+import { advanceSettlementLife, synchronizeSettlementGovernmentLeaders } from './settlementLife';
 import { advanceStateMachine } from './stateMachine';
 import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
@@ -26,6 +26,10 @@ import { advancePhysicalArmySystem, ensureArmyOutsideSettlements, nextArmyFieldS
 import { advanceHealthSystem } from './healthSystem';
 import { releaseWarPrisoners, resolveSpatialArmyBattle } from './battleSystem';
 import { advanceCultureSystem } from './cultureSystem';
+import { advanceClimateSystem, initializeClimateSystem } from './climateSystem';
+import { advanceDailyLife, initializeDailyLife } from './dailyLife';
+import { advanceDynastyLegacy, initializeDynastyLegacy } from './dynastyLegacy';
+import { advanceRaceDemography, initializeRaceDemography } from './raceDemography';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -799,6 +803,7 @@ export interface SimulationEngine {
 
 export function createSimulationEngine(world: WorldState): SimulationEngine {
   world.simulation.performanceCoreVersion = 1;
+  synchronizeEmploymentLinks(world);
   return { world, indexes: buildWorldIndexes(world), processedTasks: 0, phaseTotals: new Map(), exactMonths: 0, coarseMonths: 0 };
 }
 
@@ -917,21 +922,111 @@ export function advanceOneMonth(
     refreshDynamicWorldIndexes(indexes, world);
   });
 
+  synchronizeSettlementGovernmentLeaders(world, indexes);
+  synchronizeEmploymentLinks(world, indexes);
+  synchronizeSettlementPopulation(engine);
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
 }
 
-export function advanceWorld(source: WorldState, months = 1): WorldState {
-  const world = structuredClone(source);
+export interface WorldSystemEngineOptions {
+  primeDailyLife?: boolean;
+}
+
+export interface WorldSystemAdvanceOptions {
+  fastForward?: boolean;
+  monthStep?: number;
+  forceCharacterIds?: readonly number[];
+  onPhase?: (phase: string) => void;
+}
+
+export function initializeWorldSystems(world: WorldState): void {
+  initializeDailyLife(world);
+  initializeDynastyLegacy(world);
+  initializeClimateSystem(world);
+  initializeRaceDemography(world);
+  synchronizeEmploymentLinks(world);
+}
+
+export function createWorldSystemEngine(
+  world: WorldState,
+  options: WorldSystemEngineOptions = {},
+): SimulationEngine {
+  initializeWorldSystems(world);
   const engine = createSimulationEngine(world);
-  const fastForward = months >= 12;
+  if (options.primeDailyLife) {
+    advanceDailyLife(
+      world,
+      new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`),
+      engine.indexes,
+      { recordEvents: false },
+    );
+  }
+  synchronizeSettlementPopulation(engine);
+  return engine;
+}
+
+export function advanceWorldSystems(
+  engine: SimulationEngine,
+  options: WorldSystemAdvanceOptions = {},
+): number {
+  const fastForward = Boolean(options.fastForward);
+  const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
+  const onPhase = options.onPhase;
+
+  advanceOneMonth(engine, onPhase, { fastForward, monthStep });
+
+  onPhase?.('Климат, сезоны и природное давление');
+  advanceClimateSystem(engine.world, { elapsedMonths: monthStep });
+
+  onPhase?.('Население, семьи и переселения');
+  advanceRaceDemography(engine.world, { elapsedMonths: monthStep, indexes: engine.indexes });
+
+  onPhase?.('Повседневная жизнь жителей');
+  advanceDailyLife(
+    engine.world,
+    new RNG(`${engine.world.config.seed}:повседневность:${engine.world.year}:${engine.world.month}`),
+    engine.indexes,
+    {
+      elapsedMonths: monthStep,
+      forceCharacterIds: [...new Set(options.forceCharacterIds ?? [])],
+    },
+  );
+
+  onPhase?.('Династии, поколения и наследие');
+  advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });
+
+  synchronizeSettlementGovernmentLeaders(engine.world, engine.indexes);
+  synchronizeEmploymentLinks(engine.world, engine.indexes);
+  synchronizeSettlementPopulation(engine);
+  return monthStep;
+}
+
+export function advanceWorldUnified(source: WorldState, months = 1): WorldState {
+  const world = structuredClone(source);
+  const engine = createWorldSystemEngine(world);
+  const totalMonths = Math.max(0, Math.floor(months));
+  const fastForward = totalMonths >= 12;
   let completed = 0;
-  while (completed < months) {
-    const monthStep = fastForward ? Math.min(months - completed, monthsToNextQuarter(engine.world.month)) : 1;
-    advanceOneMonth(engine, undefined, { fastForward, monthStep });
+  while (completed < totalMonths) {
+    const monthStep = fastForward ? Math.min(totalMonths - completed, monthsToNextQuarter(engine.world.month)) : 1;
+    advanceWorldSystems(engine, { fastForward, monthStep });
     completed += monthStep;
   }
   return world;
+}
+
+export function advanceWorld(source: WorldState, months = 1): WorldState {
+  return advanceWorldUnified(source, months);
+}
+
+function synchronizeSettlementPopulation(engine: SimulationEngine): void {
+  const livingBySettlement = new Map<number, number>();
+  for (const character of engine.world.characters) {
+    if (!character.alive) continue;
+    livingBySettlement.set(character.settlementId, (livingBySettlement.get(character.settlementId) ?? 0) + 1);
+  }
+  for (const settlement of engine.world.settlements) settlement.population = livingBySettlement.get(settlement.id) ?? 0;
 }
 
 export function monthsToNextQuarter(month: number): number {

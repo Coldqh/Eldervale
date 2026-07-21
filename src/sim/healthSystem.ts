@@ -100,7 +100,8 @@ function processPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes, 
     const parentA = indexes.characterById.get(pregnancy.parentAId);
     const parentB = indexes.characterById.get(pregnancy.parentBId);
     const gestating = indexes.characterById.get(pregnancy.gestatingParentId);
-    const settlement = indexes.settlementById.get(pregnancy.settlementId);
+    const settlement = gestating ? indexes.settlementById.get(gestating.settlementId) : undefined;
+    if (settlement) pregnancy.settlementId = settlement.id;
     if (!parentA?.alive || !parentB?.alive || !gestating?.alive || !settlement) {
       pregnancy.status = 'потеря';
       pregnancy.history.push('Беременность завершилась после смерти или исчезновения одного из родителей.');
@@ -385,15 +386,20 @@ function createCondition(
 
 function createChild(world: WorldState, rng: RNG, indexes: WorldIndexes, pregnancy: Pregnancy, parentA: Character, parentB: Character, settlement: Settlement, care: number): Character {
   const tick = worldTick(world);
+  const gestatingParent = pregnancy.gestatingParentId === parentA.id ? parentA : parentB;
+  const otherParent = gestatingParent.id === parentA.id ? parentB : parentA;
+  const residentParent = [gestatingParent, otherParent].find(parent => parent.settlementId === settlement.id && parent.householdId)
+    ?? [gestatingParent, otherParent].find(parent => parent.settlementId === settlement.id)
+    ?? gestatingParent;
   const child: Character = {
     id: world.nextIds.character++, name: personName(rng, parentA.species), sex: rng.chance(.5) ? 'female' : 'male', species: parentA.species,
     age: 0, birthYear: world.year, alive: true, settlementId: settlement.id, kingdomId: settlement.kingdomId,
     dynastyId: parentA.dynastyId ?? parentB.dynastyId, profession: 'child', workplace: 'дом семьи',
-    homeDistrict: parentA.homeDistrict ?? parentB.homeDistrict ?? settlement.districts[0]?.name, renown: 0,
+    homeDistrict: residentParent.homeDistrict ?? settlement.districts[0]?.name, renown: 0,
     health: clamp(rng.int(68, 96) + care * .05 - pregnancy.risk * .08), wealth: 0, loyalty: rng.int(35, 85), ambition: 'вырасти и найти своё место в мире',
     parentIds: [parentA.id, parentB.id], childIds: [], relationshipIds: [], titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0,
-    biography: [`Родился в ${settlement.name} в ${world.year} году.`], householdId: parentA.householdId ?? parentB.householdId,
-    homeBuildingId: parentA.homeBuildingId ?? parentB.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
+    biography: [`Родился в ${settlement.name} в ${world.year} году.`], householdId: residentParent.householdId,
+    homeBuildingId: residentParent.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
     needs: { hunger: 8, thirst: 8, rest: 12, warmth: 12, safety: 8, social: 14, lastUpdatedTick: tick },
     schedule: { wakeHour: 7, workStartHour: 0, workEndHour: 0, sleepHour: 20, restDay: 1 + (world.nextIds.character % 7), currentActivity: 'находится под опекой семьи' },
     wallet: 0, equipment: { material: 'лён и шерсть', color: 'неокрашенный', quality: 28, condition: 72, socialTier: 'обычный', equippedItemIds: {}, compact: true, lastMaintainedTick: tick },

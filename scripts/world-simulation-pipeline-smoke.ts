@@ -31,6 +31,11 @@ const manual = structuredClone(generated);
 const manualEngine = createWorldSystemEngine(manual);
 for (let month = 0; month < 6; month += 1) advanceWorldSystems(manualEngine);
 assert.deepEqual(manual, direct, 'прямой прогон и ручной вызов общего pipeline должны давать идентичный мир');
+const activeContracts = direct.employments.filter(contract => contract.active);
+const establishmentById = new Map(direct.establishments.map(establishment => [establishment.id, establishment]));
+assert.ok(activeContracts.every(contract => establishmentById.get(contract.establishmentId)?.workerIds.includes(contract.characterId)), 'каждый активный договор должен быть отражён в workerIds заведения');
+const servingIds = new Set(direct.armies.flatMap(army => army.soldierIds));
+assert.ok(activeContracts.every(contract => !servingIds.has(contract.characterId)), 'военнослужащий не должен одновременно иметь гражданский трудовой договор');
 
 const august = structuredClone(generated);
 august.month = 8;

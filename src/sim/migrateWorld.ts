@@ -11,7 +11,7 @@ import { rebuildTerritoryHistoryFromCurrent } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { ensureAllBuildingFootprints } from './spatial';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
-import { initializeLivingEconomy } from './livingEconomy';
+import { initializeLivingEconomy, synchronizeEmploymentLinks } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { initializePhysicalArmySystem } from './physicalArmy';
 import { emptyCharacterKnowledge, initializeKnowledgeSystem } from './knowledgeSystem';
@@ -302,6 +302,11 @@ export function migrateWorld(input: unknown): WorldState {
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }
   ensureSimulationRuntime(localized as WorldState);
+  synchronizeEmploymentLinks(localized as WorldState);
+  for (const settlement of localized.settlements) {
+    settlement.population = localized.characters.reduce((sum: number, character: any) =>
+      sum + Number(character.alive && character.settlementId === settlement.id), 0);
+  }
 
   localized.history.engineVersion = 2;
   localized.history.historicalSimulationVersion ??= 1;

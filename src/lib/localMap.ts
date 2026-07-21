@@ -606,7 +606,7 @@ function buildSurfaceMarkers(
   }
 
   const presentMerchants = settlement ? (world.travelingMerchants ?? []).filter(merchant => merchant.currentSettlementId === settlement.id && merchant.status !== 'в пути') : [];
-  const merchantCharacterIds = new Set(presentMerchants.map(merchant => merchant.characterId));
+  const merchantCharacterIds = new Set((world.travelingMerchants ?? []).map(merchant => merchant.characterId));
   const armyCharacterIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
   const activePatrols = settlement
     ? (world.civicPatrols ?? []).filter(item => item.settlementId === settlement.id && item.status === 'патрулирует' && item.guardIds.length)
