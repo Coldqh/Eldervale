@@ -160,6 +160,10 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   const availableDesks = fixtures.filter(item => item.functional && item.kind === 'student-desk').reduce((sum, item) => sum + item.capacity, 0);
   const availableWorkstations = fixtures.filter(item => item.functional && isWorkstation(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
   const highestFloor = Math.max(0, ...rooms.map(room => room.floor), ...fixtures.map(fixture => fixture.floor));
+  const requiredFloorCount = highestFloor + 1;
+  // План не может ссылаться на этаж, которого нет у здания. Это последняя
+  // страховка после размещения обязательной мебели и декоративного ядра.
+  if (building.floors < requiredFloorCount) building.floors = requiredFloorCount;
   const warnings: string[] = [];
   if (availableBeds < demand.sleepers.length) warnings.push(`спальных мест ${availableBeds}/${demand.sleepers.length}`);
   if (availableDesks < demand.students.length) warnings.push(`парт ${availableDesks}/${demand.students.length}`);
@@ -628,6 +632,23 @@ function normalizeBuildingOccupancy(world: WorldState): void {
       if (character?.alive && character.settlementId === building.settlementId && !character.workplaceBuildingId) character.workplaceBuildingId = building.id;
     }
   }
+
+  // Трудовой договор — источник истины для рабочего места. Старые миры и
+  // миграции могли сохранить активный контракт, но потерять workerIds.
+  for (const contract of [...world.employments].filter(item => item.active).sort((a, b) => a.id - b.id)) {
+    const character = characterById.get(contract.characterId);
+    const establishment = establishmentById.get(contract.establishmentId);
+    const workplace = establishment ? buildingById.get(establishment.buildingId) : undefined;
+    if (!character?.alive || !establishment || !workplace) continue;
+    if (character.settlementId !== establishment.settlementId || workplace.settlementId !== establishment.settlementId) continue;
+    character.employmentContractId ??= contract.id;
+    character.employerEstablishmentId ??= establishment.id;
+    character.workplaceBuildingId ??= workplace.id;
+    if (!establishment.workerIds.includes(character.id)) establishment.workerIds.push(character.id);
+    if (!workplace.workerIds.includes(character.id)) workplace.workerIds.push(character.id);
+  }
+  for (const establishment of world.establishments) establishment.workerIds = [...new Set(establishment.workerIds)].sort((a, b) => a - b);
+  for (const building of world.buildings) building.workerIds = [...new Set(building.workerIds)].sort((a, b) => a - b);
 
   for (const character of world.characters.filter(item => item.alive)) {
     const household = character.householdId ? householdById.get(character.householdId) : undefined;

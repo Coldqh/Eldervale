@@ -80,7 +80,24 @@ const world = {
   nextIds: { relationship: 1, personalLifeEvent: 1 },
 } as unknown as WorldState;
 
+// Регрессия: активные договоры не должны теряться из workerIds.
+school.workerIds = [];
+forge.workerIds = [];
+world.establishments[0]!.workerIds = [];
+world.establishments[1]!.workerIds = [];
+teacher.employmentContractId = 1;
+smith.employmentContractId = 2;
+
 initializeDailyLife(world);
+
+assert.ok(world.establishments[0]!.workerIds.includes(teacher.id), 'активный договор учителя должен восстановить workerIds школы');
+assert.ok(world.establishments[1]!.workerIds.includes(smith.id), 'активный договор кузнеца должен восстановить workerIds кузницы');
+assert.ok(school.workerIds.includes(teacher.id), 'учитель должен быть записан работником здания школы');
+assert.ok(forge.workerIds.includes(smith.id), 'кузнец должен быть записан работником здания кузницы');
+for (const contract of world.employments.filter(item => item.active)) {
+  const establishment = world.establishments.find(item => item.id === contract.establishmentId);
+  assert.ok(establishment?.workerIds.includes(contract.characterId), 'каждый активный договор должен быть отражён в workerIds заведения');
+}
 
 const housePlan = interiorPlanForBuilding(world, house);
 assert.equal(housePlan.requiredBeds, 6, 'у каждого жителя дома должно быть своё спальное место');
@@ -106,6 +123,8 @@ for (const fixture of ['throne', 'carpet-runner', 'banner', 'tapestry', 'firepla
   assert.ok(castlePlan.fixtures.some(item => item.kind === fixture), `замку не хватает узнаваемого объекта: ${fixture}`);
 }
 assert.match(castlePlan.materials.wall, /кам/i, 'замок должен иметь каменные материалы');
+assert.ok(castlePlan.fixtures.every(item => item.floor >= 0 && item.floor < castle.floors), 'вся мебель замка должна находиться на существующих этажах');
+assert.ok(castlePlan.rooms.every(item => item.floor >= 0 && item.floor < castle.floors), 'все комнаты замка должны находиться на существующих этажах');
 
 const studentDesk = interiorPositionForCharacter(world, studentA, school, 'school')!;
 const studentRoutine = routineForCharacter(world, studentA);
