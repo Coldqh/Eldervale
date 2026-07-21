@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import type { Building, Character, LocalMapData, LocalMarker, WorldState } from '../src/types';
 import { applyDailyLifePhaseToMap, initializeDailyLife, routineForCharacter } from '../src/sim/dailyLife';
 import {
-  interiorIntegrityIssues, interiorPlanForBuilding, interiorPositionForCharacter,
-  isSchoolAgeCharacter, schoolBuildingForCharacter,
+  ensureInteriorCapacity, interiorIntegrityIssues, interiorPlanForBuilding, interiorPositionForCharacter,
+  isSchoolAgeCharacter, operationalSchoolCapacity, operationalWorkerIds, schoolBuildingForCharacter,
 } from '../src/sim/interiors';
+import { generateLocalMap } from '../src/lib/localMap';
 
 const SIZE = 64;
 
@@ -50,7 +51,7 @@ const ruler = person(7, 'Король Эрдан', 46, 'ruler', 4);
 ruler.titles = ['Правитель'];
 
 const world = {
-  version: 23, language: 'ru', appVersion: '4.2.2',
+  version: 23, language: 'ru', appVersion: '4.2.3',
   config: { seed: 'deep-interiors-smoke', width: 1, height: 1, historyYears: 90, kingdomCount: 1, settlementCount: 1, populationScale: 1, magic: .5, warlike: .2, monsterDensity: .1, artifactDensity: .1, localMapSize: SIZE, ecologyDensity: .1, huntingPressure: 1 },
   name: 'Проверка интерьеров', year: 90, month: 6,
   tiles: [{ x: 0, y: 0, terrain: 'plains', elevation: .5, moisture: .5, kingdomId: 1, settlementId: 1, settlementDistrict: 'Центр' }],
@@ -125,6 +126,45 @@ for (const fixture of ['throne', 'carpet-runner', 'banner', 'tapestry', 'firepla
 assert.match(castlePlan.materials.wall, /кам/i, 'замок должен иметь каменные материалы');
 assert.ok(castlePlan.fixtures.every(item => item.floor >= 0 && item.floor < castle.floors), 'вся мебель замка должна находиться на существующих этажах');
 assert.ok(castlePlan.rooms.every(item => item.floor >= 0 && item.floor < castle.floors), 'все комнаты замка должны находиться на существующих этажах');
+
+assert.equal(castlePlan.floorCount, castle.floors, 'постоянный интерьер должен знать реальное число этажей');
+assert.ok(castlePlan.stairs.some(item => item.floor === 0 && item.direction === 'up'), 'с первого этажа замка должна вести лестница наверх');
+assert.ok(castlePlan.stairs.some(item => item.floor === 1 && item.direction === 'down'), 'со второго этажа замка должна вести лестница вниз');
+const upperMap = applyDailyLifePhaseToMap(world, generateLocalMap(world, 0, 0, 1), 'day');
+assert.equal(upperMap.level, 1, 'локальная карта должна открывать второй этаж');
+assert.ok(upperMap.availableLevels.includes(1), 'второй этаж должен быть доступен в переключателе уровней');
+assert.ok(upperMap.cells.some(cell => cell.buildingId === castle.id && !cell.blocked), 'второй этаж замка должен иметь проходимые клетки');
+assert.ok(upperMap.cells.some(cell => cell.buildingId === castle.id && cell.feature === 'stairs-down'), 'на втором этаже должна отображаться лестница вниз');
+
+assert.ok(operationalWorkerIds(world, forge.id).has(smith.id), 'исправная наковальня должна допускать кузнеца к производству');
+const smithFixture = forgePlan.fixtures.find(item => item.id === smithStation!.fixtureId)!;
+smithFixture.condition = 0;
+smithFixture.functional = false;
+assert.ok(!operationalWorkerIds(world, forge.id).has(smith.id), 'сломанное рабочее место должно останавливать работу кузнеца');
+smithFixture.condition = 92;
+smithFixture.functional = true;
+
+assert.equal(operationalSchoolCapacity(world, school), 2, 'работающий класс с учителем должен обучать двух учеников');
+const teacherAssignment = schoolPlan.assignments.find(item => item.characterId === teacher.id && item.kind === 'work')!;
+const teacherDesk = schoolPlan.fixtures.find(item => item.id === teacherAssignment.fixtureId)!;
+teacherDesk.condition = 0;
+teacherDesk.functional = false;
+assert.equal(operationalSchoolCapacity(world, school), 0, 'без исправного учительского места класс не должен работать');
+teacherDesk.condition = 92;
+teacherDesk.functional = true;
+
+const floorsBeforeCrowding = house.floors;
+for (let index = 0; index < 28; index += 1) {
+  const resident = person(100 + index, `Житель ${index + 1}`, 20 + index % 20, 'farmer', house.id);
+  resident.householdId = 1;
+  world.characters.push(resident);
+  world.households[0]!.memberIds.push(resident.id);
+}
+ensureInteriorCapacity(world);
+const crowdedPlan = interiorPlanForBuilding(world, house);
+assert.equal(house.floors, floorsBeforeCrowding, 'перенаселение не должно создавать этаж из воздуха');
+assert.ok(crowdedPlan.unassignedSleeperIds.length > 0 || crowdedPlan.fixtures.some(item => item.kind === 'floor-pallet'), 'при тесноте должны появляться временные постели или реальная нехватка мест');
+
 
 const studentDesk = interiorPositionForCharacter(world, studentA, school, 'school')!;
 const studentRoutine = routineForCharacter(world, studentA);

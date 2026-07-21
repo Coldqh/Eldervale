@@ -90,13 +90,13 @@ export function personalEventsForCharacter(world: WorldState, characterId: numbe
 }
 
 export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, phase: DayPhase): LocalMapData {
-  if (map.level !== 0) return map;
+  if (map.level < 0) return map;
   map = applyInteriorLayoutToMap(world, map);
   const furniture = interiorMarkersForMap(world, map);
   const tile = world.tiles[map.globalY * world.config.width + map.globalX]
     ?? world.tiles.find(item => item.x === map.globalX && item.y === map.globalY);
   const settlement = tile?.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
-  if (!settlement) return map;
+  if (!settlement) return { ...map, markers: [...map.markers, ...furniture] };
 
   const fixedMarkers = map.markers.filter(marker => {
     if (marker.kind !== 'person') return true;
@@ -105,8 +105,6 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
   const physicalOccupants = new Set<LocalMarker['kind']>(['person', 'patrol', 'army', 'monster', 'corpse', 'merchant', 'group']);
   const occupied = new Set<string>();
   for (const marker of fixedMarkers) {
-    // Мебель и рабочие места должны делить клетку с человеком, который ими пользуется.
-    // Блокируем только других существ и физические группы.
     if (!physicalOccupants.has(marker.kind)) continue;
     const width = marker.footprintWidth ?? 1;
     const height = marker.footprintHeight ?? 1;
@@ -124,10 +122,11 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
     const stop = routineStopForCharacter(world, character, phase);
     if (stop.globalX !== map.globalX || stop.globalY !== map.globalY) continue;
     if (stop.buildingId) {
+      if ((stop.interiorFloor ?? 0) !== map.level) continue;
       const group = buildingGroups.get(stop.buildingId) ?? [];
       group.push({ character, stop });
       buildingGroups.set(stop.buildingId, group);
-    } else outdoor.push({ character, stop });
+    } else if (map.level === 0) outdoor.push({ character, stop });
   }
 
   const people: LocalMarker[] = [];
@@ -137,41 +136,35 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
   }
 
   for (const [buildingId, entries] of [...buildingGroups].sort((a, b) => a[0] - b[0])) {
-    const building = world.buildings.find(item => item.id === buildingId && item.globalX === map.globalX && item.globalY === map.globalY);
+    const building = world.buildings.find(item => item.id === buildingId && item.globalX === map.globalX && item.globalY === map.globalY && item.floors > map.level);
     if (!building) continue;
     const ordered = [...entries].sort((a, b) => a.character.id - b.character.id);
-    const groundEntries = ordered.filter(entry => (entry.stop.interiorFloor ?? 0) === 0);
-    const upperEntries = ordered.filter(entry => (entry.stop.interiorFloor ?? 0) > 0);
     const interiorCount = map.cells.filter(cell => cell.buildingId === buildingId && !cell.blocked && cell.ground !== 'water').length;
     if (!interiorCount) continue;
-
     const visibleLimit = Math.min(interiorCount, visiblePeopleLimit(building));
-    const reserveGroupCell = groundEntries.length > visibleLimit || upperEntries.length > 0 ? 1 : 0;
+    const reserveGroupCell = ordered.length > visibleLimit ? 1 : 0;
     const individualLimit = Math.max(0, Math.min(visibleLimit, interiorCount - reserveGroupCell));
     let placed = 0;
-    for (const entry of groundEntries.slice(0, individualLimit)) {
+    for (const entry of ordered.slice(0, individualLimit)) {
       const point = claimInsideBuilding(
         map, buildingId, entry.stop.localX, entry.stop.localY, occupied,
-        `${world.config.seed}:внутри:${buildingId}:${entry.character.id}:${phase}:${world.year}:${world.month}`,
+        `${world.config.seed}:внутри:${buildingId}:${map.level}:${entry.character.id}:${phase}:${world.year}:${world.month}`,
       );
       if (!point) break;
       people.push(personMarker(world, entry.character, entry.stop, point));
       placed += 1;
     }
-
-    const hidden = groundEntries.length - placed + upperEntries.length;
+    const hidden = ordered.length - placed;
     if (hidden > 0) {
       const groupPoint = claimInsideBuilding(
         map, buildingId, building.localX + Math.floor(building.localWidth / 2), building.localY + Math.floor(building.localHeight / 2), occupied,
-        `${world.config.seed}:группа-внутри:${buildingId}:${phase}:${world.year}:${world.month}`,
+        `${world.config.seed}:группа-внутри:${buildingId}:${map.level}:${phase}:${world.year}:${world.month}`,
       );
       if (groupPoint) people.push({
-        id: `indoor-group-${buildingId}-${phase}`, x: groupPoint.x, y: groupPoint.y, kind: 'group',
+        id: map.level === 0 ? `indoor-group-${buildingId}-${phase}` : `indoor-group-${buildingId}-${map.level}-${phase}`, x: groupPoint.x, y: groupPoint.y, kind: 'group',
         label: `${building.name}: ещё ${hidden}`, count: hidden,
-        refs: [...groundEntries.slice(placed), ...upperEntries].slice(0, 12).map(entry => ({ kind: 'character' as const, id: entry.character.id })),
-        detail: upperEntries.length
-          ? `${upperEntries.length} жителей находятся на верхних этажах, ещё ${Math.max(0, groundEntries.length - placed)} скрыты масштабом.`
-          : `${hidden} жителей находятся внутри · ${groundEntries[0]?.stop.activity ?? 'заняты делами'}`,
+        refs: ordered.slice(placed).slice(0, 12).map(entry => ({ kind: 'character' as const, id: entry.character.id })),
+        detail: `${hidden} жителей находятся на этом этаже · ${ordered[0]?.stop.activity ?? 'заняты делами'}`,
         visualRole: building.type,
       });
     }
@@ -353,8 +346,13 @@ function stopAtBuilding(
   const placeLabel = interior
     ? `${building.name} · ${interior.roomName} · ${interior.fixtureLabel}${interior.floor ? ` · этаж ${interior.floor + 1}` : ''}`
     : building.name;
+  const resolvedActivity = interior ? activity
+    : placeKind === 'school' ? 'не получил место в классе и ждёт свободную парту'
+      : phase === 'day' && (placeKind === 'work' || placeKind === 'barracks') ? 'не может начать работу: нет свободного рабочего места'
+        : phase === 'night' && (placeKind === 'home' || placeKind === 'barracks') ? 'спит без нормального спального места'
+          : activity;
   return {
-    phase, activity, placeKind, placeLabel, settlementId: character.settlementId,
+    phase, activity: resolvedActivity, placeKind, placeLabel, settlementId: character.settlementId,
     globalX: building.globalX, globalY: building.globalY, localX: interior?.x ?? fallbackX, localY: interior?.y ?? fallbackY,
     buildingId: building.id, establishmentId: building.establishmentId,
     interiorFloor: interior?.floor,
@@ -412,7 +410,7 @@ function createRoutineEvents(world: WorldState, rng: RNG, indexes: WorldIndexes,
       addPersonalEvent(world, character.id, [], 'evening', 'need', `${character.name} остался голодным`, 'Денег или запасов не хватило на нормальную вечернюю еду.', character.settlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 1);
       continue;
     }
-    if (day.placeKind === 'work' && roll < Math.min(55, 13 * elapsedMonths)) {
+    if (day.placeKind === 'work' && day.interiorFixtureId && roll < Math.min(55, 13 * elapsedMonths)) {
       const skill = character.skills[character.profession] ?? 0;
       character.skills[character.profession] = Math.min(100, Math.round((skill + .2 + rng.next() * .6) * 100) / 100);
       addPersonalEvent(world, character.id, [], 'day', 'work', `${character.name} хорошо справился с работой`, `${day.activity}. Навык постепенно вырос.`, character.settlementId, day.buildingId ? [{ kind: 'building', id: day.buildingId }] : [], 0);

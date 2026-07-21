@@ -30,6 +30,7 @@ import { advanceClimateSystem, initializeClimateSystem } from './climateSystem';
 import { advanceDailyLife, initializeDailyLife } from './dailyLife';
 import { advanceDynastyLegacy, initializeDynastyLegacy } from './dynastyLegacy';
 import { advanceRaceDemography, initializeRaceDemography } from './raceDemography';
+import { applyInteriorMonthlyEffects, interiorExpansionNeeds } from './interiors';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -992,6 +993,23 @@ export function advanceWorldSystems(
       forceCharacterIds: [...new Set(options.forceCharacterIds ?? [])],
     },
   );
+
+  onPhase?.('Физические интерьеры, сон и износ мебели');
+  applyInteriorMonthlyEffects(engine.world, monthStep);
+  for (const need of interiorExpansionNeeds(engine.world)) {
+    const settlement = engine.indexes.settlementById.get(need.settlementId);
+    if (!settlement || settlement.prosperity < 18) continue;
+    requestConstructionProject(
+      engine.world,
+      settlement,
+      need.requestedType,
+      need.reason,
+      new RNG(`${engine.world.config.seed}:интерьер-расширение:${need.buildingId}:${engine.world.year}:${engine.world.month}`),
+    );
+    const building = engine.indexes.buildingById.get(need.buildingId);
+    const note = `В ${engine.world.year}.${String(engine.world.month).padStart(2, '0')} выявлен дефицит интерьера: ${need.shortage} мест.`;
+    if (building && !building.history.includes(note)) building.history.push(note);
+  }
 
   onPhase?.('Династии, поколения и наследие');
   advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });

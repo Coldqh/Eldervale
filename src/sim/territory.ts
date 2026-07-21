@@ -280,16 +280,30 @@ function claim(
   sourceSettlementId?: number,
   allowSameOwner = false,
 ): boolean {
-  const previousKingdomId = tile.kingdomId;
+  const normalizedMonth = Math.max(1, Math.min(12, Math.floor(month)));
+  let previousAtMoment: TerritoryChange | undefined;
+  let latestOverall: TerritoryChange | undefined;
+  for (const existing of world.territoryHistory) {
+    if (existing.x !== tile.x || existing.y !== tile.y) continue;
+    if (!latestOverall || territoryChangeOrder(existing, latestOverall) > 0) latestOverall = existing;
+    const beforeOrAtMoment = existing.year < year || existing.year === year && existing.month <= normalizedMonth;
+    if (beforeOrAtMoment && (!previousAtMoment || territoryChangeOrder(existing, previousAtMoment) > 0)) previousAtMoment = existing;
+  }
+  const previousKingdomId = previousAtMoment?.kingdomId;
   if (!allowSameOwner && previousKingdomId === kingdomId) return false;
-  tile.kingdomId = kingdomId;
-  tile.controlledSinceYear = year;
   const change: TerritoryChange = {
-    id: world.nextIds.territoryChange++, year, month, x: tile.x, y: tile.y, kingdomId, previousKingdomId,
+    id: world.nextIds.territoryChange++, year, month: normalizedMonth, x: tile.x, y: tile.y, kingdomId, previousKingdomId,
     sourceSettlementId, reason,
   };
   world.territoryHistory.push(change);
+  if (!latestOverall || territoryChangeOrder(change, latestOverall) > 0) latestOverall = change;
+  tile.kingdomId = latestOverall.kingdomId;
+  tile.controlledSinceYear = latestOverall.year;
   return true;
+}
+
+function territoryChangeOrder(a: TerritoryChange, b: TerritoryChange): number {
+  return a.year - b.year || a.month - b.month || a.id - b.id;
 }
 
 function frontierTiles(world: WorldState, owned: Set<string>): Tile[] {

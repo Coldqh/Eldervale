@@ -29,9 +29,14 @@ export function generateLocalMap(world: WorldState, globalX: number, globalY: nu
   const tile = tileAt(world, globalX, globalY);
   if (!tile) throw new Error('Такого квадрата нет на карте мира.');
   const dungeon = world.dungeons.find(item => item.x === globalX && item.y === globalY);
-  const availableLevels = [0, ...Array.from({ length: dungeon?.depth ?? 0 }, (_, index) => -(index + 1))];
+  const maxBuildingFloor = Math.max(1, ...world.buildings
+    .filter(building => building.globalX === globalX && building.globalY === globalY)
+    .map(building => building.floors));
+  const upperLevels = Array.from({ length: Math.max(0, maxBuildingFloor - 1) }, (_, index) => index + 1);
+  const availableLevels = [0, ...upperLevels, ...Array.from({ length: dungeon?.depth ?? 0 }, (_, index) => -(index + 1))];
   const safeLevel = availableLevels.includes(level) ? level : 0;
   if (safeLevel < 0) return generateDungeonLevel(world, tile, safeLevel, availableLevels);
+  if (safeLevel > 0) return generateBuildingFloor(world, tile, safeLevel, availableLevels);
   return generateSurface(world, tile, availableLevels);
 }
 
@@ -64,6 +69,46 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
   return {
     key: localMapKey(tile.x, tile.y), globalX: tile.x, globalY: tile.y, level: 0, width, height, title,
     subtitle: subtitleParts.join(' · '), terrain: tile.terrain, cells, markers, exits, availableLevels,
+  };
+}
+
+function generateBuildingFloor(world: WorldState, tile: Tile, level: number, availableLevels: number[]): LocalMapData {
+  const width = localMapSize(world);
+  const height = width;
+  const cells: LocalCell[] = Array.from({ length: width * height }, (_, index) => ({
+    x: index % width,
+    y: Math.floor(index / width),
+    ground: 'ash' as LocalGround,
+    blocked: true,
+  }));
+  const buildings = world.buildings.filter(building => building.globalX === tile.x && building.globalY === tile.y && building.floors > level);
+  for (const building of buildings) {
+    const rect = buildingRect(building);
+    for (let y = rect.y; y < rect.y + rect.height; y += 1) for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+      const boundary = x === rect.x || y === rect.y || x === rect.x + rect.width - 1 || y === rect.y + rect.height - 1;
+      const cell = cells[y * width + x];
+      if (!cell) continue;
+      cell.buildingId = building.id;
+      cell.ground = boundary ? 'stone' : 'floor';
+      cell.feature = boundary ? 'wall' : undefined;
+      cell.blocked = boundary;
+    }
+  }
+  const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
+  return {
+    key: localMapKey(tile.x, tile.y, level),
+    globalX: tile.x,
+    globalY: tile.y,
+    level,
+    width,
+    height,
+    title: `${settlement?.name ?? terrainTitles[tile.terrain]} · этаж ${level + 1}`,
+    subtitle: `${buildings.length} зданий имеют этот этаж`,
+    terrain: tile.terrain,
+    cells,
+    markers: [],
+    exits: [],
+    availableLevels,
   };
 }
 

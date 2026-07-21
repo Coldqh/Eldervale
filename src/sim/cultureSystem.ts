@@ -8,6 +8,7 @@ import { residents } from './indexes';
 import { registerWorldEventKnowledge } from './knowledgeSystem';
 import { RNG } from './rng';
 import { worldTick } from './scheduler';
+import { hasOperationalInteriorAssignment, operationalSchoolCapacity, schoolBuildingForCharacter } from './interiors';
 
 const traditionsBySpecies: Record<Character['species'], string[]> = {
   human: ['ярмарки в день урожая', 'общественные клятвы перед свидетелями', 'поминовение основателей поселений', 'состязания ремесленных гильдий'],
@@ -119,7 +120,7 @@ function seedDefinitions(world: WorldState, rng: RNG): void {
 
 function settlementCapacities(world: WorldState, settlement: Settlement): { school: number; temple: number } {
   const buildings = world.buildings.filter(building => building.settlementId === settlement.id);
-  const school = buildings.filter(building => building.type === 'school').reduce((sum, building) => sum + building.capacity, 0)
+  const school = buildings.filter(building => building.type === 'school').reduce((sum, building) => sum + operationalSchoolCapacity(world, building), 0)
     + settlement.buildings.filter(name => /школ|академ|библиотек/i.test(name)).length * 45;
   const temple = buildings.filter(building => building.type === 'temple' || building.type === 'monastery').reduce((sum, building) => sum + building.capacity, 0)
     + settlement.buildings.filter(name => /храм|собор|часовн|монастыр/i.test(name)).length * 55;
@@ -308,7 +309,9 @@ export function advanceCultureSystem(world: WorldState, rng: RNG, indexes: World
     for (const character of candidates) {
       if (!character.cultureProfile) character.cultureProfile = profileFor(world, character, rng);
       const profile = character.cultureProfile;
-      if (character.age >= 6 && character.age <= 18 && state.educationAccess > 12) {
+      const school = schoolBuildingForCharacter(world, character);
+      const hasSeat = school ? hasOperationalInteriorAssignment(world, character.id, school.id, 'school') : false;
+      if (character.age >= 6 && character.age <= 18 && state.educationAccess > 12 && hasSeat) {
         profile.literacy = clamp(profile.literacy + Math.max(1, state.educationAccess / 24));
         profile.education = educationFor(character, profile.literacy);
       }

@@ -73,11 +73,11 @@ export function LocalMapViewer({ world, globalX, globalY, initialLevel = 0, onMo
         <div><span className="eyebrow">Локальная карта квадрата {globalX}:{globalY}</span><h1>{map.title}</h1><p>{map.subtitle}</p><small className="local-day-summary">{dayPhaseLabel(phase)} · жители перемещены по распорядку</small></div>
       </div>
       <div className="local-map-header-actions">
-        {level === 0 && <div className="daily-phase-tabs" aria-label="Время суток">
+        {level >= 0 && <div className="daily-phase-tabs" aria-label="Время суток">
           {DAY_PHASES.map(item => <button key={item} className={phase === item ? 'active' : ''} onClick={() => setPhase(item)}>{dayPhaseLabel(item)}</button>)}
         </div>}
         <div className="local-levels" aria-label="Уровни местности">
-          {map.availableLevels.map(item => <button key={item} className={level === item ? 'active' : ''} onClick={() => setLevel(item)}>{item === 0 ? 'Поверхность' : `Подземный ${Math.abs(item)}`}</button>)}
+          {map.availableLevels.map(item => <button key={item} className={level === item ? 'active' : ''} onClick={() => setLevel(item)}>{item === 0 ? 'Улица / 1 этаж' : item > 0 ? `Этаж ${item + 1}` : `Подземный ${Math.abs(item)}`}</button>)}
         </div>
         <button className="ghost-button" onClick={onBack}>Глобальная карта</button>
       </div>

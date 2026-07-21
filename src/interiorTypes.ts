@@ -8,14 +8,14 @@ export type InteriorRoomKind =
   | 'sanctuary' | 'vestry' | 'ward' | 'apothecary' | 'cell' | 'mess-hall' | 'stable';
 
 export type InteriorFixtureKind =
-  | 'bed' | 'double-bed' | 'bunk-bed' | 'prison-bed' | 'treatment-bed'
+  | 'bed' | 'double-bed' | 'bunk-bed' | 'prison-bed' | 'treatment-bed' | 'floor-pallet'
   | 'student-desk' | 'teacher-desk' | 'writing-desk'
   | 'workbench' | 'anvil' | 'forge' | 'loom' | 'oven' | 'counter' | 'market-stall'
   | 'table' | 'chair' | 'bench' | 'bar-counter' | 'kitchen-table'
   | 'shelf' | 'bookcase' | 'chest' | 'barrel' | 'crate' | 'weapon-rack'
   | 'hearth' | 'fireplace' | 'cauldron' | 'wash-basin'
   | 'rug' | 'carpet-runner' | 'banner' | 'tapestry' | 'throne' | 'altar'
-  | 'training-dummy' | 'guard-post' | 'lectern' | 'wardrobe' | 'partition';
+  | 'training-dummy' | 'guard-post' | 'lectern' | 'wardrobe' | 'partition' | 'staircase';
 
 export type InteriorAssignmentKind = 'sleep' | 'school' | 'work' | 'seat' | 'treatment' | 'prison';
 
@@ -58,6 +58,22 @@ export interface InteriorFixture {
   assignedCharacterIds: number[];
   functional: boolean;
   material: string;
+  condition: number;
+  maxCondition: number;
+  temporary?: boolean;
+  blocked?: boolean;
+  lastMaintainedTick?: number;
+}
+
+
+export interface InteriorStair {
+  id: string;
+  buildingId: number;
+  floor: number;
+  x: number;
+  y: number;
+  direction: 'up' | 'down';
+  connectedFloor: number;
 }
 
 export interface InteriorAssignment {
@@ -73,12 +89,16 @@ export interface InteriorAssignment {
 }
 
 export interface BuildingInteriorPlan {
+  version: 2;
+  generatedTick: number;
+  floorCount: number;
   buildingId: number;
   signature: string;
   materials: InteriorMaterialProfile;
   rooms: InteriorRoom[];
   fixtures: InteriorFixture[];
   assignments: InteriorAssignment[];
+  stairs: InteriorStair[];
   requiredBeds: number;
   availableBeds: number;
   requiredDesks: number;
@@ -86,5 +106,8 @@ export interface BuildingInteriorPlan {
   requiredWorkstations: number;
   availableWorkstations: number;
   overflowFloors: number;
+  unassignedSleeperIds: number[];
+  unassignedStudentIds: number[];
+  unassignedWorkerIds: number[];
   warnings: string[];
 }

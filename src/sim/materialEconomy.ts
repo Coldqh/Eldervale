@@ -8,6 +8,7 @@ import { appendCausalEvent } from './causality';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { assignBuildingFootprint, buildingDimensions } from './spatial';
+import { operationalWorkerIds } from './interiors';
 
 interface ItemTemplate {
   id: string;
@@ -986,15 +987,20 @@ function canRunRecipe(world: WorldState, establishment: Establishment, recipe: P
   return true;
 }
 
-function workerSkill(world: WorldState, establishment: Establishment, profession: string): { average: number; masterId?: number } {
-  const workers = establishment.workerIds.map(id => activeRuntime?.characterById.get(id) ?? world.characters.find(character => character.id === id)).filter((character): character is Character => Boolean(character?.alive));
-  if (!workers.length) return { average: 0 };
+function workerSkill(world: WorldState, establishment: Establishment, profession: string): { average: number; masterId?: number; workerCount: number } {
+  const operational = operationalWorkerIds(world, establishment.buildingId);
+  const workers = establishment.workerIds
+    .filter(id => operational.has(id))
+    .map(id => activeRuntime?.characterById.get(id) ?? world.characters.find(character => character.id === id))
+    .filter((character): character is Character => Boolean(character?.alive));
+  if (!workers.length) return { average: 0, workerCount: 0 };
   const sorted = workers.map(character => ({ character, skill: character.skills[profession] ?? character.skills[character.profession] ?? 8 })).sort((a, b) => b.skill - a.skill);
-  return { average: sorted.reduce((sum, item) => sum + item.skill, 0) / sorted.length, masterId: sorted[0]?.character.id };
+  return { average: sorted.reduce((sum, item) => sum + item.skill, 0) / sorted.length, masterId: sorted[0]?.character.id, workerCount: workers.length };
 }
 
-function productionRuns(world: WorldState, establishment: Establishment, recipe: ProductionRecipe, skill: number, elapsedMonths: number): number {
-  const workerFactor = Math.max(1, establishment.workerIds.length);
+function productionRuns(world: WorldState, establishment: Establishment, recipe: ProductionRecipe, skill: number, elapsedMonths: number, operationalWorkers: number): number {
+  const workerFactor = operationalWorkers;
+  if (workerFactor <= 0) return 0;
   let possible = Math.max(1, Math.floor(workerFactor * (18 + skill) / Math.max(12, recipe.laborHours * 2))) * elapsedMonths;
   for (const input of recipe.inputs) possible = Math.min(possible, Math.floor(quantityOf(world, establishment.inventoryItemIds, input.templateId) / input.quantity));
   if (recipe.category === 'добыча') possible = Math.min(possible, (3 + Math.floor(workerFactor / 2)) * elapsedMonths);
@@ -1037,7 +1043,7 @@ function runProduction(world: WorldState, establishment: Establishment, rng: RNG
     const requiredTools = PRODUCTION_TOOL_IDS[recipe.profession];
     const tool = productionTool(world, establishment, recipe.profession);
     if (requiredTools?.length && !tool) continue;
-    let runs = productionRuns(world, establishment, recipe, skill.average, elapsedMonths);
+    let runs = productionRuns(world, establishment, recipe, skill.average, elapsedMonths, skill.workerCount);
     if (tool) runs = Math.floor(runs * Math.max(.35, Math.min(1.2, .45 + tool.condition / 130 + tool.quality / 500)));
     if (recipe.category === 'добыча') {
       const crop = recipe.name.includes('урожая') || recipe.name.includes('овощ');

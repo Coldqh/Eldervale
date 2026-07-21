@@ -1,15 +1,17 @@
 import type { Building, Character, LocalCell, LocalMapData, LocalMarker, WorldState } from '../types';
 import type {
   BuildingInteriorPlan, InteriorAssignment, InteriorAssignmentKind, InteriorFixture, InteriorFixtureKind,
-  InteriorMaterialProfile, InteriorRoom, InteriorRoomKind,
+  InteriorMaterialProfile, InteriorRoom, InteriorRoomKind, InteriorStair,
 } from '../interiorTypes';
-import { hashSeed } from './rng';
+import { hashSeed, RNG } from './rng';
+import { worldTick } from './scheduler';
 import { raceDefinition } from '../raceCatalog';
 
 const PLAN_CACHE = new WeakMap<WorldState, Map<number, BuildingInteriorPlan>>();
 const INITIALIZED_WORLDS = new WeakSet<WorldState>();
 const MAX_RENDERED_FIXTURES_PER_BUILDING = 150;
 const ROOMS_PER_FLOOR = 4;
+const INTERIOR_VERSION = 2 as const;
 
 type Demand = {
   sleepers: Character[];
@@ -40,27 +42,8 @@ export function initializeInteriorSystem(world: WorldState): void {
 
 export function ensureInteriorCapacity(world: WorldState): void {
   normalizeBuildingOccupancy(world);
-  for (const building of world.buildings) {
-    const demand = collectDemand(world, building);
-    const requests = roomRequests(building, demand);
-    const innerWidth = Math.max(2, building.localWidth - 2);
-    const innerHeight = Math.max(2, building.localHeight - 2);
-    const usablePoints = Math.max(4, Math.floor(innerWidth * innerHeight * .62));
-    const requiredCells = demand.sleepers.length * 2 + demand.students.length + demand.workers.length * 2
-      + demand.prisoners.length * 2 + demand.patients.length * 2 + baseFunctionalFixtureCount(building) * 2;
-    const roomFloors = Math.ceil(requests.reduce((sum, request) => sum + request.count, 0) / ROOMS_PER_FLOOR);
-    const fixtureFloors = Math.ceil(requiredCells / usablePoints);
-    const requiredFloors = Math.max(1, roomFloors, fixtureFloors);
-    if (requiredFloors > building.floors) {
-      const previous = building.floors;
-      building.floors = requiredFloors;
-      const note = `В ${world.year} году интерьер перепланировали: этажей ${previous} → ${requiredFloors}, чтобы всем хватало спальных, учебных и рабочих мест.`;
-      if (!building.history.includes(note)) building.history.push(note);
-    }
-    const operatingCapacity = Math.max(demand.sleepers.length, demand.students.length, demand.workers.length, building.capacity);
-    if (operatingCapacity > building.capacity) building.capacity = operatingCapacity;
-  }
   PLAN_CACHE.delete(world);
+  for (const building of world.buildings) interiorPlanForBuilding(world, building);
 }
 
 export function interiorPlanForBuilding(world: WorldState, building: Building): BuildingInteriorPlan {
@@ -70,24 +53,46 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   const signature = planSignature(world, building, demand);
   const cached = cache.get(building.id);
   if (cached?.signature === signature) return cached;
+  if (building.interior?.version === INTERIOR_VERSION && building.interior.signature === signature) {
+    cache.set(building.id, building.interior);
+    return building.interior;
+  }
 
+  const previous = building.interior;
   const materials = materialProfile(world, building);
   const requests = roomRequests(building, demand);
   const rooms = layoutRooms(building, requests);
   const fixtures: InteriorFixture[] = [];
   const assignments: InteriorAssignment[] = [];
+  const stairs = buildStairs(building);
   const occupiedByFloor = new Map<number, Set<string>>();
-  const addFixture = (kind: InteriorFixtureKind, label: string, roomKinds: InteriorRoomKind[], capacity = 1, functional = true): InteriorFixture => {
+  const reservedPreviousFixtureIds = new Set(previous?.fixtures.map(item => item.id) ?? []);
+  const usedFixtureIds = new Set<string>();
+  let fixtureSequence = 1;
+  const freshFixtureId = (kind: InteriorFixtureKind): string => {
+    let id = `interior:${building.id}:${kind}:${fixtureSequence++}`;
+    while (reservedPreviousFixtureIds.has(id) || usedFixtureIds.has(id)) id = `interior:${building.id}:${kind}:${fixtureSequence++}`;
+    return id;
+  };
+  reserveStairs(stairs, occupiedByFloor);
+
+  const addFixture = (
+    kind: InteriorFixtureKind,
+    label: string,
+    roomKinds: InteriorRoomKind[],
+    capacity = 1,
+    functional = true,
+    temporary = false,
+  ): InteriorFixture | undefined => {
     const footprint = fixtureFootprint(kind);
-    let placement = findFixturePlacement(building, rooms, roomKinds, footprint, occupiedByFloor);
-    if (!placement) {
-      const overflow = addOverflowRoom(building, rooms, roomKinds[0] ?? 'workshop');
-      placement = findFixturePlacement(building, rooms, [overflow.kind], footprint, occupiedByFloor);
-    }
-    if (!placement) throw new Error(`${building.name}: не удалось разместить ${label}`);
+    const placement = findFixturePlacement(building, rooms, roomKinds, footprint, occupiedByFloor);
+    if (!placement) return undefined;
     const { room, position } = placement;
+    const old = findPreviousFixture(previous, kind, label, room.floor, usedFixtureIds);
+    const fixtureId = old?.id ?? freshFixtureId(kind);
+    usedFixtureIds.add(fixtureId);
     const fixture: InteriorFixture = {
-      id: `interior:${building.id}:${kind}:${fixtures.length + 1}`,
+      id: fixtureId,
       buildingId: building.id,
       roomId: room.id,
       kind,
@@ -97,13 +102,19 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
       y: position.y,
       capacity,
       assignedCharacterIds: [],
-      functional,
+      functional: functional && !old?.blocked && (old?.condition ?? 100) > 0,
       material: fixtureMaterial(kind, materials),
+      condition: old?.condition ?? (temporary ? 45 : Math.max(35, building.condition)),
+      maxCondition: old?.maxCondition ?? 100,
+      temporary,
+      blocked: old?.blocked ?? false,
+      lastMaintainedTick: old?.lastMaintainedTick ?? worldTick(world),
     };
     fixtures.push(fixture);
     return fixture;
   };
   const assign = (character: Character, kind: InteriorAssignmentKind, fixture: InteriorFixture): void => {
+    if (fixture.assignedCharacterIds.length >= fixture.capacity) return;
     fixture.assignedCharacterIds.push(character.id);
     assignments.push({
       characterId: character.id,
@@ -118,14 +129,21 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
     });
   };
 
+  const unassignedSleeperIds: number[] = [];
   for (const sleeper of demand.sleepers) {
     const fixtureKind = sleepFixtureKind(building, sleeper);
-    const fixture = addFixture(fixtureKind, sleepLabel(fixtureKind, sleeper), sleepRooms(building), 1, true);
-    assign(sleeper, building.type === 'prison' ? 'prison' : building.type === 'healer' ? 'treatment' : 'sleep', fixture);
+    let fixture = addFixture(fixtureKind, sleepLabel(fixtureKind, sleeper), sleepRooms(building), 1, true);
+    if (!fixture && !['prison', 'healer'].includes(building.type)) {
+      fixture = addFixture('floor-pallet', `Временная постель ${sleeper.name}`, sleepRooms(building), 1, true, true);
+    }
+    if (fixture) assign(sleeper, building.type === 'prison' ? 'prison' : building.type === 'healer' ? 'treatment' : 'sleep', fixture);
+    else unassignedSleeperIds.push(sleeper.id);
   }
 
+  const unassignedStudentIds: number[] = [];
   for (const student of demand.students) {
     const fixture = addFixture('student-desk', `Парта ${student.name}`, ['classroom'], 1, true);
+    if (!fixture) { unassignedStudentIds.push(student.id); continue; }
     const room = rooms.find(item => item.id === fixture.roomId);
     fixture.label = `Парта ${student.name} · ${room?.name ?? 'класс'}`;
     assign(student, 'school', fixture);
@@ -133,61 +151,207 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
 
   const governmentTeachers = world.settlementGovernments.find(item => item.settlementId === building.settlementId)?.teacherIds ?? [];
   const teacherIds = new Set([...governmentTeachers, ...demand.workers.filter(worker => ['teacher', 'scribe'].includes(worker.profession)).map(worker => worker.id)]);
+  const unassignedWorkerIds: number[] = [];
   for (const worker of demand.workers) {
     const fixtureKind = workstationKind(building, worker);
     const label = teacherIds.has(worker.id) && building.type === 'school'
       ? `Учительский стол ${worker.name}`
       : `${workstationLabel(fixtureKind)} · ${worker.name}`;
     const fixture = addFixture(fixtureKind, label, workRooms(building, fixtureKind), 1, true);
-    assign(worker, 'work', fixture);
+    if (fixture) assign(worker, 'work', fixture);
+    else unassignedWorkerIds.push(worker.id);
   }
 
   for (const prisoner of demand.prisoners.filter(character => !assignments.some(item => item.characterId === character.id && item.kind === 'prison'))) {
     const fixture = addFixture('prison-bed', `Койка заключённого ${prisoner.name}`, ['cell'], 1, true);
-    assign(prisoner, 'prison', fixture);
+    if (fixture) assign(prisoner, 'prison', fixture);
   }
-
   for (const patient of demand.patients.filter(character => !assignments.some(item => item.characterId === character.id && item.kind === 'treatment'))) {
     const fixture = addFixture('treatment-bed', `Лечебная койка ${patient.name}`, ['ward'], 1, true);
-    assign(patient, 'treatment', fixture);
+    if (fixture) assign(patient, 'treatment', fixture);
   }
 
-  // Сначала гарантируем места конкретным людям, затем заполняем оставшееся пространство декором.
   addDecorativeCore(building, materials, addFixture);
   addPublicSeating(building, demand, addFixture);
 
-  const availableBeds = fixtures.filter(item => item.functional && ['bed', 'double-bed', 'bunk-bed', 'prison-bed', 'treatment-bed'].includes(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
-  const availableDesks = fixtures.filter(item => item.functional && item.kind === 'student-desk').reduce((sum, item) => sum + item.capacity, 0);
-  const availableWorkstations = fixtures.filter(item => item.functional && isWorkstation(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
-  const highestFloor = Math.max(0, ...rooms.map(room => room.floor), ...fixtures.map(fixture => fixture.floor));
-  const requiredFloorCount = highestFloor + 1;
-  // План не может ссылаться на этаж, которого нет у здания. Это последняя
-  // страховка после размещения обязательной мебели и декоративного ядра.
-  if (building.floors < requiredFloorCount) building.floors = requiredFloorCount;
+  const functional = (fixture: InteriorFixture) => fixture.functional && !fixture.blocked && fixture.condition > 0;
+  const availableBeds = fixtures.filter(item => functional(item) && ['bed', 'double-bed', 'bunk-bed', 'prison-bed', 'treatment-bed', 'floor-pallet'].includes(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
+  const availableDesks = fixtures.filter(item => functional(item) && item.kind === 'student-desk').reduce((sum, item) => sum + item.capacity, 0);
+  const availableWorkstations = fixtures.filter(item => functional(item) && isWorkstation(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
   const warnings: string[] = [];
-  if (availableBeds < demand.sleepers.length) warnings.push(`спальных мест ${availableBeds}/${demand.sleepers.length}`);
-  if (availableDesks < demand.students.length) warnings.push(`парт ${availableDesks}/${demand.students.length}`);
-  if (availableWorkstations < demand.workers.length) warnings.push(`рабочих мест ${availableWorkstations}/${demand.workers.length}`);
-  if (highestFloor >= building.floors) warnings.push(`план требует ${highestFloor + 1} этажей при существующих ${building.floors}`);
+  if (unassignedSleeperIds.length) warnings.push(`без спального места: ${unassignedSleeperIds.length}`);
+  if (unassignedStudentIds.length) warnings.push(`без парты: ${unassignedStudentIds.length}`);
+  if (unassignedWorkerIds.length) warnings.push(`без рабочего места: ${unassignedWorkerIds.length}`);
+  if (requests.reduce((sum, request) => sum + request.count, 0) > rooms.length) warnings.push('часть запрошенных помещений не помещается в существующих этажах');
 
   const plan: BuildingInteriorPlan = {
+    version: INTERIOR_VERSION,
+    generatedTick: worldTick(world),
+    floorCount: building.floors,
     buildingId: building.id,
-    signature: planSignature(world, building, demand),
+    signature,
     materials,
     rooms,
     fixtures,
     assignments,
+    stairs,
     requiredBeds: demand.sleepers.length,
     availableBeds,
     requiredDesks: demand.students.length,
     availableDesks,
     requiredWorkstations: demand.workers.length,
     availableWorkstations,
-    overflowFloors: Math.max(0, highestFloor + 1 - building.floors),
+    overflowFloors: 0,
+    unassignedSleeperIds,
+    unassignedStudentIds,
+    unassignedWorkerIds,
     warnings,
   };
+  building.interior = plan;
   cache.set(building.id, plan);
   return plan;
+}
+
+export function operationalWorkerIds(world: WorldState, buildingId: number): Set<number> {
+  const building = world.buildings.find(item => item.id === buildingId);
+  if (!building) return new Set();
+  const plan = interiorPlanForBuilding(world, building);
+  return new Set(plan.assignments
+    .filter(assignment => assignment.kind === 'work')
+    .filter(assignment => {
+      const fixture = plan.fixtures.find(item => item.id === assignment.fixtureId);
+      return Boolean(fixture?.functional && !fixture.blocked && fixture.condition > 0 && isWorkstation(fixture.kind));
+    })
+    .map(assignment => assignment.characterId));
+}
+
+export function operationalSchoolCapacity(world: WorldState, building: Building): number {
+  if (building.type !== 'school') return 0;
+  const plan = interiorPlanForBuilding(world, building);
+  const operationalTeachers = operationalWorkerIds(world, building.id);
+  const activeClassrooms = new Set(plan.assignments
+    .filter(assignment => assignment.kind === 'work' && operationalTeachers.has(assignment.characterId))
+    .map(assignment => assignment.roomId)
+    .filter(roomId => plan.rooms.some(room => room.id === roomId && room.kind === 'classroom')));
+  if (!activeClassrooms.size) return 0;
+  return plan.assignments.filter(assignment => assignment.kind === 'school' && activeClassrooms.has(assignment.roomId)).filter(assignment => {
+    const fixture = plan.fixtures.find(item => item.id === assignment.fixtureId);
+    return Boolean(fixture?.functional && !fixture.blocked && fixture.condition > 0);
+  }).length;
+}
+
+export function hasOperationalInteriorAssignment(
+  world: WorldState,
+  characterId: number,
+  buildingId: number,
+  kind: InteriorAssignmentKind,
+): boolean {
+  const building = world.buildings.find(item => item.id === buildingId);
+  if (!building) return false;
+  const plan = interiorPlanForBuilding(world, building);
+  const assignment = plan.assignments.find(item => item.characterId === characterId && item.kind === kind);
+  if (!assignment) return false;
+  const fixture = plan.fixtures.find(item => item.id === assignment.fixtureId);
+  if (!fixture?.functional || fixture.blocked || fixture.condition <= 0) return false;
+  if (kind !== 'school') return true;
+  const activeClassrooms = new Set(plan.assignments.filter(item => item.kind === 'work').filter(item => {
+    const teacherFixture = plan.fixtures.find(fixture => fixture.id === item.fixtureId);
+    return Boolean(teacherFixture?.functional && !teacherFixture.blocked && teacherFixture.condition > 0 && teacherFixture.kind === 'teacher-desk');
+  }).map(item => item.roomId));
+  return activeClassrooms.has(assignment.roomId);
+}
+
+export function applyInteriorMonthlyEffects(world: WorldState, elapsedMonths = 1): void {
+  normalizeBuildingOccupancy(world);
+  PLAN_CACHE.delete(world);
+  for (const building of world.buildings) {
+    const plan = interiorPlanForBuilding(world, building);
+    for (const fixture of plan.fixtures) {
+      if (fixture.temporary) fixture.condition = Math.max(0, fixture.condition - 2.4 * elapsedMonths);
+      else fixture.condition = Math.max(0, fixture.condition - Math.max(.02, (100 - building.condition) / 850) * elapsedMonths);
+      fixture.functional = !fixture.blocked && fixture.condition > 0;
+    }
+    for (const characterId of building.residentIds) {
+      const character = world.characters.find(item => item.id === characterId && item.alive);
+      if (!character) continue;
+      const assignment = plan.assignments.find(item => item.characterId === character.id && item.kind === 'sleep');
+      const fixture = assignment ? plan.fixtures.find(item => item.id === assignment.fixtureId) : undefined;
+      if (!fixture?.functional) {
+        character.needs.rest = Math.min(100, character.needs.rest + 10 * elapsedMonths);
+        character.health = Math.max(1, character.health - .15 * elapsedMonths);
+      } else {
+        const recovery = fixture.kind === 'floor-pallet' ? 3 : fixture.kind === 'bunk-bed' ? 6 : 8;
+        character.needs.rest = Math.max(0, character.needs.rest - recovery * elapsedMonths);
+      }
+    }
+  }
+  PLAN_CACHE.delete(world);
+}
+
+export interface InteriorExpansionNeed {
+  buildingId: number;
+  settlementId: number;
+  buildingType: Building['type'];
+  requestedType: Building['type'];
+  shortage: number;
+  reason: string;
+}
+
+export function interiorExpansionNeeds(world: WorldState): InteriorExpansionNeed[] {
+  const needs: InteriorExpansionNeed[] = [];
+  for (const building of world.buildings) {
+    const plan = interiorPlanForBuilding(world, building);
+    const shortage = plan.unassignedSleeperIds.length + plan.unassignedStudentIds.length + plan.unassignedWorkerIds.length;
+    if (!shortage) continue;
+    const settlement = world.settlements.find(item => item.id === building.settlementId);
+    if (!settlement) continue;
+    const requestedType = plan.unassignedStudentIds.length ? 'school'
+      : plan.unassignedSleeperIds.length ? (building.type === 'tenement' || settlement.type === 'city' ? 'tenement' : 'house')
+        : building.type;
+    needs.push({
+      buildingId: building.id,
+      settlementId: building.settlementId,
+      buildingType: building.type,
+      requestedType,
+      shortage,
+      reason: `${building.name}: не хватает ${shortage} физических мест внутри здания`,
+    });
+  }
+  return needs;
+}
+
+function findPreviousFixture(
+  previous: BuildingInteriorPlan | undefined,
+  kind: InteriorFixtureKind,
+  label: string,
+  floor: number,
+  usedIds: ReadonlySet<string>,
+): InteriorFixture | undefined {
+  if (!previous) return undefined;
+  return previous.fixtures.find(item => item.kind === kind && item.label === label && !usedIds.has(item.id))
+    ?? previous.fixtures.find(item => item.kind === kind && item.floor === floor && !item.assignedCharacterIds.length && !usedIds.has(item.id));
+}
+
+function buildStairs(building: Building): InteriorStair[] {
+  if (building.floors <= 1) return [];
+  const innerLeft = building.localX + 1;
+  const innerTop = building.localY + 1;
+  const x = Math.min(building.localX + building.localWidth - 2, innerLeft + 1);
+  const y = Math.min(building.localY + building.localHeight - 2, innerTop + 1);
+  const stairs: InteriorStair[] = [];
+  for (let floor = 0; floor < building.floors; floor += 1) {
+    if (floor < building.floors - 1) stairs.push({ id: `stair:${building.id}:${floor}:up`, buildingId: building.id, floor, x, y, direction: 'up', connectedFloor: floor + 1 });
+    if (floor > 0) stairs.push({ id: `stair:${building.id}:${floor}:down`, buildingId: building.id, floor, x: Math.min(building.localX + building.localWidth - 2, x + 1), y, direction: 'down', connectedFloor: floor - 1 });
+  }
+  return stairs;
+}
+
+function reserveStairs(stairs: InteriorStair[], occupiedByFloor: Map<number, Set<string>>): void {
+  for (const stair of stairs) {
+    const occupied = occupiedByFloor.get(stair.floor) ?? new Set<string>();
+    occupied.add(`${stair.x}:${stair.y}`);
+    occupiedByFloor.set(stair.floor, occupied);
+  }
 }
 
 export function interiorPositionForCharacter(
@@ -222,8 +386,8 @@ export function interiorPositionForCharacter(
 }
 
 export function applyInteriorLayoutToMap(world: WorldState, map: LocalMapData): LocalMapData {
-  if (map.level !== 0) return map;
-  const buildings = world.buildings.filter(building => building.globalX === map.globalX && building.globalY === map.globalY);
+  if (map.level < 0) return map;
+  const buildings = world.buildings.filter(building => building.globalX === map.globalX && building.globalY === map.globalY && building.floors > map.level);
   if (!buildings.length) return map;
   const cells = map.cells.map(cell => ({ ...cell }));
   for (const building of buildings) {
@@ -233,18 +397,26 @@ export function applyInteriorLayoutToMap(world: WorldState, map: LocalMapData): 
       if (cell.buildingId !== building.id || cell.feature === 'wall' || cell.feature === 'door') continue;
       cell.ground = ground;
     }
-    for (const room of plan.rooms.filter(room => room.floor === 0)) drawRoomPartitions(cells, map.width, building, room);
+    for (const room of plan.rooms.filter(room => room.floor === map.level)) drawRoomPartitions(cells, map.width, building, room);
+    for (const stair of plan.stairs.filter(item => item.floor === map.level)) {
+      const cell = cells[stair.y * map.width + stair.x];
+      if (!cell) continue;
+      cell.buildingId = building.id;
+      cell.ground = ground;
+      cell.feature = stair.direction === 'up' ? 'stairs-up' : 'stairs-down';
+      cell.blocked = false;
+    }
   }
   return { ...map, cells };
 }
 
 export function interiorMarkersForMap(world: WorldState, map: LocalMapData): LocalMarker[] {
-  if (map.level !== 0) return [];
+  if (map.level < 0) return [];
   const result: LocalMarker[] = [];
-  for (const building of world.buildings.filter(item => item.globalX === map.globalX && item.globalY === map.globalY)) {
+  for (const building of world.buildings.filter(item => item.globalX === map.globalX && item.globalY === map.globalY && item.floors > map.level)) {
     const plan = interiorPlanForBuilding(world, building);
-    const groundFixtures = plan.fixtures.filter(item => item.floor === 0);
-    const visible = groundFixtures.slice(0, MAX_RENDERED_FIXTURES_PER_BUILDING);
+    const floorFixtures = plan.fixtures.filter(item => item.floor === map.level);
+    const visible = floorFixtures.slice(0, MAX_RENDERED_FIXTURES_PER_BUILDING);
     for (const fixture of visible) {
       const room = plan.rooms.find(item => item.id === fixture.roomId);
       const assigned = fixture.assignedCharacterIds
@@ -261,37 +433,25 @@ export function interiorMarkersForMap(world: WorldState, map: LocalMapData): Loc
           ...fixture.assignedCharacterIds.slice(0, 4).map(id => ({ kind: 'character' as const, id })),
         ],
         count: fixture.capacity > 1 ? fixture.capacity : undefined,
-        detail: `${room?.name ?? 'Помещение'} · ${fixture.material}. ${assigned.length ? `Закреплено: ${assigned.join(', ')}.` : ''}`,
+        detail: `${room?.name ?? 'Помещение'} · ${fixture.material} · состояние ${Math.round(fixture.condition)}%. ${fixture.temporary ? 'Временное место. ' : ''}${assigned.length ? `Закреплено: ${assigned.join(', ')}.` : ''}`,
         visualRole: fixtureVisualRole(fixture.kind),
         footprintWidth: fixtureFootprint(fixture.kind).width,
         footprintHeight: fixtureFootprint(fixture.kind).height,
       });
     }
-    const hidden = groundFixtures.length - visible.length;
+    const hidden = floorFixtures.length - visible.length;
     if (hidden > 0) result.push({
-      id: `interior-hidden-${building.id}`,
+      id: `interior-hidden-${building.id}-${map.level}`,
       x: building.entranceX,
       y: building.entranceY,
       kind: 'group',
       label: `${building.name}: ещё ${hidden} предметов`,
       refs: [{ kind: 'building', id: building.id }],
       count: hidden,
-      detail: 'Часть мебели скрыта на текущем масштабе, но остаётся в плане интерьера.',
+      detail: 'Часть мебели скрыта на текущем масштабе, но остаётся физически размещённой на этаже.',
       visualRole: 'interior-furniture-group',
     });
-    const upper = plan.fixtures.filter(item => item.floor > 0).length;
-    if (upper > 0) result.push({
-      id: `interior-upper-${building.id}`,
-      x: Math.max(building.localX + 1, Math.min(building.localX + building.localWidth - 2, building.entranceX)),
-      y: Math.max(building.localY + 1, Math.min(building.localY + building.localHeight - 2, building.entranceY - 1)),
-      kind: 'group',
-      label: `${building.name}: верхние этажи`,
-      refs: [{ kind: 'building', id: building.id }],
-      count: upper,
-      detail: `${plan.rooms.filter(room => room.floor > 0).length} помещений и ${upper} предметов находятся выше первого этажа.`,
-      visualRole: 'interior-upper-floors',
-    });
-    result.push({
+    if (map.level === 0) result.push({
       id: `interior-materials-${building.id}`,
       x: building.entranceX,
       y: building.entranceY,
@@ -310,43 +470,56 @@ export function interiorIntegrityIssues(world: WorldState): string[] {
   const plans = new Map(world.buildings.map(building => [building.id, interiorPlanForBuilding(world, building)]));
   for (const building of world.buildings) {
     const plan = plans.get(building.id)!;
-    if (plan.availableBeds < plan.requiredBeds) issues.push(`${building.name}: не хватает спальных мест ${plan.availableBeds}/${plan.requiredBeds}`);
-    if (plan.availableDesks < plan.requiredDesks) issues.push(`${building.name}: не хватает парт ${plan.availableDesks}/${plan.requiredDesks}`);
-    if (plan.availableWorkstations < plan.requiredWorkstations) issues.push(`${building.name}: не хватает рабочих мест ${plan.availableWorkstations}/${plan.requiredWorkstations}`);
+    if (plan.version !== INTERIOR_VERSION) issues.push(`${building.name}: устаревшая версия физического интерьера`);
+    if (plan.floorCount !== building.floors) issues.push(`${building.name}: интерьер хранит ${plan.floorCount} этажей при здании ${building.floors}`);
     const assignmentKeys = new Set<string>();
+    const fixtureIds = new Set<string>();
+    for (const fixture of plan.fixtures) {
+      if (fixtureIds.has(fixture.id)) issues.push(`${building.name}: повтор идентификатора мебели ${fixture.id}`);
+      fixtureIds.add(fixture.id);
+    }
     for (const assignment of plan.assignments) {
       const key = `${assignment.characterId}:${assignment.kind}`;
       if (assignmentKeys.has(key)) issues.push(`${building.name}: у жителя №${assignment.characterId} повторное назначение «${assignment.kind}»`);
       assignmentKeys.add(key);
+      if (!fixtureIds.has(assignment.fixtureId)) issues.push(`${building.name}: назначение жителя №${assignment.characterId} ссылается на отсутствующую мебель`);
+      if (assignment.floor < 0 || assignment.floor >= building.floors) issues.push(`${building.name}: назначение жителя №${assignment.characterId} находится на несуществующем этаже`);
     }
+    const footprintByFloor = new Map<number, Set<string>>();
     for (const fixture of plan.fixtures) {
       if (fixture.assignedCharacterIds.length > fixture.capacity) issues.push(`${building.name}: ${fixture.label} перегружено ${fixture.assignedCharacterIds.length}/${fixture.capacity}`);
       if (fixture.floor < 0 || fixture.floor >= building.floors) issues.push(`${building.name}: ${fixture.label} назначено на несуществующий этаж ${fixture.floor + 1}`);
+      if (fixture.condition < 0 || fixture.condition > fixture.maxCondition) issues.push(`${building.name}: ${fixture.label} имеет неверное состояние`);
       const footprint = fixtureFootprint(fixture.kind);
       if (fixture.x <= building.localX || fixture.y <= building.localY
         || fixture.x + footprint.width > building.localX + building.localWidth - 1
         || fixture.y + footprint.height > building.localY + building.localHeight - 1) {
         issues.push(`${building.name}: ${fixture.label} стоит вне полезной площади`);
       }
+      const occupied = footprintByFloor.get(fixture.floor) ?? new Set<string>();
+      for (let dy = 0; dy < footprint.height; dy += 1) for (let dx = 0; dx < footprint.width; dx += 1) {
+        const key = `${fixture.x + dx}:${fixture.y + dy}`;
+        if (occupied.has(key)) issues.push(`${building.name}: мебель пересекается на этаже ${fixture.floor + 1} в клетке ${key}`);
+        occupied.add(key);
+      }
+      footprintByFloor.set(fixture.floor, occupied);
     }
-  }
-  for (const character of world.characters.filter(item => item.alive)) {
-    if (character.homeBuildingId) {
-      const assignment = plans.get(character.homeBuildingId)?.assignments.find(item => item.characterId === character.id && ['sleep', 'prison', 'treatment'].includes(item.kind));
-      if (!assignment && character.legalStatus !== 'заключён' && character.serviceStatus !== 'гарнизон') issues.push(`${character.name}: дома нет назначенного спального места`);
-    }
-    if (isSchoolAgeCharacter(character)) {
-      const school = schoolBuildingForCharacter(world, character);
-      if (school && !plans.get(school.id)?.assignments.some(item => item.characterId === character.id && item.kind === 'school')) issues.push(`${character.name}: в школе нет класса и парты`);
-    }
-    if (character.workplaceBuildingId && character.age >= 14) {
-      const plan = plans.get(character.workplaceBuildingId);
-      const isActiveWorker = world.employments.some(contract => contract.characterId === character.id && contract.active)
-        || world.buildings.find(item => item.id === character.workplaceBuildingId)?.workerIds.includes(character.id);
-      if (isActiveWorker && !plan?.assignments.some(item => item.characterId === character.id && item.kind === 'work')) issues.push(`${character.name}: на работе нет назначенного рабочего места`);
+    for (let floor = 0; floor < building.floors; floor += 1) {
+      if (building.floors > 1 && !plan.stairs.some(stair => stair.floor === floor)) issues.push(`${building.name}: этаж ${floor + 1} не соединён лестницей`);
     }
   }
   return [...new Set(issues)];
+}
+
+export function interiorCapacityWarnings(world: WorldState): string[] {
+  const warnings: string[] = [];
+  for (const building of world.buildings) {
+    const plan = interiorPlanForBuilding(world, building);
+    if (plan.unassignedSleeperIds.length) warnings.push(`${building.name}: ${plan.unassignedSleeperIds.length} жителей спят без отдельного места`);
+    if (plan.unassignedStudentIds.length) warnings.push(`${building.name}: ${plan.unassignedStudentIds.length} учеников не получили парту`);
+    if (plan.unassignedWorkerIds.length) warnings.push(`${building.name}: ${plan.unassignedWorkerIds.length} работников не получили рабочее место`);
+  }
+  return [...new Set(warnings)];
 }
 
 function collectDemand(world: WorldState, building: Building): Demand {
@@ -426,16 +599,24 @@ function roomRequests(building: Building, demand: Demand): RoomRequest[] {
   return requests;
 }
 
+function roomSlotsPerFloor(building: Building): number {
+  const area = Math.max(1, (building.localWidth - 2) * (building.localHeight - 2));
+  if (building.type === 'castle' || area >= 260) return 8;
+  if (building.type === 'manor' || area >= 140) return 6;
+  return ROOMS_PER_FLOOR;
+}
+
 function layoutRooms(building: Building, requests: RoomRequest[]): InteriorRoom[] {
   const roomKinds = requests.flatMap(request => Array.from({ length: request.count }, (_, index) => ({ kind: request.kind, name: request.count > 1 ? `${request.name} ${index + 1}` : request.name })));
   const innerX = building.localX + 1;
   const innerY = building.localY + 1;
   const innerWidth = Math.max(2, building.localWidth - 2);
   const innerHeight = Math.max(2, building.localHeight - 2);
-  const floors = Math.max(building.floors, Math.ceil(roomKinds.length / ROOMS_PER_FLOOR));
+  const slotsPerFloor = roomSlotsPerFloor(building);
+  const floors = Math.max(1, building.floors);
   const rooms: InteriorRoom[] = [];
   for (let floor = 0; floor < floors; floor += 1) {
-    const entries = roomKinds.slice(floor * ROOMS_PER_FLOOR, (floor + 1) * ROOMS_PER_FLOOR);
+    const entries = roomKinds.slice(floor * slotsPerFloor, (floor + 1) * slotsPerFloor);
     if (!entries.length) continue;
     const columns = entries.length === 1 ? 1 : 2;
     const rows = Math.ceil(entries.length / columns);
@@ -488,25 +669,6 @@ function findFixturePlacement(
   return undefined;
 }
 
-function addOverflowRoom(building: Building, rooms: InteriorRoom[], kind: InteriorRoomKind): InteriorRoom {
-  const floor = Math.max(0, ...rooms.map(room => room.floor + 1));
-  if (floor >= building.floors) building.floors = floor + 1;
-  const room: InteriorRoom = {
-    id: `room:${building.id}:${floor}:overflow-${rooms.length + 1}`,
-    buildingId: building.id,
-    kind,
-    name: `${roomKindLabel(kind)} · этаж ${floor + 1}`,
-    floor,
-    x: building.localX + 1,
-    y: building.localY + 1,
-    width: Math.max(2, building.localWidth - 2),
-    height: Math.max(2, building.localHeight - 2),
-    capacity: Math.max(4, (building.localWidth - 2) * (building.localHeight - 2)),
-  };
-  rooms.push(room);
-  return room;
-}
-
 function fixtureFits(
   building: Building,
   room: InteriorRoom,
@@ -551,7 +713,7 @@ function roomPoints(room: InteriorRoom): { x: number; y: number }[] {
 function addDecorativeCore(
   building: Building,
   materials: InteriorMaterialProfile,
-  add: (kind: InteriorFixtureKind, label: string, rooms: InteriorRoomKind[], capacity?: number, functional?: boolean) => InteriorFixture,
+  add: (kind: InteriorFixtureKind, label: string, rooms: InteriorRoomKind[], capacity?: number, functional?: boolean, temporary?: boolean) => InteriorFixture | undefined,
 ): void {
   const shared = () => {
     add('hearth', materials.quality === 'бедная' ? 'Открытый очаг' : 'Камин и очаг', ['common-room', 'great-hall', 'tavern-hall', 'mess-hall'], 1, false);
@@ -591,7 +753,7 @@ function addDecorativeCore(
 function addPublicSeating(
   building: Building,
   demand: Demand,
-  add: (kind: InteriorFixtureKind, label: string, rooms: InteriorRoomKind[], capacity?: number, functional?: boolean) => InteriorFixture,
+  add: (kind: InteriorFixtureKind, label: string, rooms: InteriorRoomKind[], capacity?: number, functional?: boolean, temporary?: boolean) => InteriorFixture | undefined,
 ): void {
   const socialBuildings: Building['type'][] = ['house', 'tenement', 'manor', 'tavern', 'inn', 'temple', 'monastery', 'castle', 'barracks', 'school', 'market', 'shop', 'townHall', 'courthouse', 'healer', 'bathhouse'];
   if (!socialBuildings.includes(building.type)) return;
@@ -773,11 +935,13 @@ function workstationLabel(kind: InteriorFixtureKind): string {
 function fixtureMaterial(kind: InteriorFixtureKind, materials: InteriorMaterialProfile): string {
   if (['rug', 'carpet-runner', 'banner', 'tapestry'].includes(kind)) return materials.textile;
   if (['anvil', 'forge', 'weapon-rack', 'guard-post'].includes(kind)) return materials.metal;
+  if (kind === 'floor-pallet') return materials.textile;
   if (['hearth', 'fireplace', 'oven', 'altar', 'throne'].includes(kind)) return `${materials.wall}, ${materials.metal}`;
   return materials.furniture;
 }
 
 function fixtureFootprint(kind: InteriorFixtureKind): { width: number; height: number } {
+  if (kind === 'floor-pallet') return { width: 1, height: 1 };
   if (kind === 'bed' || kind === 'double-bed' || kind === 'bunk-bed' || kind === 'prison-bed' || kind === 'treatment-bed') return { width: kind === 'double-bed' ? 2 : 1, height: 2 };
   if (kind === 'table' || kind === 'bar-counter' || kind === 'kitchen-table' || kind === 'carpet-runner') return { width: 2, height: 1 };
   if (kind === 'rug') return { width: 2, height: 2 };
