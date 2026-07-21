@@ -1,4 +1,4 @@
-const VERSION = '4.1.0';
+const VERSION = '4.1.1';
 const CACHE = `eldervale-app-${VERSION}`;
 const ROOT = '/Eldervale/';
 const CORE = [

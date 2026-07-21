@@ -93,8 +93,12 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
     if (marker.kind !== 'person') return true;
     return marker.refs.some(ref => ref.kind === 'army' || ref.kind === 'patrol');
   });
+  const areaMarkers = new Set<LocalMarker['kind']>(['building', 'establishment', 'settlement', 'field', 'construction', 'cemetery']);
   const occupied = new Set<string>();
   for (const marker of fixedMarkers) {
+    // Маркер здания описывает область, но не занимает её. Раньше его footprint
+    // блокировал весь интерьер, поэтому жители вытеснялись за стены.
+    if (areaMarkers.has(marker.kind)) continue;
     const width = marker.footprintWidth ?? 1;
     const height = marker.footprintHeight ?? 1;
     for (let y = marker.y; y < marker.y + height; y += 1) for (let x = marker.x; x < marker.x + width; x += 1) occupied.add(`${x}:${y}`);
@@ -103,22 +107,106 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
   const armyIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
   const merchantIds = new Set((world.travelingMerchants ?? []).map(merchant => merchant.characterId));
   const patrolIds = new Set((world.civicPatrols ?? []).flatMap(patrol => patrol.guardIds));
-  const people: LocalMarker[] = [];
+  const buildingGroups = new Map<number, { character: Character; stop: DailyRoutineStop }[]>();
+  const outdoor: { character: Character; stop: DailyRoutineStop }[] = [];
+
   for (const character of world.characters) {
     if (!character.alive || character.settlementId !== settlement.id || armyIds.has(character.id) || merchantIds.has(character.id) || patrolIds.has(character.id)) continue;
     const stop = routineStopForCharacter(world, character, phase);
     if (stop.globalX !== map.globalX || stop.globalY !== map.globalY) continue;
-    const point = claimNearby(map, stop.localX, stop.localY, occupied, `${world.config.seed}:распорядок:${character.id}:${phase}:${world.year}:${world.month}`);
-    if (!point) continue;
-    const isRuler = world.kingdoms.some(kingdom => kingdom.rulerId === character.id);
-    people.push({
-      id: `person-${character.id}`, x: point.x, y: point.y, kind: 'person', label: character.name,
-      refs: [{ kind: 'character', id: character.id }], detail: `${stop.activity} · ${stop.placeLabel}`,
-      visualRole: isRuler ? 'king' : character.visualRole ?? character.profession,
-    });
+    if (stop.buildingId) {
+      const group = buildingGroups.get(stop.buildingId) ?? [];
+      group.push({ character, stop });
+      buildingGroups.set(stop.buildingId, group);
+    } else outdoor.push({ character, stop });
+  }
+
+  const people: LocalMarker[] = [];
+  for (const entry of outdoor.sort((a, b) => a.character.id - b.character.id)) {
+    const point = claimNearby(map, entry.stop.localX, entry.stop.localY, occupied, `${world.config.seed}:распорядок:${entry.character.id}:${phase}:${world.year}:${world.month}`);
+    if (point) people.push(personMarker(world, entry.character, entry.stop, point));
+  }
+
+  for (const [buildingId, entries] of [...buildingGroups].sort((a, b) => a[0] - b[0])) {
+    const building = world.buildings.find(item => item.id === buildingId && item.globalX === map.globalX && item.globalY === map.globalY);
+    if (!building) continue;
+    const ordered = [...entries].sort((a, b) => a.character.id - b.character.id);
+    const interiorCount = map.cells.filter(cell => cell.buildingId === buildingId && !cell.blocked && cell.ground !== 'water').length;
+    if (!interiorCount) continue;
+
+    const visibleLimit = Math.min(interiorCount, visiblePeopleLimit(building));
+    const reserveGroupCell = ordered.length > visibleLimit && interiorCount > 1 ? 1 : 0;
+    const individualLimit = Math.max(0, Math.min(visibleLimit, interiorCount - reserveGroupCell));
+    let placed = 0;
+    for (const entry of ordered.slice(0, individualLimit)) {
+      const point = claimInsideBuilding(
+        map, buildingId, entry.stop.localX, entry.stop.localY, occupied,
+        `${world.config.seed}:внутри:${buildingId}:${entry.character.id}:${phase}:${world.year}:${world.month}`,
+      );
+      if (!point) break;
+      people.push(personMarker(world, entry.character, entry.stop, point));
+      placed += 1;
+    }
+
+    const hidden = ordered.length - placed;
+    if (hidden > 0) {
+      const groupPoint = claimInsideBuilding(
+        map, buildingId, building.localX + Math.floor(building.localWidth / 2), building.localY + Math.floor(building.localHeight / 2), occupied,
+        `${world.config.seed}:группа-внутри:${buildingId}:${phase}:${world.year}:${world.month}`,
+      );
+      if (groupPoint) people.push({
+        id: `indoor-group-${buildingId}-${phase}`, x: groupPoint.x, y: groupPoint.y, kind: 'group',
+        label: `${building.name}: ещё ${hidden}`, count: hidden,
+        refs: ordered.slice(placed, placed + 12).map(entry => ({ kind: 'character' as const, id: entry.character.id })),
+        detail: `${hidden} жителей находятся внутри · ${ordered[0]?.stop.activity ?? 'заняты делами'}`,
+        visualRole: building.type,
+      });
+    }
   }
 
   return { ...map, markers: [...fixedMarkers, ...people] };
+}
+
+function personMarker(world: WorldState, character: Character, stop: DailyRoutineStop, point: { x: number; y: number }): LocalMarker {
+  const isRuler = world.kingdoms.some(kingdom => kingdom.rulerId === character.id);
+  return {
+    id: `person-${character.id}`, x: point.x, y: point.y, kind: 'person', label: character.name,
+    refs: [{ kind: 'character', id: character.id }], detail: `${stop.activity} · ${stop.placeLabel}`,
+    visualRole: isRuler ? 'king' : character.visualRole ?? character.profession,
+  };
+}
+
+function visiblePeopleLimit(building: Building): number {
+  if (building.type === 'school') return 10;
+  if (building.type === 'tavern' || building.type === 'inn' || building.type === 'market' || building.type === 'temple') return 8;
+  if (building.type === 'house' || building.type === 'tenement') return 6;
+  if (building.type === 'castle' || building.type === 'barracks' || building.type === 'prison') return 12;
+  return 8;
+}
+
+function claimInsideBuilding(
+  map: LocalMapData,
+  buildingId: number,
+  desiredX: number,
+  desiredY: number,
+  occupied: Set<string>,
+  seed: string,
+): { x: number; y: number } | undefined {
+  const tieSeed = hashSeed(seed);
+  const candidates = map.cells
+    .filter(cell => cell.buildingId === buildingId && !cell.blocked && cell.ground !== 'water' && !occupied.has(`${cell.x}:${cell.y}`))
+    .sort((a, b) => {
+      const doorPenaltyA = a.feature === 'door' ? 1000 : 0;
+      const doorPenaltyB = b.feature === 'door' ? 1000 : 0;
+      const distanceA = Math.abs(a.x - desiredX) + Math.abs(a.y - desiredY) + doorPenaltyA;
+      const distanceB = Math.abs(b.x - desiredX) + Math.abs(b.y - desiredY) + doorPenaltyB;
+      if (distanceA !== distanceB) return distanceA - distanceB;
+      return (hashSeed(`${tieSeed}:${a.x}:${a.y}`) >>> 0) - (hashSeed(`${tieSeed}:${b.x}:${b.y}`) >>> 0);
+    });
+  const point = candidates[0];
+  if (!point) return undefined;
+  occupied.add(`${point.x}:${point.y}`);
+  return { x: point.x, y: point.y };
 }
 
 function selectDetailedSettlements(world: WorldState, indexes: WorldIndexes, tick: number): number[] {
