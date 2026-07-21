@@ -4,3 +4,19 @@ dist/
 vite.config.js
 vite.config.d.ts
 .DS_Store
+
+# Foreign project trees accidentally copied into Eldervale
+/src/app/
+/src/core/
+/src/screens/
+/src/sports/
+/src/state/
+/src/storage/
+/src/utils/
+/src/components/brand/
+/src/components/career/
+/src/components/feedback/
+/src/components/layout/
+/src/components/system/
+/src/components/ui/
+/src/hooks/useCareerSave.ts

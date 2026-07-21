@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "repair:foreign-source": "node scripts/repair-foreign-source.mjs",
+    "prebuild": "npm run repair:foreign-source",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview",
     "test:watchdog": "npx --yes tsx@4.20.6 scripts/worker-watchdog-smoke.ts",
