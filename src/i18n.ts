@@ -1,18 +1,11 @@
 import type { Army, BuildingType, Monster, Settlement, Species, Terrain } from './types';
-
-const species: Record<Species, string> = {
-  human: 'человек',
-  elf: 'эльф',
-  orc: 'орк',
-  dwarf: 'дворф',
-};
+import { RACE_CATALOG } from './raceCatalog';
 
 const professions: Record<string, string> = {
   child: 'ребёнок', farmer: 'земледелец', miller: 'мельник', hunter: 'охотник', guard: 'стражник',
   blacksmith: 'кузнец', carpenter: 'плотник', herbalist: 'травник', merchant: 'торговец', scribe: 'писец',
   priest: 'жрец', soldier: 'воин', fisher: 'рыбак', miner: 'шахтёр', weaver: 'ткач', brewer: 'пивовар', healer: 'лекарь', baker: 'пекарь', cook: 'повар', shopkeeper: 'лавочник', innkeeper: 'трактирщик', laborer: 'работник', tailor: 'портной', dyer: 'красильщик', tanner: 'кожевник', cobbler: 'сапожник', armorer: 'бронник', toolmaker: 'мастер инструментов', judge: 'судья', firefighter: 'пожарный', teacher: 'учитель', gravedigger: 'могильщик', official: 'чиновник',
 };
-
 
 const buildingTypes: Record<BuildingType, string> = {
   house: 'жилой дом', tenement: 'доходный дом', manor: 'большой семейный дом', barracks: 'казарма', monastery: 'монастырь', warehouse: 'склад',
@@ -51,7 +44,7 @@ const materials: Record<string, string> = {
   silver: 'серебро', 'black iron': 'чёрное железо', gold: 'золото', dragonbone: 'драконья кость', moonstone: 'лунный камень', bronze: 'бронза', yew: 'тис',
 };
 
-export const speciesLabel = (value: Species | string) => species[value as Species] ?? value;
+export const speciesLabel = (value: Species | string) => RACE_CATALOG[value as Species]?.label ?? value;
 export const professionLabel = (value: string) => professions[value] ?? value;
 export const settlementTypeLabel = (value: Settlement['type'] | string) => settlementTypes[value as Settlement['type']] ?? value;
 export const armyStatusLabel = (value: Army['status'] | string) => armyStatuses[value as Army['status']] ?? value;
@@ -60,5 +53,4 @@ export const monsterSpeciesLabel = (value: string) => monsterSpecies[value] ?? v
 export const terrainLabel = (value: Terrain | string) => terrains[value as Terrain] ?? value;
 export const artifactTypeLabel = (value: string) => artifactTypes[value] ?? value;
 export const materialLabel = (value: string) => materials[value] ?? value;
-
 export const buildingTypeLabel = (value: BuildingType | string) => buildingTypes[value as BuildingType] ?? value;

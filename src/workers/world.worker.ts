@@ -10,6 +10,7 @@ import { advanceDailyLife, initializeDailyLife } from '../sim/dailyLife';
 import { RNG } from '../sim/rng';
 import { advanceDynastyLegacy, initializeDynastyLegacy } from '../sim/dynastyLegacy';
 import { advanceClimateSystem, initializeClimateSystem } from '../sim/climateSystem';
+import { advanceRaceDemography, initializeRaceDemography } from '../sim/raceDemography';
 
 const scope = self as DedicatedWorkerGlobalScope;
 let engine: SimulationEngine | undefined;
@@ -41,6 +42,7 @@ async function initialize(message: Extract<WorldWorkerCommand, { action: 'initia
   initializeDailyLife(message.world);
   initializeDynastyLegacy(message.world);
   initializeClimateSystem(message.world);
+  initializeRaceDemography(message.world);
   engine = createSimulationEngine(message.world);
   const profile: SimulationProfile = {
     operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(engine.indexes),
@@ -63,6 +65,7 @@ async function generate(message: Extract<WorldWorkerCommand, { action: 'generate
   post({ id: message.id, type: 'progress', progress: progressMessage('генерация', 'Индексируем созданный мир', 98, 100, startedAt) });
   initializeDynastyLegacy(world);
   initializeClimateSystem(world);
+  initializeRaceDemography(world);
   engine = createSimulationEngine(world);
   advanceDailyLife(world, new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`), engine.indexes, { recordEvents: false });
   const totalMs = performance.now() - startedAt;
@@ -120,6 +123,7 @@ async function advance(message: Extract<WorldWorkerCommand, { action: 'advance' 
     const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(engine.world.month)) : 1;
     advanceOneMonth(engine, phase => { lastPhase = phase; }, { fastForward, monthStep });
     advanceClimateSystem(engine.world, { elapsedMonths: monthStep });
+    advanceRaceDemography(engine.world, { elapsedMonths: monthStep, indexes: engine.indexes });
     advanceDailyLife(engine.world, new RNG(`${engine.world.config.seed}:повседневность:${engine.world.year}:${engine.world.month}`), engine.indexes, { elapsedMonths: monthStep, forceCharacterIds: [...watchedCharacterIds, ...(message.action === 'advanceUntilCharacterEvent' ? [message.characterId] : [])] });
     advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });
     const monthMs = performance.now() - monthStarted;

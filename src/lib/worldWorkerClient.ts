@@ -10,6 +10,7 @@ import { advanceDailyLife, initializeDailyLife } from '../sim/dailyLife';
 import { RNG } from '../sim/rng';
 import { advanceDynastyLegacy, initializeDynastyLegacy } from '../sim/dynastyLegacy';
 import { advanceClimateSystem, initializeClimateSystem } from '../sim/climateSystem';
+import { advanceRaceDemography, initializeRaceDemography } from '../sim/raceDemography';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
   ? Command extends { id: number; action: infer Action }
@@ -120,6 +121,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     initializeDailyLife(command.world);
     initializeDynastyLegacy(command.world);
     initializeClimateSystem(command.world);
+    initializeRaceDemography(command.world);
     fallbackEngine = createSimulationEngine(command.world);
     return { profile: { operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() } };
   }
@@ -132,6 +134,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
     });
     initializeDynastyLegacy(world);
     initializeClimateSystem(world);
+    initializeRaceDemography(world);
     fallbackEngine = createSimulationEngine(world);
     advanceDailyLife(world, new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`), fallbackEngine.indexes, { recordEvents: false });
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };
@@ -158,6 +161,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
       advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward, monthStep });
       advanceClimateSystem(fallbackEngine.world, { elapsedMonths: monthStep });
+      advanceRaceDemography(fallbackEngine.world, { elapsedMonths: monthStep, indexes: fallbackEngine.indexes });
       advanceDailyLife(fallbackEngine.world, new RNG(`${fallbackEngine.world.config.seed}:повседневность:${fallbackEngine.world.year}:${fallbackEngine.world.month}`), fallbackEngine.indexes, { elapsedMonths: monthStep, forceCharacterIds: [...pendingWatchedCharacterIds, ...(command.action === 'advanceUntilCharacterEvent' ? [command.characterId] : [])] });
       advanceDynastyLegacy(fallbackEngine.world, { elapsedMonths: monthStep });
       const monthMs = performance.now() - monthStart;
