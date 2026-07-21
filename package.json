@@ -1,7 +1,7 @@
 {
   "name": "eldervale",
   "private": true,
-  "version": "3.9.0",
+  "version": "4.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,11 +12,13 @@
     "test:battle": "npx --yes tsx@4.20.6 scripts/battle-smoke.ts",
     "test:long": "npx --yes tsx@4.20.6 scripts/simulation-long-smoke.ts",
     "test:perf": "npx --yes tsx@4.20.6 scripts/simulation-performance.ts",
-    "test:ci": "npm run build && npm run test:watchdog && npm run test:next-event && npm run test:daily-life && npm run test:live-stories && npm run test:storage && npm run test:sim && npm run test:battle && npm run test:long && npm run test:perf",
+    "test:ci": "npm run build && npm run test:watchdog && npm run test:next-event && npm run test:daily-life && npm run test:live-stories && npm run test:dynasty-legacy && npm run test:climate && npm run test:storage && npm run test:sim && npm run test:battle && npm run test:long && npm run test:perf",
     "test:storage": "npx --yes tsx@4.20.6 scripts/storage-smoke.ts",
     "test:next-event": "npx --yes tsx@4.20.6 scripts/next-event-smoke.ts",
     "test:daily-life": "npx --yes tsx@4.20.6 scripts/daily-life-smoke.ts",
-    "test:live-stories": "npx --yes tsx@4.20.6 scripts/live-stories-smoke.ts"
+    "test:live-stories": "npx --yes tsx@4.20.6 scripts/live-stories-smoke.ts",
+    "test:dynasty-legacy": "npx --yes tsx@4.20.6 scripts/dynasty-legacy-smoke.ts",
+    "test:climate": "npx --yes tsx@4.20.6 scripts/climate-crisis-smoke.ts"
   },
   "dependencies": {
     "react": "19.2.7",

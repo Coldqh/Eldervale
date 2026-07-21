@@ -9,6 +9,7 @@ import {
 } from '../lib/worldWorkerClient';
 import { checkForUpdate, forceUpdate, type UpdateCheckResult } from '../lib/appUpdate';
 import { migrateWorld } from '../sim/migrateWorld';
+import { initializeClimateSystem } from '../sim/climateSystem';
 import { APP_VERSION } from '../version';
 import { WORLD_STORAGE_ERROR_EVENT, type StorageFailureDetail } from '../lib/storageDiagnostics';
 
@@ -66,6 +67,7 @@ export function useWorldController() {
         const [saved, slotId] = await Promise.all([loadWorld(), getActiveWorldSlotId()]);
         if (!active) return;
         if (saved) {
+          initializeClimateSystem(saved);
           setProgress({ operation: 'загрузка', phase: 'Подготовка постоянного движка', completed: 0, total: 1, percent: 0, elapsedMs: 0 });
           setPerformanceProfile(await initializeWorldInBackground(saved, setProgress));
         }
@@ -123,6 +125,7 @@ export function useWorldController() {
     try {
       const result = await generateWorldInBackground(config, setProgress);
       if (!result.world) throw new Error('Генератор не вернул созданный мир');
+      initializeClimateSystem(result.world);
       const receivedAt = performance.now();
       setLoadingText('Сохраняем созданный мир');
       const saveStarted = performance.now();
@@ -151,6 +154,7 @@ export function useWorldController() {
 
   const finishSimulation = async (result: Awaited<ReturnType<typeof advanceWorldInBackground>>, roundTripStarted: number) => {
     if (!result.world) throw new Error('Симуляция не вернула состояние мира');
+    initializeClimateSystem(result.world);
     const receivedAt = performance.now();
     setLoadingText('Сохраняем изменения мира');
     const saveStarted = performance.now();
@@ -234,6 +238,7 @@ export function useWorldController() {
     setLoadingText('Импортируем сохранённый мир');
     try {
       const migrated = migrateWorld(JSON.parse(await file.text()));
+      initializeClimateSystem(migrated);
       await initializeWorldInBackground(migrated, setProgress);
       const created = await createWorldSlot(migrated, `import-${Date.now()}`, { onProgress: setProgress });
       setWorld(migrated);
@@ -259,6 +264,7 @@ export function useWorldController() {
     try {
       const loaded = await loadWorldSlot(slotId);
       if (!loaded) throw new Error('Мир не найден');
+      initializeClimateSystem(loaded);
       setPerformanceProfile(await initializeWorldInBackground(loaded, setProgress));
       setWorld(loaded);
       setActiveSlotId(slotId);
@@ -295,6 +301,7 @@ export function useWorldController() {
         if (next) {
           const loaded = await loadWorldSlot(next.id);
           if (!loaded) throw new Error('Следующий мир не найден');
+          initializeClimateSystem(loaded);
           await initializeWorldInBackground(loaded, setProgress);
           setWorld(loaded);
           setActiveSlotId(next.id);
@@ -329,6 +336,7 @@ export function useWorldController() {
     setLoadingText('Восстанавливаем снимок мира');
     try {
       const restored = await restoreWorldSnapshot(snapshotId);
+      initializeClimateSystem(restored.world);
       await initializeWorldInBackground(restored.world, setProgress);
       setWorld(restored.world);
       setActiveSlotId(restored.slotId);
