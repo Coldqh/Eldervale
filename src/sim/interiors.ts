@@ -36,14 +36,20 @@ export interface InteriorPosition {
 
 export function initializeInteriorSystem(world: WorldState): void {
   if (INITIALIZED_WORLDS.has(world)) return;
-  ensureInteriorCapacity(world);
+  // На старте восстанавливаем только связи жильцов и работников. Полные планы
+  // комнат и мебели создаются лениво для реально используемых зданий.
+  normalizeBuildingOccupancy(world);
+  PLAN_CACHE.delete(world);
   INITIALIZED_WORLDS.add(world);
 }
 
-export function ensureInteriorCapacity(world: WorldState): void {
+export function ensureInteriorCapacity(world: WorldState, buildingIds?: Iterable<number>): void {
   normalizeBuildingOccupancy(world);
   PLAN_CACHE.delete(world);
-  for (const building of world.buildings) interiorPlanForBuilding(world, building);
+  const requested = buildingIds
+    ? new Set(buildingIds)
+    : new Set(world.buildings.filter(building => Boolean(building.interior)).map(building => building.id));
+  for (const building of world.buildings) if (requested.has(building.id)) interiorPlanForBuilding(world, building);
 }
 
 export function interiorPlanForBuilding(world: WorldState, building: Building): BuildingInteriorPlan {
@@ -264,7 +270,9 @@ export function hasOperationalInteriorAssignment(
 export function applyInteriorMonthlyEffects(world: WorldState, elapsedMonths = 1): void {
   normalizeBuildingOccupancy(world);
   PLAN_CACHE.delete(world);
-  for (const building of world.buildings) {
+  // Обслуживаем только уже материализованные интерьеры. Остальные здания
+  // получают детерминированный постоянный план при первом использовании.
+  for (const building of world.buildings.filter(item => Boolean(item.interior))) {
     const plan = interiorPlanForBuilding(world, building);
     for (const fixture of plan.fixtures) {
       if (fixture.temporary) fixture.condition = Math.max(0, fixture.condition - 2.4 * elapsedMonths);
@@ -299,7 +307,7 @@ export interface InteriorExpansionNeed {
 
 export function interiorExpansionNeeds(world: WorldState): InteriorExpansionNeed[] {
   const needs: InteriorExpansionNeed[] = [];
-  for (const building of world.buildings) {
+  for (const building of world.buildings.filter(item => Boolean(item.interior))) {
     const plan = interiorPlanForBuilding(world, building);
     const shortage = plan.unassignedSleeperIds.length + plan.unassignedStudentIds.length + plan.unassignedWorkerIds.length;
     if (!shortage) continue;
@@ -467,8 +475,9 @@ export function interiorMarkersForMap(world: WorldState, map: LocalMapData): Loc
 
 export function interiorIntegrityIssues(world: WorldState): string[] {
   const issues: string[] = [];
-  const plans = new Map(world.buildings.map(building => [building.id, interiorPlanForBuilding(world, building)]));
-  for (const building of world.buildings) {
+  const materialized = world.buildings.filter(building => Boolean(building.interior));
+  const plans = new Map(materialized.map(building => [building.id, interiorPlanForBuilding(world, building)]));
+  for (const building of materialized) {
     const plan = plans.get(building.id)!;
     if (plan.version !== INTERIOR_VERSION) issues.push(`${building.name}: устаревшая версия физического интерьера`);
     if (plan.floorCount !== building.floors) issues.push(`${building.name}: интерьер хранит ${plan.floorCount} этажей при здании ${building.floors}`);
@@ -513,7 +522,7 @@ export function interiorIntegrityIssues(world: WorldState): string[] {
 
 export function interiorCapacityWarnings(world: WorldState): string[] {
   const warnings: string[] = [];
-  for (const building of world.buildings) {
+  for (const building of world.buildings.filter(item => Boolean(item.interior))) {
     const plan = interiorPlanForBuilding(world, building);
     if (plan.unassignedSleeperIds.length) warnings.push(`${building.name}: ${plan.unassignedSleeperIds.length} жителей спят без отдельного места`);
     if (plan.unassignedStudentIds.length) warnings.push(`${building.name}: ${plan.unassignedStudentIds.length} учеников не получили парту`);
@@ -781,9 +790,9 @@ function normalizeBuildingOccupancy(world: WorldState): void {
   const householdById = new Map(world.households.map(household => [household.id, household]));
   const establishmentById = new Map(world.establishments.map(establishment => [establishment.id, establishment]));
   const characterById = new Map(world.characters.map(character => [character.id, character]));
+  const activeContractByCharacter = new Map<number, WorldState['employments'][number]>();
 
   // Старые сохранения могли знать жильца или работника только со стороны здания.
-  // Восстанавливаем обратную ссылку детерминированно, не назначая человека в два места.
   for (const building of [...world.buildings].sort((a, b) => a.id - b.id)) {
     for (const characterId of building.residentIds) {
       const character = characterById.get(characterId);
@@ -795,44 +804,54 @@ function normalizeBuildingOccupancy(world: WorldState): void {
     }
   }
 
-  // Трудовой договор — источник истины для рабочего места. Старые миры и
-  // миграции могли сохранить активный контракт, но потерять workerIds.
+  // Один проход по договорам вместо поиска договора для каждого здания и жителя.
   for (const contract of [...world.employments].filter(item => item.active).sort((a, b) => a.id - b.id)) {
+    if (!activeContractByCharacter.has(contract.characterId)) activeContractByCharacter.set(contract.characterId, contract);
     const character = characterById.get(contract.characterId);
     const establishment = establishmentById.get(contract.establishmentId);
     const workplace = establishment ? buildingById.get(establishment.buildingId) : undefined;
     if (!character?.alive || !establishment || !workplace) continue;
     if (character.settlementId !== establishment.settlementId || workplace.settlementId !== establishment.settlementId) continue;
-    character.employmentContractId ??= contract.id;
-    character.employerEstablishmentId ??= establishment.id;
-    character.workplaceBuildingId ??= workplace.id;
-    if (!establishment.workerIds.includes(character.id)) establishment.workerIds.push(character.id);
-    if (!workplace.workerIds.includes(character.id)) workplace.workerIds.push(character.id);
+    character.employmentContractId = contract.id;
+    character.employerEstablishmentId = establishment.id;
+    character.workplaceBuildingId = workplace.id;
   }
-  for (const establishment of world.establishments) establishment.workerIds = [...new Set(establishment.workerIds)].sort((a, b) => a - b);
-  for (const building of world.buildings) building.workerIds = [...new Set(building.workerIds)].sort((a, b) => a - b);
 
-  for (const character of world.characters.filter(item => item.alive)) {
+  const residentsByBuilding = new Map<number, number[]>();
+  const workersByBuilding = new Map<number, number[]>();
+  const add = (target: Map<number, number[]>, buildingId: number | undefined, characterId: number) => {
+    if (!buildingId || !buildingById.has(buildingId)) return;
+    const list = target.get(buildingId) ?? [];
+    list.push(characterId);
+    target.set(buildingId, list);
+  };
+
+  for (const character of world.characters) {
+    if (!character.alive) continue;
     const household = character.householdId ? householdById.get(character.householdId) : undefined;
-    if (household?.homeBuildingId && (!character.homeBuildingId || !buildingById.has(character.homeBuildingId))) character.homeBuildingId = household.homeBuildingId;
-    const activeContract = character.employmentContractId
-      ? world.employments.find(contract => contract.id === character.employmentContractId && contract.active)
-      : world.employments.find(contract => contract.characterId === character.id && contract.active);
-    const establishment = activeContract ? establishmentById.get(activeContract.establishmentId) : character.employerEstablishmentId ? establishmentById.get(character.employerEstablishmentId) : undefined;
-    if (establishment && (!character.workplaceBuildingId || !buildingById.has(character.workplaceBuildingId))) character.workplaceBuildingId = establishment.buildingId;
+    const homeId = character.homeBuildingId && buildingById.has(character.homeBuildingId)
+      ? character.homeBuildingId
+      : household?.homeBuildingId;
+    if (homeId) character.homeBuildingId = homeId;
+    add(residentsByBuilding, homeId, character.id);
+
+    const contract = activeContractByCharacter.get(character.id);
+    const establishment = contract
+      ? establishmentById.get(contract.establishmentId)
+      : character.employerEstablishmentId ? establishmentById.get(character.employerEstablishmentId) : undefined;
+    const workplaceId = establishment?.buildingId
+      ?? (character.workplaceBuildingId && buildingById.has(character.workplaceBuildingId) ? character.workplaceBuildingId : undefined);
+    if (workplaceId) character.workplaceBuildingId = workplaceId;
+    add(workersByBuilding, workplaceId, character.id);
   }
 
   for (const building of world.buildings) {
-    const residents = world.characters.filter(character => character.alive && character.settlementId === building.settlementId && (
-      character.homeBuildingId === building.id
-      || (character.householdId !== undefined && householdById.get(character.householdId)?.homeBuildingId === building.id)
-    ));
-    building.residentIds = [...new Set(residents.map(character => character.id))].sort((a, b) => a - b);
-    const workers = world.characters.filter(character => character.alive && character.settlementId === building.settlementId && (
-      character.workplaceBuildingId === building.id
-      || world.employments.some(contract => contract.characterId === character.id && contract.active && establishmentById.get(contract.establishmentId)?.buildingId === building.id)
-    ));
-    building.workerIds = [...new Set(workers.map(character => character.id))].sort((a, b) => a - b);
+    building.residentIds = [...new Set(residentsByBuilding.get(building.id) ?? [])].sort((a, b) => a - b);
+    building.workerIds = [...new Set(workersByBuilding.get(building.id) ?? [])].sort((a, b) => a - b);
+  }
+  for (const establishment of world.establishments) {
+    const workerIds = workersByBuilding.get(establishment.buildingId) ?? [];
+    establishment.workerIds = [...new Set(workerIds.filter(id => activeContractByCharacter.get(id)?.establishmentId === establishment.id))].sort((a, b) => a - b);
   }
 }
 

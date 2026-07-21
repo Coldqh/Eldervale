@@ -5,7 +5,7 @@ import { indexRelationship, relationshipKey, residents } from './indexes';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import {
-  applyInteriorLayoutToMap, ensureInteriorCapacity, initializeInteriorSystem, interiorMarkersForMap, interiorPositionForCharacter,
+  applyInteriorLayoutToMap, initializeInteriorSystem, interiorMarkersForMap, interiorPositionForCharacter,
   isSchoolAgeCharacter, schoolBuildingForCharacter,
 } from './interiors';
 import type { InteriorAssignmentKind } from '../interiorTypes';
@@ -34,7 +34,6 @@ export function advanceDailyLife(
   options: { elapsedMonths?: number; recordEvents?: boolean; forceCharacterIds?: readonly number[] } = {},
 ): void {
   initializeDailyLife(world);
-  ensureInteriorCapacity(world);
   const tick = worldTick(world);
   const settlementIds = selectDetailedSettlements(world, indexes, tick);
   const forcedTargets = [...new Set(options.forceCharacterIds ?? [])]
