@@ -23,11 +23,21 @@ const world = generateHistoricalWorld({
 
 initializeDailyLife(world);
 const indexes = buildWorldIndexes(world);
-const character = world.characters.find(item => item.alive && item.age >= 14) ?? world.characters.find(item => item.alive);
-assert.ok(character, 'в мире должен существовать живой персонаж');
-const mind = ensureCharacterMind(world, character);
+
+const candidates = world.characters
+  .filter(item => item.alive && item.age >= 14)
+  .sort((a, b) => a.id - b.id);
+
+const selected = candidates
+  .map(character => ({ character, mind: ensureCharacterMind(world, character) }))
+  .find(item => item.mind.goals.length > 0);
+
+assert.ok(selected, 'в мире должен существовать живой взрослый персонаж с личной целью');
+
+const { character, mind } = selected;
 const goal = [...mind.goals].sort((a, b) => b.priority - a.priority)[0];
 assert.ok(goal, 'у выбранного персонажа должна существовать личная цель');
+
 goal.progress = 24;
 const cursor = latestCharacterEventCursor(world, character.id);
 
@@ -42,6 +52,7 @@ const routine = routineForCharacter(world, character);
 assert.equal(routine.characterId, character.id, 'наблюдаемый персонаж должен получить подробный распорядок');
 assert.equal(routine.stops.length, 4, 'распорядок должен содержать четыре части суток');
 assert.ok(goal.progress >= 25, 'реальное действие должно продвигать личную цель');
+
 const pointer = nextCharacterEvent(world, character.id, cursor);
 assert.ok(pointer, 'после продвижения должна появиться новая запись личной истории');
 

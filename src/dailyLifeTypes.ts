@@ -16,6 +16,9 @@ export interface DailyRoutineStop {
   localY: number;
   buildingId?: number;
   establishmentId?: number;
+  interiorFloor?: number;
+  interiorRoomId?: string;
+  interiorFixtureId?: string;
 }
 
 export interface DailyRoutine {
