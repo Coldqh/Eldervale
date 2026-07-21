@@ -179,7 +179,10 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes, o
     dueMonsterIds,
     runSeasonalEcology: seasonal,
     runPopulation: world.month === 1,
-    runHousing: world.month === 8,
+    // Старая августовская миграция переносила отдельных людей и ломала семьи.
+    // После инициализации PopulationSystem жильё только создаёт давление,
+    // а сам переезд выполняет единая расово-демографическая система.
+    runHousing: world.month === 8 && !world.simulation.population,
     runBooks: world.month === 12,
     runSettlementLifecycle: world.month === 3,
     runMindGlobal: fastForward ? world.month === 1 : seasonal,

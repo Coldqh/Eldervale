@@ -1,16 +1,12 @@
 import type { SimulationProfile, SimulationProgress, WorldConfig, WorldState } from '../types';
 import type { WorldWorkerCommand, WorldWorkerMessage, WorldWorkerResult } from './worldWorkerProtocol';
 import { generateHistoricalWorld } from '../sim/historicalEngine';
-import { advanceOneMonth, createSimulationEngine, monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
+import { monthsToNextQuarter, resetSimulationProfiler, simulationPhaseProfile, type SimulationEngine } from '../sim/simulation';
 import { countIndexedEntities } from '../sim/indexes';
 import { createInactivityWatchdog, workerInactivityTimeout, type InactivityWatchdog, type WorkerOperation } from './workerWatchdog';
 import { latestEventId, nextImportantEventId } from './nextEvent';
 import { latestCharacterEventCursor, nextCharacterEvent } from './liveStories';
-import { advanceDailyLife, initializeDailyLife } from '../sim/dailyLife';
-import { RNG } from '../sim/rng';
-import { advanceDynastyLegacy, initializeDynastyLegacy } from '../sim/dynastyLegacy';
-import { advanceClimateSystem, initializeClimateSystem } from '../sim/climateSystem';
-import { advanceRaceDemography, initializeRaceDemography } from '../sim/raceDemography';
+import { advanceWorldSystems, createWorldSystemEngine } from '../sim/worldSimulationPipeline';
 
 type WorldWorkerCommandInput = WorldWorkerCommand extends infer Command
   ? Command extends { id: number; action: infer Action }
@@ -118,11 +114,7 @@ function runWorker(command: WorldWorkerCommandInput, onProgress?: (progress: Sim
 async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progress: SimulationProgress) => void): Promise<WorldWorkerResult> {
   const startedAt = performance.now();
   if (command.action === 'initialize') {
-    initializeDailyLife(command.world);
-    initializeDynastyLegacy(command.world);
-    initializeClimateSystem(command.world);
-    initializeRaceDemography(command.world);
-    fallbackEngine = createSimulationEngine(command.world);
+    fallbackEngine = createWorldSystemEngine(command.world);
     return { profile: { operation: 'загрузка', totalMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() } };
   }
   if (command.action === 'generate') {
@@ -132,11 +124,7 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       const scaled = Math.min(97, completed / Math.max(1, total) * 97);
       onProgress?.({ operation, phase, completed: scaled, total: 100, percent: scaled, elapsedMs, etaMs: completed ? elapsedMs / completed * (total - completed) : undefined, detail });
     });
-    initializeDynastyLegacy(world);
-    initializeClimateSystem(world);
-    initializeRaceDemography(world);
-    fallbackEngine = createSimulationEngine(world);
-    advanceDailyLife(world, new RNG(`${world.config.seed}:повседневность:${world.year}:${world.month}`), fallbackEngine.indexes, { recordEvents: false });
+    fallbackEngine = createWorldSystemEngine(world, { primeDailyLife: true });
     const profile: SimulationProfile = { operation: 'генерация', totalMs: performance.now() - startedAt, simulationMs: performance.now() - startedAt, indexedEntities: countIndexedEntities(fallbackEngine.indexes), generatedAt: Date.now() };
     fallbackProfile = profile;
     return { world, profile };
@@ -159,11 +147,12 @@ async function runFallback(command: WorldWorkerCommandInput, onProgress?: (progr
       const monthStart = performance.now();
       let phase = 'Симуляция мира';
       const monthStep = fastForward ? Math.min(targetMonths - completedMonths, monthsToNextQuarter(fallbackEngine.world.month)) : 1;
-      advanceOneMonth(fallbackEngine, value => { phase = value; }, { fastForward, monthStep });
-      advanceClimateSystem(fallbackEngine.world, { elapsedMonths: monthStep });
-      advanceRaceDemography(fallbackEngine.world, { elapsedMonths: monthStep, indexes: fallbackEngine.indexes });
-      advanceDailyLife(fallbackEngine.world, new RNG(`${fallbackEngine.world.config.seed}:повседневность:${fallbackEngine.world.year}:${fallbackEngine.world.month}`), fallbackEngine.indexes, { elapsedMonths: monthStep, forceCharacterIds: [...pendingWatchedCharacterIds, ...(command.action === 'advanceUntilCharacterEvent' ? [command.characterId] : [])] });
-      advanceDynastyLegacy(fallbackEngine.world, { elapsedMonths: monthStep });
+      advanceWorldSystems(fallbackEngine, {
+        fastForward,
+        monthStep,
+        onPhase: value => { phase = value; },
+        forceCharacterIds: [...pendingWatchedCharacterIds, ...(command.action === 'advanceUntilCharacterEvent' ? [command.characterId] : [])],
+      });
       const monthMs = performance.now() - monthStart;
       const normalizedMonthMs = monthMs / monthStep;
       average = average ? average * .72 + normalizedMonthMs * .28 : normalizedMonthMs;

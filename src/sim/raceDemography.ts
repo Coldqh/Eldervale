@@ -285,8 +285,7 @@ function processMigrationCycles(
       const chance = Math.min(.72, .06 + originEntry.pressure / 170 + improvement / 240) * raceDefinition(group.species[0]!).migrationDrive;
       if ((hashSeed(`${world.config.seed}:миграция:${worldTick(world)}:${group.characterIds.join('-')}:${destination.id}`) % 10000) / 10000 >= chance) continue;
       if (!canEnterSettlement(world, destination, group.species, reason, group.characterIds[0]!)) continue;
-      moveGroup(world, state, originEntry.settlement, destination, group, reason, indexes, recordHistory);
-      moved += 1;
+      if (moveGroup(world, state, originEntry.settlement, destination, group, reason, indexes, recordHistory)) moved += 1;
     }
   }
 }
@@ -299,16 +298,28 @@ interface MigrationGroup {
 
 function migrationGroups(world: WorldState, settlement: Settlement): MigrationGroup[] {
   const groups: MigrationGroup[] = [];
-  const used = new Set<number>();
+  const householdMembers = new Set<number>();
   for (const household of world.households.filter(item => item.settlementId === settlement.id).sort((a, b) => a.id - b.id)) {
     const members = household.memberIds
       .map(id => world.characters.find(character => character.id === id))
-      .filter((character): character is Character => Boolean(character?.alive && character.settlementId === settlement.id && canMigrate(character)));
-    if (!members.length || members.some(character => world.kingdoms.some(kingdom => kingdom.rulerId === character.id))) continue;
-    members.forEach(character => used.add(character.id));
-    groups.push({ householdId: household.id, characterIds: members.map(character => character.id), species: [...new Set(members.map(character => character.species))] });
+      .filter((character): character is Character => Boolean(character?.alive && character.settlementId === settlement.id));
+    members.forEach(character => householdMembers.add(character.id));
+    if (!members.length) continue;
+    // Семья переезжает только целиком. Нельзя оставить ребёнка, пленника или солдата
+    // в старом городе, одновременно перенеся само домохозяйство и его дом.
+    if (members.some(character => !canMigrate(character))) continue;
+    if (members.some(character => world.kingdoms.some(kingdom => kingdom.rulerId === character.id))) continue;
+    groups.push({
+      householdId: household.id,
+      characterIds: members.map(character => character.id),
+      species: [...new Set(members.map(character => character.species))],
+    });
   }
-  for (const character of world.characters.filter(item => item.alive && item.settlementId === settlement.id && item.age >= raceDefinition(item.species).adultAge && !used.has(item.id) && canMigrate(item))) {
+  for (const character of world.characters.filter(item => item.alive
+    && item.settlementId === settlement.id
+    && item.age >= raceDefinition(item.species).adultAge
+    && !householdMembers.has(item.id)
+    && canMigrate(item))) {
     groups.push({ characterIds: [character.id], species: [character.species] });
   }
   return groups.slice(0, 80);
@@ -369,7 +380,7 @@ function migrationReason(world: WorldState, settlement: Settlement): MigrationRe
   if (world.epidemics.some(item => item.settlementId === settlement.id && item.status !== 'завершено')) return 'эпидемия';
   const climate = world.simulation.climate?.settlements.find(item => item.settlementId === settlement.id);
   if ((climate?.migrationPressure ?? 0) >= 62) return 'климат';
-  if (settlement.shortages.includes('еда') || settlement.food < 26) return 'голод';
+  if (settlement.shortages.includes('еда') || settlement.shortages.includes('пища') || settlement.food < 26) return 'голод';
   if (settlement.population > settlement.residentialCapacity) return 'перенаселение';
   if (settlement.economy.bankruptcies > 2 || settlement.prosperity < 34) return 'безработица';
   return settlement.tradeRouteIds.length ? 'торговля' : 'родственники';
@@ -396,25 +407,49 @@ function moveGroup(
   reason: MigrationReason,
   indexes: WorldIndexes | undefined,
   recordHistory: boolean,
-): void {
+): boolean {
   const household = group.householdId ? world.households.find(item => item.id === group.householdId) : undefined;
-  const oldHomeId = household?.homeBuildingId;
-  const oldHome = oldHomeId ? world.buildings.find(item => item.id === oldHomeId) : undefined;
-  if (oldHome) oldHome.residentIds = oldHome.residentIds.filter(id => !group.characterIds.includes(id));
+  const members = group.characterIds
+    .map(id => world.characters.find(item => item.id === id))
+    .filter((character): character is Character => Boolean(character?.alive && character.settlementId === origin.id));
+  if (members.length !== group.characterIds.length) return false;
+
+  if (household) {
+    const aliveHouseholdMembers = household.memberIds
+      .map(id => world.characters.find(item => item.id === id))
+      .filter((character): character is Character => Boolean(character?.alive));
+    if (aliveHouseholdMembers.some(character => character.settlementId !== origin.id)) return false;
+    if (!sameIds(aliveHouseholdMembers.map(character => character.id), group.characterIds)) return false;
+  }
+
+  const migratingIds = new Set(group.characterIds);
+  const oldHome = household?.homeBuildingId ? world.buildings.find(item => item.id === household.homeBuildingId) : undefined;
+  for (const building of world.buildings) {
+    building.residentIds = building.residentIds.filter(id => !migratingIds.has(id));
+    building.workerIds = building.workerIds.filter(id => !migratingIds.has(id));
+  }
+  for (const establishment of world.establishments) {
+    establishment.workerIds = establishment.workerIds.filter(id => !migratingIds.has(id));
+  }
+  for (const contract of world.employments) {
+    if (migratingIds.has(contract.characterId) && contract.active) contract.active = false;
+  }
+
+  if (oldHome && oldHome.householdId === household?.id) oldHome.householdId = undefined;
   const newHome = chooseDestinationHome(world, destination, group.characterIds.length);
   if (household) {
     if (indexes) moveHouseholdIndex(indexes, household, destination.id);
     household.settlementId = destination.id;
     household.homeBuildingId = newHome?.id;
     household.history.push(`${world.year}.${String(world.month).padStart(2, '0')}: семья переехала из ${origin.name} в ${destination.name}; причина — ${reason}.`);
+    if (newHome && newHome.householdId === undefined) newHome.householdId = household.id;
   }
   if (newHome) {
     for (const id of group.characterIds) if (!newHome.residentIds.includes(id)) newHome.residentIds.push(id);
+    newHome.residentIds.sort((a, b) => a - b);
   }
 
-  for (const id of group.characterIds) {
-    const character = world.characters.find(item => item.id === id);
-    if (!character) continue;
+  for (const character of members) {
     if (indexes) moveResidentInIndexes(indexes, character, destination.id);
     else character.settlementId = destination.id;
     character.kingdomId = destination.kingdomId;
@@ -426,8 +461,16 @@ function moveGroup(
     character.workplace = 'ищет работу после переезда';
     character.homeless = !newHome;
     character.biography.push(`В ${world.year} году переехал из ${origin.name} в ${destination.name}: ${reason}.`);
-    const contract = world.employments.find(item => item.characterId === character.id && item.active);
-    if (contract) contract.active = false;
+  }
+
+  for (const item of world.items) {
+    if (household && item.householdId === household.id) {
+      item.settlementId = destination.id;
+      item.buildingId = newHome?.id;
+    } else if (item.ownerCharacterId && migratingIds.has(item.ownerCharacterId)) {
+      item.settlementId = destination.id;
+      item.buildingId = newHome?.id;
+    }
   }
 
   origin.population = world.characters.filter(item => item.alive && item.settlementId === origin.id).length;
@@ -444,6 +487,13 @@ function moveGroup(
     origin.history.push(`${record.year}.${String(record.month).padStart(2, '0')}: ${record.summary}`);
     destination.history.push(`${record.year}.${String(record.month).padStart(2, '0')}: прибыли переселенцы из ${origin.name}; причина — ${reason}.`);
   }
+  return true;
+}
+
+function sameIds(first: readonly number[], second: readonly number[]): boolean {
+  if (first.length !== second.length) return false;
+  const expected = new Set(first);
+  return second.every(id => expected.has(id));
 }
 
 function chooseDestinationHome(world: WorldState, settlement: Settlement, size: number): Building | undefined {
