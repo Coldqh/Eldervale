@@ -13,8 +13,24 @@ export type CityProblemKind =
   | 'water-shortage'
   | 'fire-risk';
 
+export type CityDirtyReason =
+  | 'initialization'
+  | 'population'
+  | 'migration'
+  | 'housing'
+  | 'employment'
+  | 'inventory'
+  | 'construction'
+  | 'building'
+  | 'services'
+  | 'manual';
+
+export type CityProjectStatus = 'requested' | 'blocked' | 'approved' | 'started' | 'completed' | 'rejected' | 'cancelled';
+export type CityProblemStatus = 'active' | 'resolved';
+
 export interface BuildingCapacityProfile {
-  version: 1;
+  version: 2;
+  signature: string;
   usableFloorCells: number;
   circulationCells: number;
   serviceCells: number;
@@ -64,6 +80,17 @@ export interface HouseholdHousingAudit {
   overcrowdingRatio: number;
 }
 
+export interface CityHousingAssignment {
+  id: string;
+  householdId?: number;
+  characterIds: number[];
+  buildingId?: number;
+  shelterBuildingId?: number;
+  status: HousingStatus;
+  permanentBedCount: number;
+  assignedTick: number;
+}
+
 export interface CityProblem {
   id: string;
   kind: CityProblemKind;
@@ -77,8 +104,45 @@ export interface CityProblem {
   districtNames: string[];
 }
 
-export interface SettlementCityState {
+export interface CityProblemRecord extends CityProblem {
+  status: CityProblemStatus;
+  firstSeenTick: number;
+  lastSeenTick: number;
+  resolvedTick?: number;
+  peakSeverity: number;
+  history: string[];
+}
+
+export interface CityProjectRequest {
+  id: string;
+  settlementId: number;
+  requestedBuildingType: string;
+  reason: string;
+  source: string;
+  priority: number;
+  status: CityProjectStatus;
+  requestedTick: number;
+  updatedTick: number;
+  constructionProjectId?: number;
+  blockedReason?: string;
+  history: string[];
+}
+
+export interface UrbanState {
   version: 1;
+  settlementId: number;
+  initializedTick: number;
+  lastSimulatedTick: number;
+  simulationCount: number;
+  dirty: boolean;
+  dirtyReasons: CityDirtyReason[];
+  housingAssignments: CityHousingAssignment[];
+  problemRecords: CityProblemRecord[];
+  projectQueue: CityProjectRequest[];
+}
+
+export interface SettlementCityState {
+  version: 2;
   settlementId: number;
   updatedTick: number;
   population: number;

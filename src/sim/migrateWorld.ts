@@ -31,11 +31,11 @@ export function migrateWorld(input: unknown): WorldState {
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-24`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-25`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 24;
+  localized.version = 25;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -73,6 +73,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.settlementGovernments ??= [];
   localized.districtCivicStates ??= [];
   localized.cityStates ??= [];
+  localized.urbanStates ??= [];
   localized.civicPatrols ??= [];
   localized.crimes ??= [];
   localized.courtCases ??= [];
@@ -300,7 +301,6 @@ export function migrateWorld(input: unknown): WorldState {
   initializeHealthSystem(localized as WorldState);
   initializeBattleSystem(localized as WorldState);
   initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
-  initializeCitySimulation(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }
@@ -310,6 +310,7 @@ export function migrateWorld(input: unknown): WorldState {
     settlement.population = localized.characters.reduce((sum: number, character: any) =>
       sum + Number(character.alive && character.settlementId === settlement.id), 0);
   }
+  initializeCitySimulation(localized as WorldState);
 
   localized.history.engineVersion = 2;
   localized.history.historicalSimulationVersion ??= 1;

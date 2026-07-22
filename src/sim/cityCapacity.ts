@@ -9,7 +9,11 @@ const WORKPLACE = new Set<Building['type']>([
   'courthouse', 'prison', 'fireStation', 'school', 'shelter', 'barracks', 'monastery',
 ]);
 
-export function buildingCapacityProfile(building: Building): BuildingCapacityProfile {
+export function buildingCapacitySignature(building: Building): string {
+  return [building.type, building.localWidth, building.localHeight, building.floors].join(':');
+}
+
+export function calculateBuildingCapacityProfile(building: Building): BuildingCapacityProfile {
   const innerWidth = Math.max(1, building.localWidth - 2);
   const innerHeight = Math.max(1, building.localHeight - 2);
   const usableFloorCells = innerWidth * innerHeight * Math.max(1, building.floors);
@@ -22,7 +26,8 @@ export function buildingCapacityProfile(building: Building): BuildingCapacityPro
   const functionalCells = Math.max(1, Math.floor((remainingAfterCirculation - serviceCells) * layoutEfficiencyFor(building.type)));
 
   const profile: BuildingCapacityProfile = {
-    version: 1,
+    version: 2,
+    signature: buildingCapacitySignature(building),
     usableFloorCells,
     circulationCells,
     serviceCells,
@@ -77,6 +82,20 @@ export function buildingCapacityProfile(building: Building): BuildingCapacityPro
     ? Math.max(1, Math.floor(innerWidth / 5)) : 0;
   profile.publicSeats = publicSeatCapacity(building.type, functionalCells);
 
+  return profile;
+}
+
+
+export function buildingCapacityProfile(building: Building): BuildingCapacityProfile {
+  const current = building.cityCapacity;
+  const signature = buildingCapacitySignature(building);
+  if (current?.version === 2 && current.signature === signature) return current;
+  return calculateBuildingCapacityProfile(building);
+}
+
+export function ensureBuildingCapacityProfile(building: Building): BuildingCapacityProfile {
+  const profile = buildingCapacityProfile(building);
+  if (building.cityCapacity !== profile) building.cityCapacity = profile;
   return profile;
 }
 

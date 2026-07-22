@@ -51,7 +51,7 @@ const ruler = person(7, 'Король Эрдан', 46, 'ruler', 4);
 ruler.titles = ['Правитель'];
 
 const world = {
-  version: 24, language: 'ru', appVersion: '5.0.0',
+  version: 25, language: 'ru', appVersion: '5.0.0',
   config: { seed: 'deep-interiors-smoke', width: 1, height: 1, historyYears: 90, kingdomCount: 1, settlementCount: 1, populationScale: 1, magic: .5, warlike: .2, monsterDensity: .1, artifactDensity: .1, localMapSize: SIZE, ecologyDensity: .1, huntingPressure: 1 },
   name: 'Проверка интерьеров', year: 90, month: 6,
   tiles: [{ x: 0, y: 0, terrain: 'plains', elevation: .5, moisture: .5, kingdomId: 1, settlementId: 1, settlementDistrict: 'Центр' }],

@@ -848,7 +848,7 @@ function runPhase<T>(engine: SimulationEngine, phase: string, onPhase: ((phase: 
 export function advanceOneMonth(
   engine: SimulationEngine,
   onPhase?: (phase: string) => void,
-  options: { fastForward?: boolean; monthStep?: number } = {},
+  options: { fastForward?: boolean; monthStep?: number; deferCitySimulation?: boolean } = {},
 ): number {
   const { world, indexes } = engine;
   const fastForward = Boolean(options.fastForward);
@@ -928,7 +928,7 @@ export function advanceOneMonth(
   synchronizeStateMachineReferences(world, new RNG(`${world.config.seed}:state-references:${world.year}:${world.month}`), indexes);
   synchronizeEmploymentLinks(world, indexes);
   synchronizeSettlementPopulation(engine);
-  advanceCitySimulation(world);
+  if (!options.deferCitySimulation) advanceCitySimulation(world);
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
 }
@@ -949,8 +949,8 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeDynastyLegacy(world);
   initializeClimateSystem(world);
   initializeRaceDemography(world);
-  initializeCitySimulation(world);
   synchronizeEmploymentLinks(world);
+  initializeCitySimulation(world);
 }
 
 export function createWorldSystemEngine(
@@ -979,7 +979,7 @@ export function advanceWorldSystems(
   const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
   const onPhase = options.onPhase;
 
-  advanceOneMonth(engine, onPhase, { fastForward, monthStep });
+  advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true });
 
   onPhase?.('Климат, сезоны и природное давление');
   advanceClimateSystem(engine.world, { elapsedMonths: monthStep });
@@ -998,12 +998,6 @@ export function advanceWorldSystems(
     },
   );
 
-  onPhase?.('Городское ядро, жильё, школы, работа и земля');
-  advanceCitySimulation(engine.world);
-
-  onPhase?.('Физические интерьеры, сон и износ мебели');
-  applyInteriorMonthlyEffects(engine.world, monthStep);
-
   onPhase?.('Династии, поколения и наследие');
   advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });
 
@@ -1011,7 +1005,12 @@ export function advanceWorldSystems(
   synchronizeStateMachineReferences(engine.world, new RNG(`${engine.world.config.seed}:state-references:${engine.world.year}:${engine.world.month}`), engine.indexes);
   synchronizeEmploymentLinks(engine.world, engine.indexes);
   synchronizeSettlementPopulation(engine);
+
+  onPhase?.('Городской источник истины, распределение и проекты');
   advanceCitySimulation(engine.world);
+
+  onPhase?.('Физические интерьеры, сон и износ мебели');
+  applyInteriorMonthlyEffects(engine.world, monthStep);
   return monthStep;
 }
 

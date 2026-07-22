@@ -7,7 +7,7 @@ import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { raceDefinition } from '../raceCatalog';
 import type { BuildingCapacityProfile } from '../cityTypes';
-import { buildingCapacityProfile, circulationCell } from './cityCapacity';
+import { ensureBuildingCapacityProfile, circulationCell } from './cityCapacity';
 
 const PLAN_CACHE = new WeakMap<WorldState, Map<number, BuildingInteriorPlan>>();
 const INITIALIZED_WORLDS = new WeakSet<WorldState>();
@@ -58,8 +58,7 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   let cache = PLAN_CACHE.get(world);
   if (!cache) { cache = new Map(); PLAN_CACHE.set(world, cache); }
   const demand = collectDemand(world, building);
-  const capacityProfile = buildingCapacityProfile(building);
-  building.cityCapacity = capacityProfile;
+  const capacityProfile = ensureBuildingCapacityProfile(building);
   const signature = planSignature(world, building, demand, capacityProfile);
   const cached = cache.get(building.id);
   if (cached?.signature === signature) return cached;

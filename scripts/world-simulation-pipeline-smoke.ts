@@ -31,6 +31,11 @@ const manual = structuredClone(generated);
 const manualEngine = createWorldSystemEngine(manual);
 for (let month = 0; month < 6; month += 1) advanceWorldSystems(manualEngine);
 assert.deepEqual(manual, direct, 'прямой прогон и ручной вызов общего pipeline должны давать идентичный мир');
+const initialCityRuns = new Map(generated.urbanStates.map(state => [state.settlementId, state.simulationCount]));
+for (const state of direct.urbanStates) {
+  assert.equal(state.simulationCount, (initialCityRuns.get(state.settlementId) ?? 0) + 6, 'единый pipeline должен выполнять ровно один городской ход за месяц');
+  assert.equal(state.dirty, false, 'городской ход должен завершаться чистым состоянием');
+}
 const activeContracts = direct.employments.filter(contract => contract.active);
 const establishmentById = new Map(direct.establishments.map(establishment => [establishment.id, establishment]));
 assert.ok(activeContracts.every(contract => establishmentById.get(contract.establishmentId)?.workerIds.includes(contract.characterId)), 'каждый активный договор должен быть отражён в workerIds заведения');

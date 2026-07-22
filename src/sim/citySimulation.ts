@@ -1,28 +1,64 @@
 import type { Building, Character, Settlement, WorldState } from '../types';
 import type {
-  BuildingCityAudit, CityProblem, CityProblemKind, HouseholdHousingAudit, HousingStatus, SettlementCityState,
+  BuildingCityAudit, CityHousingAssignment, CityProblem, CityProblemKind, HouseholdHousingAudit, HousingStatus,
+  SettlementCityState, UrbanState,
 } from '../cityTypes';
 import { raceDefinition } from '../raceCatalog';
 import { worldTick } from './scheduler';
-import { buildingCapacityProfile } from './cityCapacity';
+import { buildingCapacityProfile, ensureBuildingCapacityProfile } from './cityCapacity';
+import { clearCityDirty, ensureUrbanState, markAllCitiesDirty, normalizeUrbanStates } from './cityState';
+import { reconcileCityProjectQueue } from './cityProjects';
 
-const CITY_VERSION = 1 as const;
+const CITY_VERSION = 2 as const;
 const RESIDENTIAL_TYPES = new Set<Building['type']>(['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle']);
+
+type HousingAuditResult = ReturnType<typeof auditHousing>;
+
+interface CityProjectionResult {
+  state: SettlementCityState;
+  housing: HousingAuditResult;
+  living: Character[];
+}
 
 export function initializeCitySimulation(world: WorldState): void {
   world.cityStates ??= [];
+  const hadUrbanStates = Array.isArray(world.urbanStates) && world.urbanStates.length === world.settlements.length;
+  normalizeUrbanStates(world);
+  for (const building of world.buildings) ensureBuildingCapacityProfile(building);
+  const snapshotsCurrent = world.cityStates.length === world.settlements.length
+    && world.cityStates.every(state => state.version === CITY_VERSION);
+  const requiresInitialTurn = !hadUrbanStates || !snapshotsCurrent
+    || world.urbanStates.some(state => state.lastSimulatedTick < 0);
+  if (!requiresInitialTurn) return;
+  markAllCitiesDirty(world, 'initialization');
   advanceCitySimulation(world);
 }
 
 export function advanceCitySimulation(world: WorldState, settlementIds?: ReadonlySet<number>): void {
   world.cityStates ??= [];
+  normalizeUrbanStates(world);
   const requested = settlementIds ?? new Set(world.settlements.map(settlement => settlement.id));
   const nextBySettlement = new Map(world.cityStates.map(state => [state.settlementId, state]));
   for (const settlement of world.settlements) {
     if (!requested.has(settlement.id)) continue;
-    nextBySettlement.set(settlement.id, auditSettlementCity(world, settlement));
+    nextBySettlement.set(settlement.id, simulateSettlementCity(world, settlement));
   }
-  world.cityStates = world.settlements.map(settlement => nextBySettlement.get(settlement.id)).filter((state): state is SettlementCityState => Boolean(state));
+  world.cityStates = world.settlements
+    .map(settlement => nextBySettlement.get(settlement.id))
+    .filter((state): state is SettlementCityState => Boolean(state));
+}
+
+export function refreshCitySnapshots(world: WorldState, settlementIds?: ReadonlySet<number>): void {
+  world.cityStates ??= [];
+  const requested = settlementIds ?? new Set(world.settlements.map(settlement => settlement.id));
+  const nextBySettlement = new Map(world.cityStates.map(state => [state.settlementId, state]));
+  for (const settlement of world.settlements) {
+    if (!requested.has(settlement.id)) continue;
+    nextBySettlement.set(settlement.id, projectSettlementCity(world, settlement));
+  }
+  world.cityStates = world.settlements
+    .map(settlement => nextBySettlement.get(settlement.id))
+    .filter((state): state is SettlementCityState => Boolean(state));
 }
 
 export function cityStateForSettlement(world: WorldState, settlementId: number): SettlementCityState | undefined {
@@ -30,6 +66,33 @@ export function cityStateForSettlement(world: WorldState, settlementId: number):
 }
 
 export function auditSettlementCity(world: WorldState, settlement: Settlement): SettlementCityState {
+  return projectSettlementCity(world, settlement);
+}
+
+export function projectSettlementCity(world: WorldState, settlement: Settlement): SettlementCityState {
+  return computeCityProjection(world, settlement).state;
+}
+
+function simulateSettlementCity(world: WorldState, settlement: Settlement): SettlementCityState {
+  const tick = worldTick(world);
+  for (const building of world.buildings) {
+    if (building.settlementId === settlement.id) ensureBuildingCapacityProfile(building);
+  }
+  const projection = computeCityProjection(world, settlement);
+  const urban = ensureUrbanState(world, settlement.id);
+  urban.housingAssignments = buildHousingAssignments(world, projection.housing, projection.living, tick);
+  applyHousingStatuses(world, settlement, projection.living, projection.housing.characterStatuses, projection.housing.shelterAssignments);
+  settlement.population = projection.state.population;
+  settlement.households = projection.state.households;
+  settlement.residentialCapacity = projection.state.housing.permanentBeds;
+  updateProblemRecords(urban, projection.state.problems, tick);
+  urban.simulationCount += 1;
+  reconcileCityProjectQueue(world, settlement.id);
+  clearCityDirty(urban, tick);
+  return projection.state;
+}
+
+function computeCityProjection(world: WorldState, settlement: Settlement): CityProjectionResult {
   const living = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
   const buildings = world.buildings.filter(building => building.settlementId === settlement.id);
   const households = world.households.filter(household => household.settlementId === settlement.id);
@@ -41,7 +104,6 @@ export function auditSettlementCity(world: WorldState, settlement: Settlement): 
 
   const buildingAudits: BuildingCityAudit[] = buildings.map(building => {
     const capacity = buildingCapacityProfile(building);
-    building.cityCapacity = capacity;
     const residents = living.filter(character => character.homeBuildingId === building.id || building.residentIds.includes(character.id));
     const workers = living.filter(character => character.workplaceBuildingId === building.id || building.workerIds.includes(character.id));
     const students = studentsBySchool.get(building.id) ?? [];
@@ -75,8 +137,6 @@ export function auditSettlementCity(world: WorldState, settlement: Settlement): 
   });
 
   const housing = auditHousing(world, settlement, living, households, buildingById, buildingAudits);
-  applyHousingStatuses(world, settlement, living, housing.characterStatuses, housing.shelterAssignments);
-
   const schoolAgeChildren = living.filter(isSchoolAge).length;
   const classrooms = buildingAudits.reduce((sum, audit) => sum + audit.capacity.classrooms, 0);
   const studentSeats = buildingAudits.reduce((sum, audit) => sum + audit.capacity.studentSeats, 0);
@@ -102,16 +162,11 @@ export function auditSettlementCity(world: WorldState, settlement: Settlement): 
   const storageCapacity = buildingAudits.reduce((sum, audit) => sum + audit.capacity.storageVolume, 0);
   const storageUsedTotal = buildingAudits.reduce((sum, audit) => sum + audit.storageUsed, 0);
   const storageOverflow = Math.max(0, storageUsedTotal - storageCapacity);
-
   const land = landAudit(world, settlement, buildings);
   const waterBuildings = buildings.filter(building => building.hasWater).length;
   const waterCoverage = buildings.length ? waterBuildings / buildings.length : 0;
   const districtStates = world.districtCivicStates.filter(state => state.settlementId === settlement.id);
   const averageFireRisk = districtStates.length ? districtStates.reduce((sum, state) => sum + state.fireRisk, 0) / districtStates.length : 0;
-
-  settlement.population = living.length;
-  settlement.households = households.length;
-  settlement.residentialCapacity = housing.permanentBeds;
 
   const stateBase: Omit<SettlementCityState, 'problems'> = {
     version: CITY_VERSION,
@@ -146,24 +201,134 @@ export function auditSettlementCity(world: WorldState, settlement: Settlement): 
     buildingAudits,
     householdAudits: housing.householdAudits,
   };
-  return { ...stateBase, problems: buildProblems(settlement, stateBase, living) };
+  const state = { ...stateBase, problems: buildProblems(settlement, stateBase, living, housing.characterStatuses) };
+  return { state, housing, living };
+}
+
+function buildHousingAssignments(world: WorldState, housing: HousingAuditResult, living: Character[], tick: number): CityHousingAssignment[] {
+  const assignments: CityHousingAssignment[] = [];
+  const livingById = new Map(living.map(character => [character.id, character]));
+  const assignedCharacters = new Set<number>();
+  for (const audit of housing.householdAudits) {
+    const household = world.households.find(item => item.id === audit.householdId);
+    const characterIds = [...new Set((household?.memberIds ?? []).filter(id => livingById.has(id) && !assignedCharacters.has(id)))];
+    if (!characterIds.length) continue;
+    const statuses = new Set(characterIds.map(id => housing.characterStatuses.get(id) ?? 'homeless'));
+    const split = statuses.size > 1 || characterIds.some(id => housing.shelterAssignments.has(id));
+    if (split) {
+      for (const characterId of characterIds) {
+        assignedCharacters.add(characterId);
+        const status = housing.characterStatuses.get(characterId) ?? 'homeless';
+        assignments.push({
+          id: `housing:household:${audit.householdId}:character:${characterId}`,
+          householdId: audit.householdId,
+          characterIds: [characterId],
+          buildingId: audit.buildingId,
+          shelterBuildingId: housing.shelterAssignments.get(characterId),
+          status,
+          permanentBedCount: status === 'secure' || status === 'overcrowded' ? 1 : 0,
+          assignedTick: tick,
+        });
+      }
+      continue;
+    }
+    characterIds.forEach(id => assignedCharacters.add(id));
+    assignments.push({
+      id: `housing:household:${audit.householdId}`,
+      householdId: audit.householdId,
+      characterIds,
+      buildingId: audit.buildingId,
+      status: audit.status,
+      permanentBedCount: audit.permanentBedCount,
+      assignedTick: tick,
+    });
+  }
+  for (const character of living) {
+    if (assignedCharacters.has(character.id)) continue;
+    assignments.push({
+      id: `housing:character:${character.id}`,
+      characterIds: [character.id],
+      buildingId: character.homeBuildingId,
+      shelterBuildingId: housing.shelterAssignments.get(character.id),
+      status: housing.characterStatuses.get(character.id) ?? 'homeless',
+      permanentBedCount: housing.characterStatuses.get(character.id) === 'secure' ? 1 : 0,
+      assignedTick: tick,
+    });
+  }
+  return assignments;
+}
+
+function updateProblemRecords(urban: UrbanState, problems: CityProblem[], tick: number): void {
+  const activeById = new Map(problems.map(problem => [problem.id, problem]));
+  for (const record of urban.problemRecords) {
+    const current = activeById.get(record.id);
+    if (current) {
+      const changed = Math.round(record.severity) !== Math.round(current.severity);
+      Object.assign(record, current, { status: 'active' as const, lastSeenTick: tick, resolvedTick: undefined, peakSeverity: Math.max(record.peakSeverity, current.severity) });
+      if (changed) record.history.push(`Тяжесть изменилась до ${Math.round(current.severity)} в ${tick}.`);
+      activeById.delete(record.id);
+    } else if (record.status === 'active') {
+      record.status = 'resolved';
+      record.resolvedTick = tick;
+      record.lastSeenTick = tick;
+      record.history.push(`Проблема разрешена в ${tick}.`);
+    }
+  }
+  for (const problem of activeById.values()) {
+    urban.problemRecords.push({ ...problem, status: 'active', firstSeenTick: tick, lastSeenTick: tick, peakSeverity: problem.severity, history: [`Проблема обнаружена в ${tick}.`] });
+  }
+  urban.problemRecords = urban.problemRecords
+    .sort((a, b) => Number(a.status === 'resolved') - Number(b.status === 'resolved') || b.severity - a.severity || a.firstSeenTick - b.firstSeenTick)
+    .slice(0, 240);
 }
 
 export function cityIntegrityIssues(world: WorldState): string[] {
   const issues: string[] = [];
   const stateBySettlement = new Map((world.cityStates ?? []).map(state => [state.settlementId, state]));
+  const urbanBySettlement = new Map((world.urbanStates ?? []).map(state => [state.settlementId, state]));
+  const constructionIds = new Set(world.constructionProjects.map(project => project.id));
+  const requestIds = new Set<string>();
   for (const settlement of world.settlements) {
     const state = stateBySettlement.get(settlement.id);
-    if (!state) { issues.push(`${settlement.name}: отсутствует городской аудит`); continue; }
-    if (state.version !== CITY_VERSION) issues.push(`${settlement.name}: устаревшая версия городского ядра`);
-    if (state.population !== settlement.population) issues.push(`${settlement.name}: городской аудит считает ${state.population} жителей, поселение хранит ${settlement.population}`);
+    const urban = urbanBySettlement.get(settlement.id);
+    if (!state) { issues.push(`${settlement.name}: отсутствует городской snapshot`); continue; }
+    if (!urban) { issues.push(`${settlement.name}: отсутствует постоянное городское состояние`); continue; }
+    if (state.version !== CITY_VERSION) issues.push(`${settlement.name}: устаревшая версия городского snapshot`);
+    if (urban.version !== 1) issues.push(`${settlement.name}: устаревшая версия постоянного городского состояния`);
+    if (urban.dirty) issues.push(`${settlement.name}: городской ход завершён с dirty-состоянием`);
+    if (state.population !== settlement.population) issues.push(`${settlement.name}: городской snapshot считает ${state.population} жителей, поселение хранит ${settlement.population}`);
     if (settlement.residentialCapacity !== state.housing.permanentBeds) issues.push(`${settlement.name}: агрегат жилья не совпадает с физическими спальными местами`);
     if (state.land.freeBuildableCells < 0) issues.push(`${settlement.name}: отрицательная свободная земля`);
     if (state.housing.occupiedBeds > state.housing.permanentBeds) issues.push(`${settlement.name}: занятых постоянных мест больше физической вместимости`);
+
+    const livingIds = new Set(world.characters.filter(character => character.alive && character.settlementId === settlement.id).map(character => character.id));
+    const assignmentCount = new Map<number, number>();
+    for (const assignment of urban.housingAssignments) {
+      for (const characterId of assignment.characterIds) {
+        assignmentCount.set(characterId, (assignmentCount.get(characterId) ?? 0) + 1);
+        if (!livingIds.has(characterId)) issues.push(`${settlement.name}: жилищное назначение содержит отсутствующего жителя №${characterId}`);
+      }
+    }
+    for (const characterId of livingIds) {
+      const count = assignmentCount.get(characterId) ?? 0;
+      if (count !== 1) issues.push(`${settlement.name}: житель №${characterId} имеет ${count} городских жилищных назначений`);
+    }
+
+    const snapshotProblemIds = new Set(state.problems.map(problem => problem.id));
+    const activeProblemIds = new Set(urban.problemRecords.filter(problem => problem.status === 'active').map(problem => problem.id));
+    for (const id of snapshotProblemIds) if (!activeProblemIds.has(id)) issues.push(`${settlement.name}: проблема ${id} не записана в постоянную историю`);
+    for (const id of activeProblemIds) if (!snapshotProblemIds.has(id)) issues.push(`${settlement.name}: постоянная проблема ${id} отсутствует в snapshot`);
+
+    for (const request of urban.projectQueue) {
+      if (requestIds.has(request.id)) issues.push(`${settlement.name}: повтор ID городского проекта ${request.id}`);
+      requestIds.add(request.id);
+      if (request.constructionProjectId && !constructionIds.has(request.constructionProjectId)) issues.push(`${settlement.name}: городской проект ${request.id} ссылается на отсутствующую стройку`);
+    }
+
     for (const audit of state.buildingAudits) {
       const building = world.buildings.find(item => item.id === audit.buildingId);
       if (!building) issues.push(`${settlement.name}: аудит ссылается на отсутствующее здание №${audit.buildingId}`);
-      else if (building.cityCapacity?.version !== 1) issues.push(`${building.name}: отсутствует профиль функциональной вместимости`);
+      else if (building.cityCapacity?.version !== 2 || building.cityCapacity.signature !== audit.capacity.signature) issues.push(`${building.name}: отсутствует актуальный blueprint функциональной вместимости`);
       if (audit.capacity.circulationCells + audit.capacity.serviceCells >= audit.capacity.usableFloorCells && audit.capacity.usableFloorCells > 2) issues.push(`${building?.name ?? audit.buildingId}: нет полезной площади после проходов и служб`);
     }
   }
@@ -409,14 +574,19 @@ function isSchoolAge(character: Character): boolean {
   return character.age >= Math.max(5, Math.round(adultAge * .3)) && character.age < adultAge;
 }
 
-function buildProblems(settlement: Settlement, state: Omit<SettlementCityState, 'problems'>, living: Character[]): CityProblem[] {
+function buildProblems(
+  settlement: Settlement,
+  state: Omit<SettlementCityState, 'problems'>,
+  living: Character[],
+  characterStatuses: ReadonlyMap<number, HousingStatus>,
+): CityProblem[] {
   const problems: CityProblem[] = [];
   const add = (kind: CityProblemKind, severity: number, title: string, description: string, causes: string[], consequences: string[], buildingIds: number[] = [], characterIds: number[] = [], districts: string[] = []) => {
     if (severity <= 0) return;
     problems.push({ id: `city:${settlement.id}:${kind}`, kind, severity: clamp(severity, 1, 100), title, description, causes, consequences, affectedBuildingIds: [...new Set(buildingIds)], affectedCharacterIds: [...new Set(characterIds)], districtNames: [...new Set(districts)] });
   };
 
-  const homeless = living.filter(character => character.housingStatus === 'homeless');
+  const homeless = living.filter(character => characterStatuses.get(character.id) === 'homeless');
   if (state.housing.homelessPeople) add('homelessness', 25 + state.housing.homelessPeople / Math.max(1, state.population) * 180, 'Люди ночуют без крыши', `${state.housing.homelessPeople} жителей не получили ни постоянного жилья, ни места в приюте.`, ['жилья и приютов меньше, чем нуждающихся'], ['болезни', 'уличные лагеря', 'рост преступности'], [], homeless.map(item => item.id), homeless.map(item => item.homeDistrict ?? 'Окраина'));
   if (state.housing.overcrowdedHouseholds) add('overcrowding', 18 + state.housing.overcrowdedPeople / Math.max(1, state.population) * 140, 'Дома переполнены', `${state.housing.overcrowdedHouseholds} домохозяйств делят недостаточное число постоянных спальных мест.`, ['семьи крупнее физической вместимости домов'], ['плохой сон', 'конфликты', 'повышенный пожарный риск'], state.buildingAudits.filter(audit => audit.housingOccupancy > 1).map(audit => audit.buildingId));
   if (state.housing.peopleWithoutPermanentBed > 0) add('housing-shortage', 20 + state.housing.peopleWithoutPermanentBed / Math.max(1, state.population) * 120, 'Не хватает постоянного жилья', `${state.housing.peopleWithoutPermanentBed} жителей не имеют закреплённого постоянного спального места. В городе физически есть ${state.housing.permanentBeds} мест, но часть из них служебная или находится не там, где живут нуждающиеся семьи.`, ['рост населения опередил доступное строительство', 'свободные места распределены между несовместимыми типами жилья'], ['рост аренды', 'перенаселение', 'отток жителей']);

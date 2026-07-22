@@ -160,7 +160,7 @@ export function constructionRect(project: import('../types').ConstructionProject
 export function assignConstructionFootprint(
   world: Pick<WorldState, 'config' | 'buildings' | 'constructionProjects' | 'fields'>,
   project: import('../types').ConstructionProject,
-): void {
+): boolean {
   const localSize = world.config.localMapSize ?? 128;
   const dimensions = buildingDimensions(project.buildingType, 1);
   const width = Math.max(4, project.localWidth || dimensions.width);
@@ -189,13 +189,14 @@ export function assignConstructionFootprint(
       }
     }
   }
-  slot ??= { x: preferredX, y: preferredY };
+  if (!slot) return false;
   project.localX = slot.x;
   project.localY = slot.y;
   project.localWidth = width;
   project.localHeight = height;
   project.entranceX = slot.x + Math.floor(width / 2);
   project.entranceY = slot.y + height - 1;
+  return true;
 }
 
 export function assignFieldCells(

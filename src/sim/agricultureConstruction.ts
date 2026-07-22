@@ -8,6 +8,9 @@ import { addMaterialItem, consumeSettlementMaterial } from './materialEconomy';
 import { RNG, hashSeed } from './rng';
 import { assignConstructionFootprint, assignFieldCells, buildingDimensions } from './spatial';
 import { worldTick } from './scheduler';
+import { approveCityProjectRequest, blockCityProjectRequest, completeCityProjectRequest, failCityProjectRequest, linkCityProjectToConstruction, requestCityProject } from './cityProjects';
+import { ensureBuildingCapacityProfile } from './cityCapacity';
+import { markCityDirty } from './cityState';
 
 interface CropDefinition {
   crop: CropKind;
@@ -226,12 +229,25 @@ function rotateField(field: FieldPlot, world: WorldState): void {
 
 export function requestConstructionProject(world: WorldState, settlement: Settlement, type: BuildingType, reason: string, rng: RNG): ConstructionProject | undefined {
   world.constructionProjects ??= [];
-  if (world.constructionProjects.some(project => project.settlementId === settlement.id && project.buildingType === type && !['завершено', 'заброшено'].includes(project.stage))) return undefined;
+  const request = requestCityProject(world, settlement.id, type, reason, {
+    source: 'construction-system',
+    priority: cityProjectPriority(type, reason),
+  });
+  const existing = world.constructionProjects.find(project => project.settlementId === settlement.id && project.buildingType === type && !['завершено', 'заброшено'].includes(project.stage));
+  if (existing) {
+    existing.cityRequestId ??= request.id;
+    linkCityProjectToConstruction(world, request.id, existing);
+    return undefined;
+  }
+  approveCityProjectRequest(world, request.id);
   const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
   const district = chooseConstructionDistrict(settlement, type);
-  if (!district) return undefined;
+  if (!district) {
+    blockCityProjectRequest(world, request.id, 'в поселении нет подходящего района');
+    return undefined;
+  }
   const project: ConstructionProject = {
-    id: world.nextIds.constructionProject++, settlementId: settlement.id, requestedByKingdomId: settlement.kingdomId, buildingType: type,
+    id: world.nextIds.constructionProject++, settlementId: settlement.id, requestedByKingdomId: settlement.kingdomId, cityRequestId: request.id, buildingType: type,
     name: constructionName(type, settlement, world.nextIds.constructionProject), reason, globalX: district.x, globalY: district.y,
     localX: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.width - 9)), localY: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.height - 9)),
     localWidth: dimensions.width, localHeight: dimensions.height, entranceX: 0, entranceY: 0,
@@ -239,11 +255,15 @@ export function requestConstructionProject(world: WorldState, settlement: Settle
     builderIds: [], stage: 'планирование', startedYear: world.year, startedMonth: world.month,
     history: [`Проект утверждён в ${world.year}.${String(world.month).padStart(2, '0')}: ${reason}.`],
   };
-  assignConstructionFootprint(world, project);
+  if (!assignConstructionFootprint(world, project)) {
+    blockCityProjectRequest(world, request.id, 'не найден свободный участок без пересечений со зданиями, стройками и полями');
+    return undefined;
+  }
   world.constructionProjects.push(project);
+  linkCityProjectToConstruction(world, request.id, project);
   appendCausalEvent(world, {
     kind: 'construction', title: `Начато строительство: ${project.name}`, description: `В ${settlement.name} размечена площадка ${project.localWidth}×${project.localHeight} клеток.`,
-    cause: reason, conditions: ['местная власть или община выделила участок', 'проект получил список материалов и объём работ'],
+    cause: reason, conditions: ['городская система подтвердила свободный участок', 'проект получил список материалов и объём работ'],
     decision: `построить ${project.name}`, outcome: 'площадка зарезервирована, начат подвоз материалов',
     consequences: ['строители получат работу', 'спрос на древесину, камень и крепёж вырастет'], entityRefs: [{ kind: 'constructionProject', id: project.id }, { kind: 'settlement', id: settlement.id }], importance: 2,
   });
@@ -268,6 +288,7 @@ export function advanceConstruction(world: WorldState, rng: RNG, indexes: WorldI
     if (materialRatio >= .995 && project.laborDone >= project.laborRequired) completeConstruction(world, project, settlement, rng, indexes);
     else if (world.year - project.startedYear >= 12 && materialRatio < .35) {
       project.stage = 'заброшено'; project.history.push(`Стройка заброшена в ${world.year} году из-за многолетней нехватки материалов.`);
+      failCityProjectRequest(world, project.id, 'многолетняя нехватка материалов');
     } else project.stage = constructionStage(project, materialRatio);
   }
 }
@@ -296,6 +317,15 @@ function evaluateConstructionNeeds(world: WorldState, rng: RNG, indexes: WorldIn
     const missing = targets.find(([type, target]) => (counts.get(type) ?? 0) + active.filter(project => project.buildingType === type).length < target);
     if (missing) requestConstructionProject(world, settlement, missing[0], missing[2], rng);
   }
+}
+
+
+function cityProjectPriority(type: BuildingType, reason: string): number {
+  if (type === 'shelter' || /бездом|пожар|голод/i.test(reason)) return 92;
+  if (['house', 'tenement', 'healer', 'school', 'fireStation'].includes(type)) return 78;
+  if (['warehouse', 'mill', 'bakery', 'market'].includes(type)) return 62;
+  if (['barracks', 'arsenal', 'castle'].includes(type)) return 58;
+  return 50;
 }
 
 function constructionMaterials(type: BuildingType): Record<string, number> {
@@ -382,11 +412,14 @@ function completeConstruction(world: WorldState, project: ConstructionProject, s
     residentIds: [], workerIds: [], inventoryItemIds: [], rooms: completedBuildingRooms(project.buildingType), hasWater: !['quarry', 'mine', 'kiln', 'watchtower'].includes(project.buildingType),
     hasHearth: !['warehouse', 'market', 'quarry', 'mine', 'watchtower'].includes(project.buildingType), history: [...project.history, `Завершено в ${world.year}.${String(world.month).padStart(2, '0')}.`],
   };
+  ensureBuildingCapacityProfile(building);
   world.buildings.push(building); settlement.buildingIds.push(building.id); indexes.buildingById.set(building.id, building);
   const list = indexes.buildingsBySettlement.get(settlement.id) ?? []; list.push(building); indexes.buildingsBySettlement.set(settlement.id, list);
   if (['house', 'tenement', 'manor', 'barracks', 'monastery'].includes(building.type)) settlement.residentialCapacity += building.capacity;
   project.stage = 'завершено'; project.completedYear = world.year; project.completedMonth = world.month; project.buildingId = building.id;
   project.history.push(`Строительство завершено; создано здание №${building.id}.`);
+  completeCityProjectRequest(world, project.id);
+  markCityDirty(world, settlement.id, 'building');
   const establishment = createEstablishmentForBuilding(world, building, settlement, rng, indexes);
   if (building.type === 'farm') ensureFieldsForFarms(world, rng);
   appendCausalEvent(world, {

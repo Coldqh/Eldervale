@@ -1,5 +1,5 @@
 import type { BuildingInteriorPlan } from './interiorTypes';
-import type { BuildingCapacityProfile, HousingStatus, SettlementCityState } from './cityTypes';
+import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, UrbanState } from './cityTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -809,6 +809,7 @@ export interface ConstructionProject {
   id: number;
   settlementId: number;
   requestedByKingdomId?: number;
+  cityRequestId?: string;
   buildingType: BuildingType;
   name: string;
   reason: string;
@@ -1823,7 +1824,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 24;
+  version: 25;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1877,6 +1878,7 @@ export interface WorldState {
   settlementGovernments: SettlementGovernment[];
   districtCivicStates: DistrictCivicState[];
   cityStates: SettlementCityState[];
+  urbanStates: UrbanState[];
   civicPatrols: CivicPatrol[];
   crimes: CrimeIncident[];
   courtCases: CourtCase[];

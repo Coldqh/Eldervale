@@ -144,7 +144,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 24;
+  world.version = 25;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }
