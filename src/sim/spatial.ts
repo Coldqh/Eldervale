@@ -1,5 +1,6 @@
 import type { Building, BuildingType, WorldState } from '../types';
 import { hashSeed } from './rng';
+import { morphologyPlacementCandidates, morphologyRectAllowsBuilding } from './cityMorphology';
 
 export interface SpatialRect {
   x: number;
@@ -58,28 +59,41 @@ export function ensureAllBuildingFootprints(world: WorldState): void {
   const ordered = [...world.buildings].sort((a, b) => a.globalY - b.globalY || a.globalX - b.globalX || a.id - b.id);
   const placed: Building[] = [];
   for (const building of ordered) {
-    assignBuildingFootprint(world, building, placed);
+    if (!assignBuildingFootprintAcrossSettlement(world, building, placed)) throw new Error(`${building.name}: город не может выделить физический участок без пересечения`);
     placed.push(building);
   }
 }
 
-export function assignBuildingFootprint(world: Pick<WorldState, 'config' | 'buildings'>, building: Building, alreadyPlaced?: readonly Building[]): void {
+type BuildingLayoutWorld = Pick<WorldState, 'config' | 'buildings'> & Partial<Pick<WorldState, 'settlements' | 'tiles'>>;
+
+export function assignBuildingFootprint(world: BuildingLayoutWorld, building: Building, alreadyPlaced?: readonly Building[]): boolean {
   const localSize = world.config.localMapSize ?? 128;
   const dimensions = buildingDimensions(building.type, building.floors);
   const width = Math.max(4, building.localWidth ?? dimensions.width);
   const height = Math.max(4, building.localHeight ?? dimensions.height);
   const peers = (alreadyPlaced ?? world.buildings).filter(other => other.id !== building.id && other.globalX === building.globalX && other.globalY === building.globalY);
-  const preferred = {
+  const existing = {
     x: clamp(building.localX, EDGE_MARGIN, localSize - width - EDGE_MARGIN),
     y: clamp(building.localY, EDGE_MARGIN, localSize - height - EDGE_MARGIN),
   };
-  const slot = findFreeRect(preferred.x, preferred.y, width, height, localSize, peers) ?? preferred;
+  const preserveLegacy = building.spatialVersion === 1 && rectFits(existing.x, existing.y, width, height, localSize, peers, BUILDING_GAP);
+  const candidates = preserveLegacy
+    ? [existing]
+    : morphologyPlacementCandidates(world, building).map(point => ({
+      x: clamp(point.x - Math.floor(width / 2), EDGE_MARGIN, localSize - width - EDGE_MARGIN),
+      y: clamp(point.y - Math.floor(height / 2), EDGE_MARGIN, localSize - height - EDGE_MARGIN),
+    }));
+  const slot = candidates.find(candidate => rectFits(candidate.x, candidate.y, width, height, localSize, peers, BUILDING_GAP)
+    && morphologyRectAllowsBuilding(world, building, { x: candidate.x, y: candidate.y, width, height }))
+    ?? findFreeRect(existing.x, existing.y, width, height, localSize, peers);
+  if (!slot) return false;
   building.localX = slot.x;
   building.localY = slot.y;
   building.localWidth = width;
   building.localHeight = height;
+  building.spatialVersion = preserveLegacy ? 1 : 2;
 
-  const sideRoll = hashSeed(`${world.config.seed}:вход:${building.id}`) % 4;
+  const sideRoll = hashSeed(`${world.config.seed}:вход-v2:${building.id}:${slot.x}:${slot.y}`) % 4;
   if (sideRoll === 0) {
     building.entranceX = slot.x + Math.floor(width / 2);
     building.entranceY = slot.y;
@@ -93,14 +107,46 @@ export function assignBuildingFootprint(world: Pick<WorldState, 'config' | 'buil
     building.entranceX = slot.x;
     building.entranceY = slot.y + Math.floor(height / 2);
   }
+  return true;
+}
+
+export function assignBuildingFootprintAcrossSettlement(world: BuildingLayoutWorld, building: Building, alreadyPlaced?: readonly Building[]): boolean {
+  const settlement = world.settlements?.find(item => item.id === building.settlementId);
+  if (!settlement?.districts.length) return assignBuildingFootprint(world, building, alreadyPlaced);
+  const original = { districtName: building.districtName, globalX: building.globalX, globalY: building.globalY };
+  const peers = alreadyPlaced ?? world.buildings;
+  const currentKey = `${building.globalX}:${building.globalY}`;
+  const districtLoad = (x: number, y: number) => peers
+    .filter(item => item.id !== building.id && item.globalX === x && item.globalY === y)
+    .reduce((sum, item) => sum + item.localWidth * item.localHeight, 0);
+  const districts = [...settlement.districts].sort((a, b) => {
+    const currentA = `${a.x}:${a.y}` === currentKey ? 0 : 1;
+    const currentB = `${b.x}:${b.y}` === currentKey ? 0 : 1;
+    if (currentA !== currentB) return currentA - currentB;
+    const load = districtLoad(a.x, a.y) - districtLoad(b.x, b.y);
+    if (load) return load;
+    return hashSeed(`${world.config.seed}:резервный-район:${building.id}:${a.x}:${a.y}`) - hashSeed(`${world.config.seed}:резервный-район:${building.id}:${b.x}:${b.y}`);
+  });
+  for (const district of districts) {
+    building.districtName = district.name;
+    building.globalX = district.x;
+    building.globalY = district.y;
+    if (assignBuildingFootprint(world, building, alreadyPlaced)) return true;
+  }
+  building.districtName = original.districtName;
+  building.globalX = original.globalX;
+  building.globalY = original.globalY;
+  return false;
+}
+
+function rectFits(x: number, y: number, width: number, height: number, localSize: number, peers: readonly Building[], gap: number): boolean {
+  if (x < EDGE_MARGIN || y < EDGE_MARGIN || x + width > localSize - EDGE_MARGIN || y + height > localSize - EDGE_MARGIN) return false;
+  const candidate = { x: x - gap, y: y - gap, width: width + gap * 2, height: height + gap * 2 };
+  return peers.every(peer => !rectanglesOverlap(candidate, expandedRect(buildingRect(peer), gap)));
 }
 
 function findFreeRect(preferredX: number, preferredY: number, width: number, height: number, localSize: number, peers: readonly Building[]): { x: number; y: number } | undefined {
-  const fits = (x: number, y: number) => {
-    if (x < EDGE_MARGIN || y < EDGE_MARGIN || x + width > localSize - EDGE_MARGIN || y + height > localSize - EDGE_MARGIN) return false;
-    const candidate = { x: x - BUILDING_GAP, y: y - BUILDING_GAP, width: width + BUILDING_GAP * 2, height: height + BUILDING_GAP * 2 };
-    return peers.every(peer => !rectanglesOverlap(candidate, expandedRect(buildingRect(peer), BUILDING_GAP)));
-  };
+  const fits = (x: number, y: number) => rectFits(x, y, width, height, localSize, peers, BUILDING_GAP);
 
   if (fits(preferredX, preferredY)) return { x: preferredX, y: preferredY };
   for (let radius = 2; radius <= localSize; radius += 2) {
@@ -158,7 +204,7 @@ export function constructionRect(project: import('../types').ConstructionProject
 }
 
 export function assignConstructionFootprint(
-  world: Pick<WorldState, 'config' | 'buildings' | 'constructionProjects' | 'fields'>,
+  world: Pick<WorldState, 'config' | 'buildings' | 'constructionProjects' | 'fields'> & Partial<Pick<WorldState, 'settlements' | 'tiles'>>,
   project: import('../types').ConstructionProject,
 ): boolean {
   const localSize = world.config.localMapSize ?? 128;
@@ -180,6 +226,19 @@ export function assignConstructionFootprint(
     return true;
   };
   let slot: { x: number; y: number } | undefined;
+  if (world.settlements?.length) {
+    const pseudoBuilding: Building = {
+      id: 1_000_000_000 + project.id, settlementId: project.settlementId, districtName: '', globalX: project.globalX, globalY: project.globalY,
+      localX: preferredX, localY: preferredY, localWidth: width, localHeight: height, entranceX: 0, entranceY: 0,
+      name: project.name, type: project.buildingType, floors: 1, capacity: 0, condition: 100, builtYear: 0,
+      residentIds: [], workerIds: [], inventoryItemIds: [], rooms: [], hasWater: false, hasHearth: false, history: [], spatialVersion: 2,
+    };
+    for (const point of morphologyPlacementCandidates(world, pseudoBuilding, 120)) {
+      const x = clamp(point.x - Math.floor(width / 2), EDGE_MARGIN, localSize - width - EDGE_MARGIN);
+      const y = clamp(point.y - Math.floor(height / 2), EDGE_MARGIN, localSize - height - EDGE_MARGIN);
+      if (fits(x, y) && morphologyRectAllowsBuilding(world, pseudoBuilding, { x, y, width, height })) { slot = { x, y }; break; }
+    }
+  }
   for (let radius = 0; radius <= localSize && !slot; radius += 2) {
     for (let dy = -radius; dy <= radius && !slot; dy += 2) {
       for (let dx = -radius; dx <= radius; dx += 2) {
@@ -200,7 +259,7 @@ export function assignConstructionFootprint(
 }
 
 export function assignFieldCells(
-  world: Pick<WorldState, 'config' | 'buildings' | 'constructionProjects' | 'fields'>,
+  world: Pick<WorldState, 'config' | 'buildings' | 'constructionProjects' | 'fields'> & Partial<Pick<WorldState, 'settlements' | 'tiles'>>,
   globalX: number,
   globalY: number,
   near: { x: number; y: number },

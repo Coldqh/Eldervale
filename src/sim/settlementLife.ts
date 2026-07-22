@@ -7,7 +7,7 @@ import { appendCausalEvent } from './causality';
 import { registerWorldEventKnowledge } from './knowledgeSystem';
 import { archiveCharactersBatch } from './mortality';
 import { requestConstructionProject } from './agricultureConstruction';
-import { assignBuildingFootprint, buildingDimensions, buildingRect } from './spatial';
+import { assignBuildingFootprintAcrossSettlement, buildingDimensions, buildingRect } from './spatial';
 import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
 import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
@@ -168,7 +168,10 @@ function ensureHistoricalCivicBuildings(world: WorldState, settlement: Settlemen
       ownerCharacterId: government.leaderCharacterId, residentIds: [], workerIds: [], inventoryItemIds: [], rooms: definition.rooms,
       hasWater: type !== 'prison' || rng.chance(.7), hasHearth: !['fireStation'].includes(type), history: [`Служит поселению ${settlement.name}.`],
     };
-    assignBuildingFootprint(world, building);
+    if (!assignBuildingFootprintAcrossSettlement(world, building)) {
+      world.nextIds.building = Math.max(1, world.nextIds.building - 1);
+      continue;
+    }
     world.buildings.push(building); settlement.buildingIds.push(building.id);
     indexes?.buildingById.set(building.id, building);
     if (indexes) {

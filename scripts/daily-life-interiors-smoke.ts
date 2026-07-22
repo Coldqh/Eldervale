@@ -64,14 +64,15 @@ world.dailyRoutines = residents.map((character): DailyRoutine => ({
 const rendered = applyDailyLifePhaseToMap(world, baseMap, 'day');
 const residentIds = new Set(residents.map(character => character.id));
 const individualMarkers = rendered.markers.filter(marker => marker.kind === 'person' && marker.refs.some(ref => ref.kind === 'character' && residentIds.has(ref.id)));
-const groupMarker = rendered.markers.find(marker => marker.id === `indoor-group-${building!.id}-day`);
+const groupMarkers = rendered.markers.filter(marker => marker.kind === 'group' && marker.id.startsWith(`indoor-group-${building!.id}-day-`));
 assert.ok(individualMarkers.length > 0, 'часть жителей должна отображаться отдельными фигурами');
-assert.ok(groupMarker, 'лишние посетители должны сворачиваться в одну группу, а не высыпать на улицу');
-for (const marker of [...individualMarkers, groupMarker!]) {
+assert.ok(groupMarkers.length > 0, 'лишние посетители должны оставаться небольшими группами внутри здания, а не высыпать на улицу');
+assert.ok(groupMarkers.every(marker => (marker.count ?? 0) <= 8), 'одна группа не должна сворачивать десятки жителей в маркер 99+');
+for (const marker of [...individualMarkers, ...groupMarkers]) {
   const cell = rendered.cells[marker.y * rendered.width + marker.x];
   assert.equal(cell?.buildingId, building!.id, `${marker.label}: маркер должен оставаться внутри выбранного здания`);
   assert.equal(cell?.blocked, false, `${marker.label}: житель не должен стоять в стене`);
 }
 assert.ok(individualMarkers.length < residents.length, 'переполненное здание не должно рисовать каждого посетителя отдельной фигурой');
 
-console.log(`OK INTERIORS: ${residents.length} жителей, отдельно показано ${individualMarkers.length}, остальные собраны внутри здания.`);
+console.log(`OK INTERIORS: ${residents.length} жителей, отдельно показано ${individualMarkers.length}, остальные разбиты на ${groupMarkers.length} небольших групп.`);

@@ -1,3 +1,29 @@
+export type CityLayoutStyle = 'organic' | 'radial' | 'linear' | 'fortified' | 'waterfront' | 'terraced';
+export type CityWallStyle = 'none' | 'palisade' | 'stone';
+export type CityAxis = 'horizontal' | 'vertical' | 'diagonal-ne' | 'diagonal-se';
+
+export interface DistrictLayoutPlan {
+  version: 1;
+  districtName: string;
+  globalX: number;
+  globalY: number;
+  style: CityLayoutStyle;
+  centerX: number;
+  centerY: number;
+  axis: CityAxis;
+  density: number;
+  blockScale: number;
+  wall: CityWallStyle;
+  streetSeed: number;
+}
+
+export interface SettlementLayoutPlan {
+  version: 1;
+  settlementId: number;
+  generatedFromSeed: string;
+  districtPlans: DistrictLayoutPlan[];
+}
+
 export type HousingStatus = 'secure' | 'overcrowded' | 'shared' | 'shelter' | 'homeless';
 
 export type CityProblemKind =

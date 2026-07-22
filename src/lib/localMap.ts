@@ -5,6 +5,8 @@ import { professionLabel, settlementTypeLabel } from '../i18n';
 import { hashSeed, RNG } from '../sim/rng';
 import { buildingInteriorPoint, buildingRect } from '../sim/spatial';
 import { LocalOccupancyGrid, type LocalPoint } from './localOccupancy';
+import { districtLayoutPlan } from '../sim/cityMorphology';
+import type { DistrictLayoutPlan } from '../cityTypes';
 
 export const DEFAULT_LOCAL_MAP_SIZE = 128;
 
@@ -46,10 +48,14 @@ function generateSurface(world: WorldState, tile: Tile, availableLevels: number[
   const rng = new RNG(`${world.config.seed}:местность:${tile.x}:${tile.y}:0`);
   const cells = createBaseCells(world, tile, width, height, rng);
   const exits = roadExits(world, tile, width, height);
-  drawRoadNetwork(cells, width, height, exits, rng, Boolean(tile.settlementId));
-
   const settlement = tile.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
-  if (settlement) buildSettlement(world, cells, width, height, settlement, tile, exits, rng);
+  const layout = settlement ? districtLayoutPlan(world, settlement, tile.x, tile.y) : undefined;
+  drawRoadNetwork(cells, width, height, exits, rng, layout);
+
+  if (settlement && layout) {
+    buildSettlement(world, cells, width, height, settlement, tile, exits, rng, layout);
+    connectSettlementBuildingsToRoads(world, tile, cells, width, height, layout);
+  }
   placeAgricultureAndConstruction(world, tile, cells, width, height);
   placeCemeteries(world, tile, cells, width, height);
   const dungeon = tile.dungeonId ? world.dungeons.find(item => item.id === tile.dungeonId) : world.dungeons.find(item => item.x === tile.x && item.y === tile.y);
@@ -286,14 +292,143 @@ function boundaryPosition(seed: string, tile: Tile, side: Side, width: number, h
   return 8 + hashSeed(`${seed}:граница:${vertical ? 'в' : 'г'}:${bx}:${by}`) % Math.max(1, limit - 16);
 }
 
-function drawRoadNetwork(cells: LocalCell[], width: number, height: number, exits: LocalExit[], rng: RNG, hasSettlement: boolean): void {
-  if (!exits.length && !hasSettlement) return;
-  const centerPoint = { x: Math.floor(width / 2), y: Math.floor(height / 2) };
-  const endpoints = exits.map(exit => exitPoint(exit, width, height)).concat(hasSettlement ? [centerPoint] : []);
+function drawRoadNetwork(cells: LocalCell[], width: number, height: number, exits: LocalExit[], rng: RNG, layout?: DistrictLayoutPlan): void {
+  if (!exits.length && !layout) return;
+  const centerPoint = layout ? { x: layout.centerX, y: layout.centerY } : { x: Math.floor(width / 2), y: Math.floor(height / 2) };
+  const endpoints = exits.map(exit => exitPoint(exit, width, height)).concat(layout ? [centerPoint] : []);
   if (endpoints.length === 1) endpoints.push(centerPoint);
-  const hub = hasSettlement ? centerPoint : endpoints[0]!;
-  for (const endpoint of endpoints) drawPath(cells, width, height, endpoint, hub, rng, 2);
+  const hub = layout ? centerPoint : endpoints[0]!;
+  for (const endpoint of endpoints) drawPath(cells, width, height, endpoint, hub, rng, layout?.style === 'fortified' ? 2 : 1);
+  if (layout) drawDistrictStreetPattern(cells, width, height, layout, rng);
 }
+
+function drawDistrictStreetPattern(cells: LocalCell[], width: number, height: number, layout: DistrictLayoutPlan, rng: RNG): void {
+  const hub = { x: layout.centerX, y: layout.centerY };
+  const margin = 8;
+  const point = (x: number, y: number): Point => ({ x: clampLocal(Math.round(x), margin, width - margin - 1), y: clampLocal(Math.round(y), margin, height - margin - 1) });
+  if (layout.style === 'radial') {
+    const radius = Math.max(14, Math.round(Math.min(width, height) * (.16 + layout.density * .08)));
+    for (let spoke = 0; spoke < 5; spoke += 1) {
+      const angle = (layout.streetSeed % 360) * Math.PI / 180 + spoke * Math.PI * 2 / 5;
+      drawPath(cells, width, height, hub, point(hub.x + Math.cos(angle) * radius * 1.55, hub.y + Math.sin(angle) * radius * 1.55), rng, 1);
+    }
+    for (let step = 0; step < 48; step += 1) {
+      const angle = step * Math.PI * 2 / 48;
+      paintRoad(cells, width, height, Math.round(hub.x + Math.cos(angle) * radius), Math.round(hub.y + Math.sin(angle) * radius), 1);
+    }
+    return;
+  }
+  if (layout.style === 'linear' || layout.style === 'waterfront') {
+    const horizontal = layout.axis === 'horizontal' || layout.axis === 'diagonal-ne';
+    const offset = layout.style === 'waterfront' ? Math.round((layout.streetSeed % 11) - 5) : 0;
+    const from = horizontal ? point(margin, hub.y + offset) : point(hub.x + offset, margin);
+    const to = horizontal ? point(width - margin - 1, hub.y + offset) : point(hub.x + offset, height - margin - 1);
+    drawPath(cells, width, height, from, to, rng, layout.style === 'waterfront' ? 2 : 1);
+    const branchCount = 2 + layout.streetSeed % 3;
+    for (let index = 0; index < branchCount; index += 1) {
+      const along = margin + Math.round((index + 1) * (Math.min(width, height) - margin * 2) / (branchCount + 1));
+      const side = index % 2 ? -1 : 1;
+      const branchStart = horizontal ? point(along, hub.y + offset) : point(hub.x + offset, along);
+      const branchEnd = horizontal ? point(along + rng.int(-8, 8), hub.y + side * rng.int(16, 34)) : point(hub.x + side * rng.int(16, 34), along + rng.int(-8, 8));
+      drawPath(cells, width, height, branchStart, branchEnd, rng, 1);
+    }
+    return;
+  }
+  if (layout.style === 'terraced') {
+    const horizontal = layout.axis !== 'vertical';
+    for (let terrace = -2; terrace <= 2; terrace += 1) {
+      const offset = terrace * Math.max(8, layout.blockScale);
+      const from = horizontal ? point(margin, hub.y + offset) : point(hub.x + offset, margin);
+      const to = horizontal ? point(width - margin - 1, hub.y + offset + rng.int(-3, 3)) : point(hub.x + offset + rng.int(-3, 3), height - margin - 1);
+      drawPath(cells, width, height, from, to, rng, 1);
+    }
+    return;
+  }
+  if (layout.style === 'fortified') {
+    drawPath(cells, width, height, point(hub.x, 6), point(hub.x, height - 7), rng, 2);
+    drawPath(cells, width, height, point(6, hub.y), point(width - 7, hub.y), rng, 2);
+    const ringX = Math.max(14, Math.round(width * .22));
+    const ringY = Math.max(12, Math.round(height * .2));
+    for (let x = hub.x - ringX; x <= hub.x + ringX; x += 1) {
+      paintRoad(cells, width, height, x, hub.y - ringY, 1);
+      paintRoad(cells, width, height, x, hub.y + ringY, 1);
+    }
+    for (let y = hub.y - ringY; y <= hub.y + ringY; y += 1) {
+      paintRoad(cells, width, height, hub.x - ringX, y, 1);
+      paintRoad(cells, width, height, hub.x + ringX, y, 1);
+    }
+    return;
+  }
+  const hubs = Array.from({ length: 3 + layout.streetSeed % 3 }, (_, index) => {
+    const angle = (layout.streetSeed % 720) * Math.PI / 360 + index * 2.19 + rng.next() * .7;
+    const radius = 18 + rng.int(0, Math.max(8, Math.floor(Math.min(width, height) * .25)));
+    return point(hub.x + Math.cos(angle) * radius, hub.y + Math.sin(angle) * radius);
+  });
+  for (const secondary of hubs) drawPath(cells, width, height, hub, secondary, rng, 1);
+  for (let index = 1; index < hubs.length; index += 1) if (rng.chance(.7)) drawPath(cells, width, height, hubs[index - 1]!, hubs[index]!, rng, 1);
+}
+
+function connectSettlementBuildingsToRoads(world: WorldState, tile: Tile, cells: LocalCell[], width: number, height: number, layout: DistrictLayoutPlan): void {
+  const buildings = world.buildings
+    .filter(building => building.globalX === tile.x && building.globalY === tile.y)
+    .sort((a, b) => a.id - b.id);
+  for (const building of buildings) {
+    const outside = exteriorDoorCell(building, width, height);
+    if (!outside) continue;
+    const path = pathToNearestRoad(cells, width, height, outside, `${world.config.seed}:переулок:${layout.streetSeed}:${building.id}`);
+    if (!path) continue;
+    for (const step of path) {
+      const cell = cells[step.y * width + step.x];
+      if (!cell || cell.buildingId || cell.ground === 'water') continue;
+      cell.ground = 'road';
+      if (!['bridge', 'door'].includes(cell.feature ?? '')) cell.feature = undefined;
+      cell.blocked = false;
+    }
+  }
+}
+
+function exteriorDoorCell(building: WorldState['buildings'][number], width: number, height: number): Point | undefined {
+  const rect = buildingRect(building);
+  const candidates: Point[] = [];
+  if (building.entranceY === rect.y) candidates.push({ x: building.entranceX, y: rect.y - 1 });
+  if (building.entranceY === rect.y + rect.height - 1) candidates.push({ x: building.entranceX, y: rect.y + rect.height });
+  if (building.entranceX === rect.x) candidates.push({ x: rect.x - 1, y: building.entranceY });
+  if (building.entranceX === rect.x + rect.width - 1) candidates.push({ x: rect.x + rect.width, y: building.entranceY });
+  return candidates.find(candidate => inside(candidate.x, candidate.y, width, height));
+}
+
+function pathToNearestRoad(cells: LocalCell[], width: number, height: number, start: Point, seed: string): Point[] | undefined {
+  const queue: Point[] = [start];
+  const parents = new Map<string, string | undefined>([[`${start.x}:${start.y}`, undefined]]);
+  const directions: Point[] = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]
+    .sort((a, b) => hashSeed(`${seed}:${a.x}:${a.y}`) - hashSeed(`${seed}:${b.x}:${b.y}`));
+  let target: Point | undefined;
+  while (queue.length && parents.size < 1800) {
+    const current = queue.shift()!;
+    const cell = cells[current.y * width + current.x];
+    if (cell?.ground === 'road' && (current.x !== start.x || current.y !== start.y)) { target = current; break; }
+    for (const direction of directions) {
+      const next = { x: current.x + direction.x, y: current.y + direction.y };
+      const key = `${next.x}:${next.y}`;
+      if (!inside(next.x, next.y, width, height) || parents.has(key)) continue;
+      const nextCell = cells[next.y * width + next.x];
+      if (!nextCell || nextCell.ground === 'water' || nextCell.buildingId || nextCell.constructionProjectId || nextCell.feature === 'wall' || nextCell.feature === 'palisade') continue;
+      parents.set(key, `${current.x}:${current.y}`);
+      queue.push(next);
+    }
+  }
+  if (!target) return undefined;
+  const path: Point[] = [];
+  let key: string | undefined = `${target.x}:${target.y}`;
+  while (key) {
+    const [x, y] = key.split(':').map(Number);
+    path.push({ x: x!, y: y! });
+    key = parents.get(key);
+  }
+  return path.reverse();
+}
+
+function clampLocal(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
 
 function exitPoint(exit: LocalExit, width: number, height: number): Point {
   if (exit.side === 'north') return { x: exit.position, y: 0 };
@@ -325,7 +460,7 @@ function paintRoad(cells: LocalCell[], width: number, height: number, cx: number
 }
 
 function buildSettlement(
-  world: WorldState, cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], tile: Tile, exits: LocalExit[], rng: RNG,
+  world: WorldState, cells: LocalCell[], width: number, height: number, settlement: WorldState['settlements'][number], tile: Tile, exits: LocalExit[], rng: RNG, layout: DistrictLayoutPlan,
 ): void {
   const districts = settlement.districts?.length ? settlement.districts : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: 'центр' as const }];
   const districtIndex = Math.max(0, districts.findIndex(item => item.x === tile.x && item.y === tile.y));
@@ -344,9 +479,7 @@ function buildSettlement(
   }
   const targetCount = Math.min(labels.length, Math.floor((width - 10) * (height - 12) / 48));
 
-  if (district.role === 'крепость' || (district.role === 'центр' && (settlement.type === 'city' || settlement.type === 'fortress'))) {
-    drawSettlementWall(cells, width, height, exits);
-  }
+  if (layout.wall !== 'none') drawSettlementWall(cells, width, height, exits, layout);
   const physicalBuildings = (world.buildings ?? []).filter(building => building.globalX === tile.x && building.globalY === tile.y);
   if (physicalBuildings.length) {
     for (const building of physicalBuildings) {
@@ -377,22 +510,40 @@ function buildSettlement(
   }
 }
 
-function drawSettlementWall(cells: LocalCell[], width: number, height: number, exits: LocalExit[]): void {
-  const min = 3;
-  const maxX = width - 4;
-  const maxY = height - 4;
-  for (let x = min; x <= maxX; x += 1) {
-    setCell(cells, width, x, min, { feature: 'wall', blocked: true, ground: 'stone', building: 'городская стена' });
-    setCell(cells, width, x, maxY, { feature: 'wall', blocked: true, ground: 'stone', building: 'городская стена' });
+function drawSettlementWall(cells: LocalCell[], width: number, height: number, exits: LocalExit[], layout: DistrictLayoutPlan): void {
+  const halfWidth = Math.max(18, Math.min(Math.floor(width * .43), Math.round(24 + layout.density * 20)));
+  const halfHeight = Math.max(16, Math.min(Math.floor(height * .4), Math.round(21 + layout.density * 18)));
+  const minX = Math.max(3, layout.centerX - halfWidth);
+  const maxX = Math.min(width - 4, layout.centerX + halfWidth);
+  const minY = Math.max(3, layout.centerY - halfHeight);
+  const maxY = Math.min(height - 4, layout.centerY + halfHeight);
+  const wallFeature: LocalFeature = layout.wall === 'palisade' ? 'palisade' : 'wall';
+  const ground: LocalGround = layout.wall === 'palisade' ? 'dirt' : 'stone';
+  const setWall = (x: number, y: number) => setCell(cells, width, x, y, { feature: wallFeature, blocked: true, ground, building: layout.wall === 'palisade' ? 'городской частокол' : 'городская стена' });
+  for (let x = minX + 4; x <= maxX - 4; x += 1) {
+    const cut = Math.round(Math.sin((x + layout.streetSeed % 17) * .19) * 2);
+    setWall(x, minY + Math.max(0, cut));
+    setWall(x, maxY - Math.max(0, -cut));
   }
-  for (let y = min; y <= maxY; y += 1) {
-    setCell(cells, width, min, y, { feature: 'wall', blocked: true, ground: 'stone', building: 'городская стена' });
-    setCell(cells, width, maxX, y, { feature: 'wall', blocked: true, ground: 'stone', building: 'городская стена' });
+  for (let y = minY + 4; y <= maxY - 4; y += 1) {
+    const cut = Math.round(Math.cos((y + layout.streetSeed % 23) * .17) * 2);
+    setWall(minX + Math.max(0, cut), y);
+    setWall(maxX - Math.max(0, -cut), y);
+  }
+  // Срезанные углы убирают одинаковую прямоугольную коробку у каждого города.
+  for (let offset = 0; offset < 5; offset += 1) {
+    setWall(minX + offset, minY + 4 - offset);
+    setWall(maxX - offset, minY + 4 - offset);
+    setWall(minX + offset, maxY - 4 + offset);
+    setWall(maxX - offset, maxY - 4 + offset);
   }
   for (const exit of exits) {
     const point = exitPoint(exit, width, height);
-    const gate = { x: Math.max(min, Math.min(maxX, point.x)), y: Math.max(min, Math.min(maxY, point.y)) };
-    for (let offset = -2; offset <= 2; offset += 1) {
+    const candidates = exit.side === 'north' ? [{ x: clampLocal(point.x, minX + 5, maxX - 5), y: minY }]
+      : exit.side === 'south' ? [{ x: clampLocal(point.x, minX + 5, maxX - 5), y: maxY }]
+        : exit.side === 'west' ? [{ x: minX, y: clampLocal(point.y, minY + 5, maxY - 5) }]
+          : [{ x: maxX, y: clampLocal(point.y, minY + 5, maxY - 5) }];
+    for (const gate of candidates) for (let offset = -2; offset <= 2; offset += 1) {
       const x = exit.side === 'north' || exit.side === 'south' ? gate.x + offset : gate.x;
       const y = exit.side === 'east' || exit.side === 'west' ? gate.y + offset : gate.y;
       setCell(cells, width, x, y, { feature: 'door', blocked: false, ground: 'road', building: 'городские ворота' });
@@ -603,7 +754,7 @@ function buildSurfaceMarkers(
 
   if (settlement) {
     const district = settlement.districts?.find(item => item.x === tile.x && item.y === tile.y);
-    markers.push({ id: `settlement-${settlement.id}-${tile.x}-${tile.y}`, x: Math.floor(width / 2), y: Math.floor(height / 2), kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }], detail: `${district?.name ?? 'поселение'} · ${settlement.population} жителей` });
+    markers.push({ id: `settlement-${settlement.id}-${tile.x}-${tile.y}`, x: districtLayoutPlan(world, settlement, tile.x, tile.y).centerX, y: districtLayoutPlan(world, settlement, tile.x, tile.y).centerY, kind: 'settlement', label: settlement.name, refs: [{ kind: 'settlement', id: settlement.id }], detail: `${district?.name ?? 'поселение'} · ${settlement.population} жителей` });
   }
   if (dungeon) {
     const stair = cells.find(cell => cell.feature === 'stairs-down');

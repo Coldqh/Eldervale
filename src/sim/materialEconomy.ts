@@ -7,7 +7,7 @@ import type { WorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
-import { assignBuildingFootprint, buildingDimensions } from './spatial';
+import { assignBuildingFootprintAcrossSettlement, buildingDimensions } from './spatial';
 import { operationalWorkerIds } from './interiors';
 import type { ResourceDefinition } from '../civilizationTypes';
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
@@ -302,8 +302,46 @@ export function consumeSettlementMaterial(world: WorldState, settlementId: numbe
 
 export function materialTemplateExists(templateId: string): boolean { return ITEM_BY_ID.has(templateId); }
 
+
+const DISTRICT_ROLE_BY_BUILDING: Partial<Record<BuildingType, Settlement['districts'][number]['role'][]>> = {
+  house: ['жилой район', 'окраина', 'центр'], tenement: ['жилой район', 'центр'], manor: ['центр', 'жилой район', 'крепость'],
+  market: ['рынок', 'центр', 'порт'], shop: ['рынок', 'центр', 'жилой район'], tavern: ['рынок', 'центр', 'порт'], inn: ['рынок', 'окраина', 'порт'],
+  guildhall: ['ремесленный район', 'рынок', 'центр'], townHall: ['центр', 'рынок'], courthouse: ['центр', 'крепость'], public: ['центр', 'жилой район', 'рынок'],
+  school: ['жилой район', 'центр'], healer: ['жилой район', 'центр'], bathhouse: ['жилой район', 'рынок'], temple: ['центр', 'жилой район'], shelter: ['окраина', 'жилой район'],
+  blacksmith: ['ремесленный район', 'окраина'], carpenter: ['ремесленный район', 'окраина'], weaver: ['ремесленный район', 'жилой район'], tailor: ['ремесленный район', 'рынок'],
+  dyehouse: ['ремесленный район', 'окраина'], tannery: ['окраина', 'ремесленный район'], cobbler: ['ремесленный район', 'рынок'], armorer: ['ремесленный район', 'крепость'],
+  toolmaker: ['ремесленный район', 'окраина'], kiln: ['окраина', 'ремесленный район'], bakery: ['рынок', 'жилой район'], brewery: ['ремесленный район', 'окраина'], winery: ['ремесленный район', 'окраина'],
+  warehouse: ['окраина', 'порт', 'рынок'], stable: ['окраина', 'поля', 'порт'], farm: ['поля', 'окраина'], mill: ['поля', 'окраина'], fishery: ['порт', 'окраина'], mine: ['окраина', 'поля'], quarry: ['окраина', 'поля'], cemetery: ['окраина', 'поля'],
+  castle: ['крепость', 'центр'], barracks: ['крепость', 'окраина'], arsenal: ['крепость', 'ремесленный район'], watchtower: ['крепость', 'окраина'], siegeWorkshop: ['крепость', 'окраина'], prison: ['крепость', 'окраина'], fireStation: ['центр', 'рынок', 'ремесленный район'],
+};
+
+function chooseDistrictForBuilding(world: WorldState, settlement: Settlement, type: BuildingType, index: number): Settlement['districts'][number] {
+  const districts = settlement.districts.length
+    ? settlement.districts
+    : [{ x: settlement.x, y: settlement.y, name: 'Сердце поселения', role: settlement.type === 'fortress' ? 'крепость' as const : 'центр' as const }];
+  const preferred = DISTRICT_ROLE_BY_BUILDING[type] ?? ['центр', 'жилой район', 'окраина'];
+  const existingLoads = new Map<string, number>();
+  for (const building of world.buildings) {
+    if (building.settlementId !== settlement.id) continue;
+    const key = `${building.globalX}:${building.globalY}`;
+    existingLoads.set(key, (existingLoads.get(key) ?? 0) + Math.max(1, building.localWidth * building.localHeight));
+  }
+  return [...districts].sort((a, b) => {
+    const roleA = preferred.indexOf(a.role);
+    const roleB = preferred.indexOf(b.role);
+    const rankA = roleA < 0 ? preferred.length + 2 : roleA;
+    const rankB = roleB < 0 ? preferred.length + 2 : roleB;
+    if (rankA !== rankB) return rankA - rankB;
+    const loadA = existingLoads.get(`${a.x}:${a.y}`) ?? 0;
+    const loadB = existingLoads.get(`${b.x}:${b.y}`) ?? 0;
+    if (loadA !== loadB) return loadA - loadB;
+    return hashSeed(`${world.config.seed}:район-здания:${settlement.id}:${type}:${index}:${a.x}:${a.y}`)
+      - hashSeed(`${world.config.seed}:район-здания:${settlement.id}:${type}:${index}:${b.x}:${b.y}`);
+  })[0]!;
+}
+
 function ensureBuilding(world: WorldState, settlement: Settlement, type: BuildingType, label: string, index: number, rng: RNG): Building {
-  const district = settlement.districts[index % Math.max(1, settlement.districts.length)] ?? settlement.districts[0]!;
+  const district = chooseDistrictForBuilding(world, settlement, type, index);
   const localSize = world.config.localMapSize ?? 128;
   const floors = type === 'tenement' || type === 'manor' ? rng.int(2, 3) : 1;
   const dimensions = buildingDimensions(type, floors);
@@ -317,7 +355,7 @@ function ensureBuilding(world: WorldState, settlement: Settlement, type: Buildin
     builtYear: rng.int(Math.max(1, settlement.foundedYear), world.year), residentIds: [], workerIds: [], inventoryItemIds: [], rooms: roomsFor(type),
     hasWater: rng.chance(type === 'house' ? .55 : .82), hasHearth: !['warehouse', 'market', 'mine', 'watchtower'].includes(type), history: [`Построено не позднее ${world.year} года.`],
   };
-  assignBuildingFootprint(world, building);
+  if (!assignBuildingFootprintAcrossSettlement(world, building)) throw new Error(`${settlement.name}: нет свободного участка для ${label}`);
   world.buildings.push(building);
   activeRuntime?.buildingById.set(building.id, building);
   settlement.buildingIds.push(building.id);

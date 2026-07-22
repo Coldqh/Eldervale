@@ -140,9 +140,10 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
     const ordered = [...entries].sort((a, b) => a.character.id - b.character.id);
     const interiorCount = map.cells.filter(cell => cell.buildingId === buildingId && !cell.blocked && cell.ground !== 'water').length;
     if (!interiorCount) continue;
+    const groupSize = 8;
     const visibleLimit = Math.min(interiorCount, visiblePeopleLimit(building));
-    const reserveGroupCell = ordered.length > visibleLimit ? 1 : 0;
-    const individualLimit = Math.max(0, Math.min(visibleLimit, interiorCount - reserveGroupCell));
+    const groupSlots = ordered.length > visibleLimit ? Math.min(interiorCount, Math.ceil(ordered.length / groupSize)) : 0;
+    const individualLimit = Math.max(0, Math.min(ordered.length, visibleLimit, interiorCount - groupSlots));
     let placed = 0;
     for (const entry of ordered.slice(0, individualLimit)) {
       const point = claimInsideBuilding(
@@ -153,17 +154,21 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
       people.push(personMarker(world, entry.character, entry.stop, point));
       placed += 1;
     }
-    const hidden = ordered.length - placed;
-    if (hidden > 0) {
+    const hiddenEntries = ordered.slice(placed);
+    for (let groupIndex = 0; groupIndex < Math.min(groupSlots, Math.ceil(hiddenEntries.length / groupSize)); groupIndex += 1) {
+      const chunk = hiddenEntries.slice(groupIndex * groupSize, groupIndex * groupSize + groupSize);
+      const reference = chunk[0];
+      if (!reference) break;
       const groupPoint = claimInsideBuilding(
-        map, buildingId, building.localX + Math.floor(building.localWidth / 2), building.localY + Math.floor(building.localHeight / 2), occupied,
-        `${world.config.seed}:группа-внутри:${buildingId}:${map.level}:${phase}:${world.year}:${world.month}`,
+        map, buildingId, reference.stop.localX, reference.stop.localY, occupied,
+        `${world.config.seed}:группа-внутри:${buildingId}:${map.level}:${phase}:${world.year}:${world.month}:${groupIndex}`,
       );
-      if (groupPoint) people.push({
-        id: map.level === 0 ? `indoor-group-${buildingId}-${phase}` : `indoor-group-${buildingId}-${map.level}-${phase}`, x: groupPoint.x, y: groupPoint.y, kind: 'group',
-        label: `${building.name}: ещё ${hidden}`, count: hidden,
-        refs: ordered.slice(placed).slice(0, 12).map(entry => ({ kind: 'character' as const, id: entry.character.id })),
-        detail: `${hidden} жителей находятся на этом этаже · ${ordered[0]?.stop.activity ?? 'заняты делами'}`,
+      if (!groupPoint) break;
+      people.push({
+        id: map.level === 0 ? `indoor-group-${buildingId}-${phase}-${groupIndex}` : `indoor-group-${buildingId}-${map.level}-${phase}-${groupIndex}`,
+        x: groupPoint.x, y: groupPoint.y, kind: 'group', label: `${building.name}: ${chunk.length} человек`, count: chunk.length,
+        refs: chunk.map(entry => ({ kind: 'character' as const, id: entry.character.id })),
+        detail: `${chunk.length} жителей в этой части здания · ${reference.stop.activity}`,
         visualRole: building.type,
       });
     }
@@ -294,10 +299,10 @@ function buildDailyRoutine(world: WorldState, character: Character, tick: number
     day = stopAtBuilding(world, character, 'day', barracks, 'проходит службу и занимается снаряжением', 'barracks');
   } else if (work) {
     day = stopAtBuilding(world, character, 'day', work, workActivity(character), 'work');
-  } else if (market) {
-    day = stopAtBuilding(world, character, 'day', market, !isSchoolAgeCharacter(character) ? 'ищет работу, товары и новости' : 'помогает семье на рынке', 'market');
+  } else if (!isSchoolAgeCharacter(character)) {
+    day = unemployedDayStop(world, character, settlement, { market, tavern, townHall, castle, home });
   } else {
-    day = stopInSettlement(world, character, settlement, 'day', !isSchoolAgeCharacter(character) ? 'занят случайной работой' : 'проводит день рядом с домом', 'street');
+    day = stopInSettlement(world, character, settlement, 'day', 'проводит день рядом с домом и помогает семье', 'street');
   }
 
   const eveningRoll = hashSeed(`${world.config.seed}:вечер:${tick}:${character.id}`) % 100;
@@ -305,7 +310,7 @@ function buildDailyRoutine(world: WorldState, character: Character, tick: number
   if (character.health < 50 && home) evening = stopAtBuilding(world, character, 'evening', home, 'раньше возвращается домой из-за слабости', 'home');
   else if ((character.mind?.values.faith ?? 0) > 65 && temple && eveningRoll < 55) evening = stopAtBuilding(world, character, 'evening', temple, 'молится и встречает знакомых', 'temple');
   else if (character.age >= 16 && tavern && eveningRoll < 34) evening = stopAtBuilding(world, character, 'evening', tavern, 'ужинает, разговаривает и слушает новости', 'tavern');
-  else if (market && eveningRoll < 62) evening = stopAtBuilding(world, character, 'evening', market, 'покупает нужное и разговаривает с торговцами', 'market');
+  else if (market && eveningRoll < 62) evening = stopNearBuilding(world, character, 'evening', market, 'покупает нужное и разговаривает у торговых рядов', 'market');
   else if (home) evening = stopAtBuilding(world, character, 'evening', home, 'проводит вечер с домочадцами', 'home');
   else evening = stopInSettlement(world, character, settlement, 'evening', 'ищет ночлег и безопасное место', 'street');
 
@@ -342,6 +347,12 @@ function stopAtBuilding(
   const innerHeight = Math.max(1, building.localHeight - 2);
   const fallbackX = building.localX + Math.min(building.localWidth - 1, 1 + hashSeed(`${world.config.seed}:место:${phase}:${character.id}:${building.id}:x`) % innerWidth);
   const fallbackY = building.localY + Math.min(building.localHeight - 1, 1 + hashSeed(`${world.config.seed}:место:${phase}:${character.id}:${building.id}:y`) % innerHeight);
+  if (!interior && (assignmentKind === 'work' || assignmentKind === 'school')) {
+    const overflowActivity = assignmentKind === 'school'
+      ? 'ждёт занятия во дворе: в классе нет свободного места'
+      : 'ищет свободное рабочее место возле мастерской';
+    return stopNearBuilding(world, character, phase, building, overflowActivity, assignmentKind === 'school' ? 'public' : 'jobSearch');
+  }
   const placeLabel = interior
     ? `${building.name} · ${interior.roomName} · ${interior.fixtureLabel}${interior.floor ? ` · этаж ${interior.floor + 1}` : ''}`
     : building.name;
@@ -366,8 +377,65 @@ function interiorAssignmentKind(phase: DayPhase, placeKind: DailyPlaceKind, char
   if (placeKind === 'healer') return character.health < 55 ? 'treatment' : character.profession === 'healer' || character.profession === 'herbalist' ? 'work' : 'seat';
   if (phase === 'day' && placeKind === 'temple' && character.profession === 'priest') return 'work';
   if (phase === 'night' && (placeKind === 'home' || placeKind === 'barracks')) return 'sleep';
-  if (phase === 'day' && (placeKind === 'work' || placeKind === 'barracks' || placeKind === 'market')) return 'work';
+  if (phase === 'day' && (placeKind === 'work' || placeKind === 'barracks')) return 'work';
+  if (placeKind === 'market' || placeKind === 'public' || placeKind === 'jobSearch') return 'seat';
   return 'seat';
+}
+
+function unemployedDayStop(
+  world: WorldState,
+  character: Character,
+  settlement: Settlement,
+  places: { market?: Building; tavern?: Building; townHall?: Building; castle?: Building; home?: Building },
+): DailyRoutineStop {
+  const roll = hashSeed(`${world.config.seed}:день-без-работы:${world.year}:${world.month}:${character.id}`) % 10;
+  const projects = world.constructionProjects
+    .filter(project => project.settlementId === settlement.id && project.stage !== 'завершено' && project.stage !== 'заброшено')
+    .sort((a, b) => a.id - b.id);
+  const fields = world.fields.filter(field => field.settlementId === settlement.id).sort((a, b) => a.id - b.id);
+  if (roll <= 1 && projects.length) {
+    const project = projects[hashSeed(`${world.config.seed}:подёнщик-стройка:${character.id}`) % projects.length]!;
+    return {
+      phase: 'day', activity: roll === 0 ? 'спрашивает о подённой работе на стройке' : 'помогает разгружать материалы за дневную плату',
+      placeKind: 'jobSearch', placeLabel: project.name, settlementId: settlement.id,
+      globalX: project.globalX, globalY: project.globalY,
+      localX: project.localX + hashSeed(`${character.id}:стройка:x`) % Math.max(1, project.localWidth),
+      localY: project.localY + project.localHeight + 1 + hashSeed(`${character.id}:стройка:y`) % 3,
+    };
+  }
+  if (roll === 2 && fields.length) {
+    const field = fields[hashSeed(`${world.config.seed}:подёнщик-поле:${character.id}`) % fields.length]!;
+    const cell = field.cells[hashSeed(`${world.config.seed}:клетка-поля:${character.id}`) % Math.max(1, field.cells.length)] ?? { x: 8, y: 8 };
+    return { phase: 'day', activity: 'ищет сезонную работу и помогает в поле', placeKind: 'jobSearch', placeLabel: `Поле: ${field.crop}`, settlementId: settlement.id, globalX: field.globalX, globalY: field.globalY, localX: cell.x, localY: cell.y };
+  }
+  if (roll === 3 && places.townHall) return stopNearBuilding(world, character, 'day', places.townHall, 'спрашивает о найме, долгах и городских работах', 'jobSearch');
+  if (roll === 4 && places.market) return stopNearBuilding(world, character, 'day', places.market, 'ищет заказчиков и разовую работу у торговых рядов', 'jobSearch');
+  if (roll === 5 && places.tavern) return stopNearBuilding(world, character, 'day', places.tavern, 'слушает объявления и спрашивает о работе у приезжих', 'jobSearch');
+  if (roll === 6 && places.castle) return stopNearBuilding(world, character, 'day', places.castle, 'проверяет набор на общественные и военные работы', 'jobSearch');
+  if (roll === 7 && places.home) return stopAtBuilding(world, character, 'day', places.home, 'чинит дом, готовит припасы и помогает семье', 'home');
+  return stopInSettlement(world, character, settlement, 'day', roll === 8 ? 'ходит по мастерским и предлагает работу за дневную плату' : 'занимается случайной работой в своём районе', 'jobSearch');
+}
+
+function stopNearBuilding(
+  world: WorldState,
+  character: Character,
+  phase: DayPhase,
+  building: Building,
+  activity: string,
+  placeKind: DailyPlaceKind,
+): DailyRoutineStop {
+  const seed = hashSeed(`${world.config.seed}:снаружи-здания:${phase}:${building.id}:${character.id}:${world.year}:${world.month}`);
+  const offset = 2 + seed % 5;
+  const side = Math.floor(seed / 17) % 4;
+  const x = side === 0 ? building.entranceX + offset : side === 1 ? building.entranceX - offset : building.entranceX + (seed % 7) - 3;
+  const y = side === 2 ? building.entranceY + offset : side === 3 ? building.entranceY - offset : building.entranceY + (Math.floor(seed / 31) % 7) - 3;
+  const size = world.config.localMapSize ?? 128;
+  return {
+    phase, activity, placeKind, placeLabel: `${building.name} · снаружи`, settlementId: character.settlementId,
+    globalX: building.globalX, globalY: building.globalY,
+    localX: Math.max(2, Math.min(size - 3, x)), localY: Math.max(2, Math.min(size - 3, y)),
+    establishmentId: building.establishmentId,
+  };
 }
 
 function stopInSettlement(

@@ -1,5 +1,5 @@
 import type { BuildingInteriorPlan } from './interiorTypes';
-import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, UrbanState } from './cityTypes';
+import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, SettlementLayoutPlan, UrbanState } from './cityTypes';
 import type { Civilization } from './civilizationTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
@@ -772,6 +772,7 @@ export interface Building {
   history: string[];
   interior?: BuildingInteriorPlan;
   cityCapacity?: BuildingCapacityProfile;
+  spatialVersion?: 1 | 2;
 }
 
 
@@ -1216,6 +1217,7 @@ export interface Settlement {
   economy: SettlementEconomy;
   cultureStateId?: number;
   civilizationId?: number;
+  layout?: SettlementLayoutPlan;
 }
 
 export interface Character {
@@ -1830,7 +1832,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 27;
+  version: 28;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

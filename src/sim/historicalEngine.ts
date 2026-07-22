@@ -25,6 +25,7 @@ import { initializeHealthSystem } from './healthSystem';
 import { initializeCultureSystem } from './cultureSystem';
 import { initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
+import { initializeSettlementLayouts } from './cityMorphology';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -94,6 +95,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   onProgress?.('Связывание книг, артефактов и руин', 89, 100, 'Источники получают реальные события и владельцев');
   linkKnowledgeAndArtifacts(world, rng);
   normalizeKingdomCapitals(world);
+  initializeSettlementLayouts(world);
   generatePhysicalEconomy(world, new RNG(`${config.seed}:повседневная-жизнь-v1`), (phase, percent, detail) => {
     onProgress?.(phase, 90 + Math.round(percent * .055), 100, detail);
   });
@@ -147,7 +149,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 27;
+  world.version = 28;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

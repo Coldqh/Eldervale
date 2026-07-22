@@ -26,17 +26,18 @@ import { initializeBattleSystem } from './battleSystem';
 import { initializeCultureSystem } from './cultureSystem';
 import { initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
+import { normalizeSettlementLayouts } from './cityMorphology';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-27`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-28`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 27;
+  localized.version = 28;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -285,6 +286,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.civilization = Math.max(0, ...localized.civilizations.map((item: any) => item.id ?? 0)) + 1;
 
   normalizeKingdomCapitals(localized);
+  normalizeSettlementLayouts(localized as WorldState);
+  for (const building of localized.buildings ?? []) building.spatialVersion = sourceVersion < 28 ? 2 : (building.spatialVersion ?? 1);
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
   ensureAllBuildingFootprints(localized as WorldState);
   initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));

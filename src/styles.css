@@ -231,6 +231,11 @@ button { border: 0; cursor: pointer; }
 .profile-grid strong { display: block; color: var(--gold-pale); font-family: Georgia, serif; font-size: 13px; font-weight: 500; }
 .profile-grid span { display: block; margin-top: 4px; color: #727c73; font-size: 8px; line-height: 1.35; }
 .compact-field { margin-bottom: 13px; }
+
+.seed-field-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; margin-bottom: 13px; }
+.seed-field-row .compact-field { margin-bottom: 0; }
+.seed-field-row > button { min-height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--muted); font-size: 10px; }
+.seed-field-row > button:hover { border-color: var(--line-strong); color: var(--gold-pale); }
 .field { margin-bottom: 13px; }
 .field input { padding: 10px 12px; }
 .field-grid { gap: 11px 16px; }

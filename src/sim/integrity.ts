@@ -43,6 +43,15 @@ export function inspectWorldIntegrity(world: WorldState): WorldIntegrityReport {
     if (!tiles.length) errors.push(`${settlement.name}: нет квадрата на глобальной карте`);
     if (settlement.districts.length !== tiles.length) warnings.push(`${settlement.name}: число районов и занятых квадратов различается`);
     if ((settlement.type === 'city' || settlement.type === 'port') && settlement.population >= 700 && settlement.districts.length < 2) warnings.push(`${settlement.name}: крупный город занимает только один квадрат`);
+    if (!settlement.layout || settlement.layout.version !== 1 || settlement.layout.settlementId !== settlement.id) errors.push(`${settlement.name}: отсутствует постоянный морфологический план`);
+    else {
+      if (settlement.layout.generatedFromSeed !== world.config.seed) errors.push(`${settlement.name}: городской план создан для другого ключа мира`);
+      for (const district of settlement.districts) {
+        const plan = settlement.layout.districtPlans.find(item => item.globalX === district.x && item.globalY === district.y);
+        if (!plan) errors.push(`${settlement.name}: район ${district.name} не имеет плана улиц и застройки`);
+        else if (plan.centerX < 2 || plan.centerY < 2 || plan.centerX >= (world.config.localMapSize ?? 128) - 2 || plan.centerY >= (world.config.localMapSize ?? 128) - 2) errors.push(`${settlement.name}: центр района ${district.name} находится вне локальной карты`);
+      }
+    }
   }
 
   const settlementIds = new Set(world.settlements.map(item => item.id));

@@ -10,7 +10,7 @@ const deviceProfiles: { label: string; hint: string; config: Partial<WorldConfig
 ];
 
 export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { initial?: WorldConfig; onGenerate: (config: WorldConfig) => void; onClose?: () => void; onOpenSettings: () => void }) {
-  const [config, setConfig] = useState<WorldConfig>(initial ?? defaultConfig);
+  const [config, setConfig] = useState<WorldConfig>(() => ({ ...(initial ?? defaultConfig), seed: randomWorldSeed() }));
   const set = <K extends keyof WorldConfig>(key: K, value: WorldConfig[K]) => setConfig(current => ({ ...current, [key]: value }));
   const applyProfile = (profile: Partial<WorldConfig>) => setConfig(current => ({ ...current, ...profile }));
 
@@ -34,7 +34,10 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
         </button>)}
       </div>
 
-      <label className="field compact-field"><span>Ключ мира</span><input value={config.seed} onChange={e => set('seed', e.target.value)} /></label>
+      <div className="seed-field-row">
+        <label className="field compact-field"><span>Ключ мира</span><input value={config.seed} onChange={e => set('seed', e.target.value)} /></label>
+        <button type="button" onClick={() => set('seed', randomWorldSeed())}>Новый ключ</button>
+      </div>
 
       <div className="field-grid primary-settings">
         <Range label="Лет истории" value={config.historyYears} min={80} max={800} step={20} onChange={v => set('historyYears', v)} />
@@ -64,7 +67,7 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
         <button onClick={() => setConfig({ ...defaultConfig, seed: `Тихие-королевства-${Date.now()}`, warlike: .18, monsterDensity: .5 })}>Тихие королевства</button>
       </div>
 
-      <button className="primary-button" onClick={() => onGenerate(config)}>Сотворить Eldervale <span>→</span></button>
+      <button className="primary-button" onClick={() => onGenerate({ ...config, seed: config.seed.trim() || randomWorldSeed() })}>Сотворить Eldervale <span>→</span></button>
       <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Животные существуют популяциями, природные ресурсы восстанавливаются по сезонам, а локальная карта каждого квадрата имеет размер {config.localMapSize}×{config.localMapSize}. Версия приложения: {APP_VERSION}.</p>
     </div>
   </div>;
@@ -72,4 +75,10 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
 
 function Range({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void }) {
   return <label className="range-field"><span>{label}<strong>{Number.isInteger(value) ? value : value.toFixed(2)}</strong></span><input type="range" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value))} /></label>;
+}
+
+function randomWorldSeed(): string {
+  const time = Date.now().toString(36);
+  const entropy = Math.floor(Math.random() * 0xFFFFFF).toString(36).padStart(5, '0');
+  return `Eldervale-${time}-${entropy}`;
 }
