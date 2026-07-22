@@ -4,9 +4,11 @@ import { generateHistoricalWorld } from '../src/sim/historicalEngine';
 import { advanceCitySimulation, cityIntegrityIssues, projectSettlementCity } from '../src/sim/citySimulation';
 import { interiorPlanForBuilding } from '../src/sim/interiors';
 import { circulationCell } from '../src/sim/cityCapacity';
-import { requestConstructionProject } from '../src/sim/agricultureConstruction';
+import { advanceConstruction, requestConstructionProject } from '../src/sim/agricultureConstruction';
 import { assignConstructionFootprint } from '../src/sim/spatial';
 import { RNG } from '../src/sim/rng';
+import { buildWorldIndexes } from '../src/sim/indexes';
+import { expandSettlementDistrict } from '../src/sim/cityExpansion';
 
 const world = generateHistoricalWorld({
   ...defaultConfig,
@@ -22,7 +24,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .15,
 });
 
-assert.equal(world.version, 25);
+assert.equal(world.version, 26);
 assert.equal(world.cityStates.length, world.settlements.length, 'каждое поселение должно иметь городской аудит');
 assert.ok(world.cityStates.every(state => state.land.freeBuildableCells >= 0), 'свободная земля не может быть отрицательной');
 assert.ok(world.buildings.every(building => building.cityCapacity?.version === 2), 'каждое здание должно иметь профиль функциональной вместимости');
@@ -65,7 +67,9 @@ for (const state of world.cityStates) {
   assert.ok(state.land.districtTiles >= 1, 'город должен занимать хотя бы одну локальную территорию');
 }
 
-const house = world.buildings.find(building => ['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle'].includes(building.type) && (building.cityCapacity?.permanentBeds ?? 0) >= 1);
+const house = world.buildings.find(building => ['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle'].includes(building.type)
+  && (building.cityCapacity?.permanentBeds ?? 0) >= 1
+  && world.constructionProjects.filter(project => project.settlementId === building.settlementId && !['завершено', 'заброшено'].includes(project.stage)).length < 3);
 assert.ok(house, 'для проверки нужно жилое здание');
 const settlementHouseholds = world.households.filter(household => household.settlementId === house!.settlementId).slice(0, 5);
 assert.ok(settlementHouseholds.length >= 2, 'для проверки перенаселения нужны несколько домохозяйств');
@@ -82,6 +86,47 @@ assert.ok(crowdedState.problems.some(problem => problem.kind === 'overcrowding' 
 
 const crowdedUrban = world.urbanStates.find(state => state.settlementId === house!.settlementId)!;
 assert.ok(crowdedUrban.problemRecords.some(problem => problem.status === 'active' && (problem.kind === 'overcrowding' || problem.kind === 'housing-shortage')), 'городская проблема должна сохраняться в постоянной истории');
+
+const automaticHousingRequest = crowdedUrban.projectQueue.find(request => request.triggerProblemIds.some(id => id.includes('overcrowding') || id.includes('housing-shortage')));
+assert.ok(automaticHousingRequest, 'реальный жилищный дефицит должен создать постоянную городскую заявку');
+assert.ok(automaticHousingRequest.expectedRelief.some(kind => kind === 'overcrowding' || kind === 'housing-shortage'), 'заявка должна хранить ожидаемый эффект');
+const developmentMonth = world.month;
+world.month = 2;
+advanceConstruction(world, new RNG('city-autonomous-development-smoke'), buildWorldIndexes(world), new Set([house!.settlementId]));
+world.month = developmentMonth;
+assert.ok(['started', 'blocked'].includes(automaticHousingRequest.status), 'городская заявка должна быть обработана строительной системой');
+if (automaticHousingRequest.status === 'started') {
+  assert.ok(automaticHousingRequest.constructionProjectId && world.constructionProjects.some(project => project.id === automaticHousingRequest.constructionProjectId), 'автономное решение должно создать физическую стройку');
+} else assert.ok(automaticHousingRequest.blockedReason, 'неисполненная автономная заявка должна сохранить точную причину');
+advanceCitySimulation(world, new Set([house!.settlementId]));
+
+const expansionSettlement = world.settlements.find(settlement => world.settlementGovernments.some(government => government.settlementId === settlement.id))!;
+const occupiedDistrictTiles = new Set(world.settlements.flatMap(settlement => settlement.districts.map(district => `${district.x}:${district.y}`)));
+let expansionTile = world.tiles.find(tile => expansionSettlement.districts.some(district => Math.abs(district.x - tile.x) + Math.abs(district.y - tile.y) === 1)
+  && !occupiedDistrictTiles.has(`${tile.x}:${tile.y}`));
+assert.ok(expansionTile, 'для проверки расширения нужна соседняя свободная клетка');
+expansionTile!.terrain = 'plains';
+expansionTile!.kingdomId = expansionSettlement.kingdomId;
+expansionTile!.settlementId = undefined;
+expansionTile!.settlementDistrict = undefined;
+expansionTile!.dungeonId = undefined;
+expansionTile!.monsterId = undefined;
+const expansionGovernment = world.settlementGovernments.find(government => government.settlementId === expansionSettlement.id)!;
+const districtsBeforeExpansion = expansionSettlement.districts.length;
+expansionGovernment.treasury = 0;
+const blockedExpansion = expandSettlementDistrict(world, expansionSettlement, 'окраина', 'проверка отказа без денег');
+assert.equal(blockedExpansion.ok, false, 'город не должен получать новый район без оплаты');
+assert.equal(expansionSettlement.districts.length, districtsBeforeExpansion, 'неоплаченное расширение не должно менять город');
+assert.ok(blockedExpansion.reason?.includes('не хватает'), 'отказ должен объяснять дефицит казны');
+expansionGovernment.treasury = 1000;
+const treasuryBeforeExpansion = expansionGovernment.treasury;
+const expansion = expandSettlementDistrict(world, expansionSettlement, 'окраина', 'регрессионная проверка автономного расширения');
+assert.ok(expansion.ok && expansion.district, `расширение должно быть выполнено: ${expansion.reason ?? 'неизвестная причина'}`);
+assert.equal(expansionSettlement.districts.length, districtsBeforeExpansion + 1, 'расширение должно добавить реальный район');
+assert.ok(expansionGovernment.treasury < treasuryBeforeExpansion, 'расширение должно оплачиваться из местной казны');
+assert.equal(expansionTile!.settlementId, expansionSettlement.id, 'новый район должен занять клетку глобальной карты');
+assert.ok(world.districtCivicStates.some(state => state.settlementId === expansionSettlement.id && state.districtName === expansion.district!.name), 'новый район должен получить гражданское состояние');
+advanceCitySimulation(world, new Set([expansionSettlement.id]));
 
 const projectSettlement = world.settlements.find(item => item.id !== house!.settlementId) ?? world.settlements[0]!;
 const queueBefore = world.urbanStates.find(item => item.settlementId === projectSettlement.id)!.projectQueue.length;
@@ -133,4 +178,4 @@ if (warehouse) {
 
 const issues = cityIntegrityIssues(world);
 assert.deepEqual(issues, [], `ошибки городского ядра: ${issues.join(' | ')}`);
-console.log(`OK CITY CORE: ${world.cityStates.length} поселений, ${crowdedState.problems.length} проблем, ${plan.unassignedSleeperIds.length} жителей без постоянной кровати.`);
+console.log(`OK CITY DEVELOPMENT: ${world.cityStates.length} поселений, заявка ${automaticHousingRequest.status}, район ${expansion.district!.name}, ${plan.unassignedSleeperIds.length} жителей без постоянной кровати.`);

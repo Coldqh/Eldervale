@@ -123,17 +123,22 @@ export interface CityProjectRequest {
   status: CityProjectStatus;
   requestedTick: number;
   updatedTick: number;
+  triggerProblemIds: string[];
+  expectedRelief: CityProblemKind[];
+  targetDistrictRole?: string;
   constructionProjectId?: number;
+  completedDistrictName?: string;
   blockedReason?: string;
   history: string[];
 }
 
 export interface UrbanState {
-  version: 1;
+  version: 2;
   settlementId: number;
   initializedTick: number;
   lastSimulatedTick: number;
   simulationCount: number;
+  lastDevelopmentTick: number;
   dirty: boolean;
   dirtyReasons: CityDirtyReason[];
   housingAssignments: CityHousingAssignment[];

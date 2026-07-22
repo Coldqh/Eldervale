@@ -57,7 +57,7 @@ export function CityView({ world, onSelect }: { world: WorldState; onSelect: (re
           </div>
         </div>
         <div className="window-card city-problems-window"><header><strong>Проблемы города</strong><small>{selected.problems.length ? 'Причины и последствия рассчитаны из физических данных' : 'Критических дефицитов нет'}</small></header><div className="city-problem-list">{selected.problems.map(problem => <ProblemCard key={problem.id} problem={problem} />)}</div></div>
-        {urban && <div className="window-card city-projects-window"><header><strong>Городские проекты</strong><small>Единая очередь заявок, участков и строек</small></header><div className="city-project-list">{urban.projectQueue.filter(item => !['completed', 'cancelled', 'rejected'].includes(item.status)).slice(0, 12).map(project => <article key={project.id}><span><strong>{project.requestedBuildingType}</strong><small>{project.reason}</small>{project.blockedReason && <em>{project.blockedReason}</em>}</span><b>{project.status}</b></article>)}{!urban.projectQueue.some(item => !['completed', 'cancelled', 'rejected'].includes(item.status)) && <p>Активных проектов нет.</p>}</div><footer><span>Городских ходов: {urban.simulationCount}</span><span>Исторических проблем: {urban.problemRecords.length}</span></footer></div>}
+        {urban && <div className="window-card city-projects-window"><header><strong>Городские проекты</strong><small>Единая очередь заявок, участков и строек</small></header><div className="city-project-list">{urban.projectQueue.filter(item => !['completed', 'cancelled', 'rejected'].includes(item.status)).slice(0, 12).map(project => <article key={project.id}><span><strong>{cityProjectLabel(project.requestedBuildingType)}</strong><small>{project.reason}</small><small className="city-project-meta">Приоритет {project.priority}{project.expectedRelief.length ? ` · решает: ${project.expectedRelief.map(cityProblemLabel).join(', ')}` : ''}</small>{project.blockedReason && <em>{project.blockedReason}</em>}</span><b>{cityProjectStatus(project.status)}</b></article>)}{!urban.projectQueue.some(item => !['completed', 'cancelled', 'rejected'].includes(item.status)) && <p>Активных проектов нет.</p>}</div><footer><span>Городских ходов: {urban.simulationCount}</span><span>Исторических проблем: {urban.problemRecords.length}</span></footer></div>}
         <div className="window-card city-buildings-window"><header><strong>Перегруженные здания</strong><small>Вместимость считается отдельно по назначению</small></header><div className="city-building-list">{selected.buildingAudits.filter(audit => audit.overloaded).slice(0, 24).map(audit => {
           const building = world.buildings.find(item => item.id === audit.buildingId);
           return <button key={audit.buildingId} onClick={() => onSelect({ kind: 'building', id: audit.buildingId })}><span><strong>{building?.name ?? `Здание ${audit.buildingId}`}</strong><small>{audit.warnings.join(' · ')}</small></span><em>{audit.floorArea} клеток</em></button>;
@@ -82,4 +82,24 @@ function CapacityBlock({ title, current, total, detail, suffix = '' }: { title: 
 
 function ProblemCard({ problem }: { problem: CityProblem }) {
   return <article className={problem.severity >= 65 ? 'critical' : problem.severity >= 35 ? 'warning' : ''}><header><span><strong>{problem.title}</strong><small>{problem.description}</small></span><em>{Math.round(problem.severity)}</em></header><div><span>Причины: {problem.causes.join(', ')}</span><span>Последствия: {problem.consequences.join(', ')}</span></div></article>;
+}
+
+
+function cityProjectLabel(value: string): string {
+  const labels: Record<string, string> = {
+    house: 'Жилой дом', tenement: 'Доходный дом', shelter: 'Приют', school: 'Школа', warehouse: 'Склад', bathhouse: 'Баня',
+    fireStation: 'Пожарный двор', market: 'Рынок', 'district-expansion': 'Расширение города', mill: 'Мельница', bakery: 'Пекарня',
+    kiln: 'Кирпичная мастерская', quarry: 'Каменоломня', watchtower: 'Сторожевая башня',
+  };
+  return labels[value] ?? value;
+}
+
+function cityProjectStatus(value: string): string {
+  return ({ requested: 'в очереди', blocked: 'заблокирован', approved: 'одобрен', started: 'строится' } as Record<string, string>)[value] ?? value;
+}
+
+function cityProblemLabel(value: string): string {
+  return ({ homelessness: 'бездомность', overcrowding: 'теснота', 'housing-shortage': 'нехватка жилья', 'school-shortage': 'нехватка школ',
+    unemployment: 'безработица', 'worker-shortage': 'нехватка работников', 'storage-shortage': 'нехватка складов', 'land-shortage': 'нехватка земли',
+    'land-conflict': 'конфликт земли', 'water-shortage': 'нехватка воды', 'fire-risk': 'пожарный риск' } as Record<string, string>)[value] ?? value;
 }

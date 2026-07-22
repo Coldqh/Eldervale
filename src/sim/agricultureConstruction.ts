@@ -2,15 +2,18 @@ import type {
   Building, BuildingType, ConstructionProject, ConstructionStage, CropKind, Establishment, EstablishmentType,
   FieldPlot, FieldState, Settlement, WorldState,
 } from '../types';
+import type { CityProjectRequest } from '../cityTypes';
 import type { WorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
 import { addMaterialItem, consumeSettlementMaterial } from './materialEconomy';
 import { RNG, hashSeed } from './rng';
 import { assignConstructionFootprint, assignFieldCells, buildingDimensions } from './spatial';
 import { worldTick } from './scheduler';
-import { approveCityProjectRequest, blockCityProjectRequest, completeCityProjectRequest, failCityProjectRequest, linkCityProjectToConstruction, requestCityProject } from './cityProjects';
+import { approveCityProjectRequest, blockCityProjectRequest, completeCityActionRequest, completeCityProjectRequest, failCityProjectRequest, linkCityProjectToConstruction, requestCityProject } from './cityProjects';
 import { ensureBuildingCapacityProfile } from './cityCapacity';
 import { markCityDirty } from './cityState';
+import { pendingCityDevelopmentRequests } from './cityDevelopment';
+import { expandSettlementDistrict } from './cityExpansion';
 
 interface CropDefinition {
   crop: CropKind;
@@ -44,6 +47,15 @@ function equippedToolFactor(world: WorldState, workers: Array<WorldState['charac
   });
   return factors.reduce((sum, value) => sum + value, 0) / factors.length;
 }
+
+const BUILDING_TYPES: Record<BuildingType, true> = {
+  house: true, tenement: true, manor: true, barracks: true, monastery: true, warehouse: true, farm: true, mill: true,
+  bakery: true, tavern: true, inn: true, brewery: true, winery: true, blacksmith: true, carpenter: true, weaver: true,
+  tailor: true, dyehouse: true, tannery: true, cobbler: true, armorer: true, toolmaker: true, kiln: true, quarry: true,
+  market: true, shop: true, bathhouse: true, healer: true, temple: true, guildhall: true, stable: true, fishery: true,
+  mine: true, cemetery: true, castle: true, arsenal: true, watchtower: true, siegeWorkshop: true, townHall: true,
+  courthouse: true, prison: true, fireStation: true, school: true, shelter: true, public: true,
+};
 
 const ESTABLISHMENT_FOR_BUILDING: Partial<Record<BuildingType, EstablishmentType>> = {
   farm: 'ферма', mill: 'мельница', bakery: 'пекарня', tavern: 'таверна', inn: 'постоялый двор', brewery: 'пивоварня', winery: 'винодельня',
@@ -233,46 +245,12 @@ export function requestConstructionProject(world: WorldState, settlement: Settle
     source: 'construction-system',
     priority: cityProjectPriority(type, reason),
   });
-  const existing = world.constructionProjects.find(project => project.settlementId === settlement.id && project.buildingType === type && !['завершено', 'заброшено'].includes(project.stage));
-  if (existing) {
-    existing.cityRequestId ??= request.id;
-    linkCityProjectToConstruction(world, request.id, existing);
-    return undefined;
-  }
-  approveCityProjectRequest(world, request.id);
-  const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
-  const district = chooseConstructionDistrict(settlement, type);
-  if (!district) {
-    blockCityProjectRequest(world, request.id, 'в поселении нет подходящего района');
-    return undefined;
-  }
-  const project: ConstructionProject = {
-    id: world.nextIds.constructionProject++, settlementId: settlement.id, requestedByKingdomId: settlement.kingdomId, cityRequestId: request.id, buildingType: type,
-    name: constructionName(type, settlement, world.nextIds.constructionProject), reason, globalX: district.x, globalY: district.y,
-    localX: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.width - 9)), localY: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.height - 9)),
-    localWidth: dimensions.width, localHeight: dimensions.height, entranceX: 0, entranceY: 0,
-    requiredMaterials: constructionMaterials(type), deliveredMaterials: {}, laborRequired: constructionLabor(type), laborDone: 0,
-    builderIds: [], stage: 'планирование', startedYear: world.year, startedMonth: world.month,
-    history: [`Проект утверждён в ${world.year}.${String(world.month).padStart(2, '0')}: ${reason}.`],
-  };
-  if (!assignConstructionFootprint(world, project)) {
-    blockCityProjectRequest(world, request.id, 'не найден свободный участок без пересечений со зданиями, стройками и полями');
-    return undefined;
-  }
-  world.constructionProjects.push(project);
-  linkCityProjectToConstruction(world, request.id, project);
-  appendCausalEvent(world, {
-    kind: 'construction', title: `Начато строительство: ${project.name}`, description: `В ${settlement.name} размечена площадка ${project.localWidth}×${project.localHeight} клеток.`,
-    cause: reason, conditions: ['городская система подтвердила свободный участок', 'проект получил список материалов и объём работ'],
-    decision: `построить ${project.name}`, outcome: 'площадка зарезервирована, начат подвоз материалов',
-    consequences: ['строители получат работу', 'спрос на древесину, камень и крепёж вырастет'], entityRefs: [{ kind: 'constructionProject', id: project.id }, { kind: 'settlement', id: settlement.id }], importance: 2,
-  });
-  return project;
+  return startCityProjectRequest(world, settlement, request, rng);
 }
 
 export function advanceConstruction(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>): void {
   if (!world.constructionProjects) world.constructionProjects = [];
-  if ([2, 8].includes(world.month)) evaluateConstructionNeeds(world, rng, indexes, settlementIds);
+  if ([2, 8].includes(world.month)) evaluateConstructionNeeds(world, rng, indexes, settlementIds, true);
   for (const project of world.constructionProjects) {
     if (!settlementIds.has(project.settlementId) || ['завершено', 'заброшено'].includes(project.stage)) continue;
     const settlement = indexes.settlementById.get(project.settlementId);
@@ -293,19 +271,37 @@ export function advanceConstruction(world: WorldState, rng: RNG, indexes: WorldI
   }
 }
 
-function evaluateConstructionNeeds(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>): void {
+function evaluateConstructionNeeds(
+  world: WorldState,
+  rng: RNG,
+  indexes: WorldIndexes,
+  settlementIds: ReadonlySet<number>,
+  includeEconomicBaseline: boolean,
+): void {
   for (const settlementId of settlementIds) {
     const settlement = indexes.settlementById.get(settlementId);
     if (!settlement) continue;
     const active = world.constructionProjects.filter(project => project.settlementId === settlement.id && !['завершено', 'заброшено'].includes(project.stage));
-    if (active.length >= 3) continue;
+    let availableSlots = Math.max(0, 3 - active.length);
+
+    const cityRequest = pendingCityDevelopmentRequests(world, settlement.id)[0];
+    if (cityRequest) {
+      if (cityRequest.requestedBuildingType === 'district-expansion') {
+        const role = districtRole(cityRequest.targetDistrictRole) ?? preferredDistrictRoles('house')[0]!;
+        approveCityProjectRequest(world, cityRequest.id);
+        const result = expandSettlementDistrict(world, settlement, role, cityRequest.reason);
+        if (result.ok && result.district) {
+          completeCityActionRequest(world, cityRequest.id, `Создан район «${result.district.name}» за ${result.cost} монет.`, result.district.name);
+        } else blockCityProjectRequest(world, cityRequest.id, result.reason ?? 'город не смог расширить границы');
+      } else if (availableSlots > 0 && isBuildingType(cityRequest.requestedBuildingType)) {
+        const started = startCityProjectRequest(world, settlement, cityRequest, rng);
+        if (started) availableSlots -= 1;
+      }
+    }
+
+    if (!includeEconomicBaseline || availableSlots <= 0) continue;
     const counts = new Map<BuildingType, number>();
     for (const building of indexes.buildingsBySettlement.get(settlement.id) ?? []) counts.set(building.type, (counts.get(building.type) ?? 0) + 1);
-    const spare = settlement.residentialCapacity - settlement.population;
-    if (spare < Math.max(3, Math.ceil(settlement.population * .025))) {
-      requestConstructionProject(world, settlement, settlement.population > 900 ? 'tenement' : 'house', 'население приблизилось к пределу существующего жилья', rng);
-      continue;
-    }
     const targets: [BuildingType, number, string][] = [
       ['warehouse', Math.max(1, Math.ceil(settlement.population / 700)), 'склады не успевают принимать урожай и стройматериалы'],
       ['mill', settlement.population >= 80 ? Math.max(1, Math.ceil(settlement.population / 650)) : 0, 'поселению не хватает мощностей для помола зерна'],
@@ -317,6 +313,104 @@ function evaluateConstructionNeeds(world: WorldState, rng: RNG, indexes: WorldIn
     const missing = targets.find(([type, target]) => (counts.get(type) ?? 0) + active.filter(project => project.buildingType === type).length < target);
     if (missing) requestConstructionProject(world, settlement, missing[0], missing[2], rng);
   }
+}
+
+function startCityProjectRequest(
+  world: WorldState,
+  settlement: Settlement,
+  request: CityProjectRequest,
+  rng: RNG,
+): ConstructionProject | undefined {
+  const type = request.requestedBuildingType;
+  if (!isBuildingType(type)) {
+    blockCityProjectRequest(world, request.id, `неизвестный тип строительного проекта: ${type}`);
+    return undefined;
+  }
+  const existing = world.constructionProjects.find(project => project.settlementId === settlement.id && project.buildingType === type && !['завершено', 'заброшено'].includes(project.stage));
+  if (existing) {
+    existing.cityRequestId ??= request.id;
+    linkCityProjectToConstruction(world, request.id, existing);
+    return undefined;
+  }
+  approveCityProjectRequest(world, request.id);
+  const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
+  let project = placeConstructionProject(world, settlement, request, type, dimensions, rng);
+  if (!project) {
+    const expansionRole = districtRole(request.targetDistrictRole) ?? preferredDistrictRoles(type)[0]!;
+    const expansion = expandSettlementDistrict(world, settlement, expansionRole, `для проекта «${constructionName(type, settlement, world.nextIds.constructionProject)}»: ${request.reason}`);
+    if (expansion.ok && expansion.district) {
+      request.history.push(`Город расширен районом «${expansion.district.name}», чтобы освободить участок под проект.`);
+      project = placeConstructionProject(world, settlement, request, type, dimensions, rng, expansion.district.name);
+    } else {
+      request.history.push(`Попытка расширения города не удалась: ${expansion.reason ?? 'неизвестная причина'}.`);
+    }
+  }
+  if (!project) {
+    blockCityProjectRequest(world, request.id, 'не найден свободный участок; расширение района невозможно или не оплачено');
+    return undefined;
+  }
+  world.nextIds.constructionProject += 1;
+  world.constructionProjects.push(project);
+  linkCityProjectToConstruction(world, request.id, project);
+  appendCausalEvent(world, {
+    kind: 'construction', title: `Начато строительство: ${project.name}`, description: `В ${settlement.name} размечена площадка ${project.localWidth}×${project.localHeight} клеток.`,
+    cause: request.reason, conditions: ['городская заявка имеет источник и приоритет', 'найден физически свободный участок', 'проект получил список материалов и объём работ'],
+    decision: `построить ${project.name}`, outcome: 'площадка зарезервирована, начат подвоз материалов',
+    consequences: ['строители получат работу', 'спрос на древесину, камень и крепёж вырастет'], entityRefs: [{ kind: 'constructionProject', id: project.id }, { kind: 'settlement', id: settlement.id }], importance: 2,
+  });
+  return project;
+}
+
+function placeConstructionProject(
+  world: WorldState,
+  settlement: Settlement,
+  request: CityProjectRequest,
+  type: BuildingType,
+  dimensions: { width: number; height: number },
+  rng: RNG,
+  onlyDistrictName?: string,
+): ConstructionProject | undefined {
+  const districts = constructionDistricts(settlement, type, request.targetDistrictRole)
+    .filter(district => !onlyDistrictName || district.name === onlyDistrictName);
+  for (const district of districts) {
+    const id = world.nextIds.constructionProject;
+    const project: ConstructionProject = {
+      id, settlementId: settlement.id, requestedByKingdomId: settlement.kingdomId, cityRequestId: request.id, buildingType: type,
+      name: constructionName(type, settlement, id), reason: request.reason, globalX: district.x, globalY: district.y,
+      localX: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.width - 9)), localY: 4 + rng.int(0, Math.max(1, (world.config.localMapSize ?? 128) - dimensions.height - 9)),
+      localWidth: dimensions.width, localHeight: dimensions.height, entranceX: 0, entranceY: 0,
+      requiredMaterials: constructionMaterials(type), deliveredMaterials: {}, laborRequired: constructionLabor(type), laborDone: 0,
+      builderIds: [], stage: 'планирование', startedYear: world.year, startedMonth: world.month,
+      history: [`Проект утверждён в ${world.year}.${String(world.month).padStart(2, '0')}: ${request.reason}.`, `Выбран район «${district.name}».`],
+    };
+    if (assignConstructionFootprint(world, project)) return project;
+  }
+  return undefined;
+}
+
+function constructionDistricts(settlement: Settlement, type: BuildingType, requestedRole?: string): Settlement['districts'] {
+  const roles = [districtRole(requestedRole), ...preferredDistrictRoles(type)].filter((role): role is Settlement['districts'][number]['role'] => Boolean(role));
+  const rank = new Map(roles.map((role, index) => [role, index]));
+  return [...settlement.districts].sort((a, b) => (rank.get(a.role) ?? roles.length) - (rank.get(b.role) ?? roles.length) || a.name.localeCompare(b.name));
+}
+
+function preferredDistrictRoles(type: BuildingType): Settlement['districts'][number]['role'][] {
+  if (type === 'farm' || type === 'quarry' || type === 'mine') return ['поля', 'окраина'];
+  if (type === 'castle' || type === 'barracks' || type === 'arsenal' || type === 'watchtower') return ['крепость', 'центр', 'окраина'];
+  if (type === 'kiln' || type === 'siegeWorkshop') return ['ремесленный район', 'окраина'];
+  if (type === 'house' || type === 'tenement' || type === 'shelter' || type === 'school') return ['жилой район', 'окраина', 'центр'];
+  if (type === 'market') return ['рынок', 'центр', 'ремесленный район'];
+  return ['ремесленный район', 'центр', 'рынок', 'окраина'];
+}
+
+function districtRole(value?: string): Settlement['districts'][number]['role'] | undefined {
+  return ['центр', 'жилой район', 'рынок', 'ремесленный район', 'крепость', 'порт', 'поля', 'окраина'].includes(value ?? '')
+    ? value as Settlement['districts'][number]['role']
+    : undefined;
+}
+
+function isBuildingType(value: string): value is BuildingType {
+  return Object.prototype.hasOwnProperty.call(BUILDING_TYPES, value);
 }
 
 
@@ -348,11 +442,6 @@ function constructionLabor(type: BuildingType): number {
   const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
   const multiplier = type === 'castle' ? 11 : ['tenement', 'manor', 'temple', 'guildhall', 'arsenal'].includes(type) ? 6 : ['warehouse', 'barracks', 'kiln', 'siegeWorkshop'].includes(type) ? 4.5 : 3.2;
   return Math.round(dimensions.width * dimensions.height * multiplier);
-}
-
-function chooseConstructionDistrict(settlement: Settlement, type: BuildingType) {
-  const preferredRoles = type === 'farm' || type === 'quarry' || type === 'mine' ? ['поля', 'окраина'] : type === 'castle' || type === 'barracks' || type === 'arsenal' || type === 'watchtower' ? ['крепость', 'центр', 'окраина'] : type === 'kiln' || type === 'siegeWorkshop' ? ['ремесленный район', 'окраина'] : type === 'house' || type === 'tenement' ? ['жилой район', 'окраина', 'центр'] : ['ремесленный район', 'центр', 'рынок'];
-  return settlement.districts.find(district => preferredRoles.includes(district.role)) ?? settlement.districts[0];
 }
 
 function constructionName(type: BuildingType, settlement: Settlement, serial: number): string {

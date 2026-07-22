@@ -1,17 +1,20 @@
 import type { BuildingType, ConstructionProject, WorldState } from '../types';
-import type { CityProjectRequest } from '../cityTypes';
+import type { CityProblemKind, CityProjectRequest } from '../cityTypes';
 import { worldTick } from './scheduler';
 import { ensureUrbanState, markCityDirty } from './cityState';
 
 export interface CityProjectRequestOptions {
   source?: string;
   priority?: number;
+  triggerProblemIds?: string[];
+  expectedRelief?: CityProblemKind[];
+  targetDistrictRole?: string;
 }
 
 export function requestCityProject(
   world: WorldState,
   settlementId: number,
-  buildingType: BuildingType,
+  buildingType: BuildingType | 'district-expansion',
   reason: string,
   options: CityProjectRequestOptions = {},
 ): CityProjectRequest {
@@ -22,6 +25,9 @@ export function requestCityProject(
   if (active) {
     active.priority = Math.max(active.priority, clamp(options.priority ?? 50, 1, 100));
     active.updatedTick = tick;
+    active.triggerProblemIds = [...new Set([...(active.triggerProblemIds ?? []), ...(options.triggerProblemIds ?? [])])];
+    active.expectedRelief = [...new Set([...(active.expectedRelief ?? []), ...(options.expectedRelief ?? [])])];
+    active.targetDistrictRole ??= options.targetDistrictRole;
     if (reason && !active.history.includes(reason)) active.history.push(reason);
     if (active.status === 'blocked') active.status = 'requested';
     active.blockedReason = undefined;
@@ -39,6 +45,9 @@ export function requestCityProject(
     status: 'requested',
     requestedTick: tick,
     updatedTick: tick,
+    triggerProblemIds: [...new Set(options.triggerProblemIds ?? [])],
+    expectedRelief: [...new Set(options.expectedRelief ?? [])],
+    targetDistrictRole: options.targetDistrictRole,
     history: [`Запрос создан: ${reason}`],
   };
   state.projectQueue.push(request);
@@ -74,6 +83,18 @@ export function linkCityProjectToConstruction(world: WorldState, requestId: stri
   request.constructionProjectId = project.id;
   request.updatedTick = worldTick(world);
   request.history.push(`Создана стройка №${project.id}.`);
+  markCityDirty(world, request.settlementId, 'construction');
+}
+
+
+export function completeCityActionRequest(world: WorldState, requestId: string, note: string, completedDistrictName?: string): void {
+  const request = findCityProjectRequest(world, requestId);
+  if (!request) return;
+  request.status = 'completed';
+  request.blockedReason = undefined;
+  request.completedDistrictName = completedDistrictName;
+  request.updatedTick = worldTick(world);
+  request.history.push(note);
   markCityDirty(world, request.settlementId, 'construction');
 }
 

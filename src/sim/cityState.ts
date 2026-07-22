@@ -8,11 +8,12 @@ export function ensureUrbanState(world: WorldState, settlementId: number): Urban
   if (state) return state;
   const tick = worldTick(world);
   state = {
-    version: 1,
+    version: 2,
     settlementId,
     initializedTick: tick,
     lastSimulatedTick: -1,
     simulationCount: 0,
+    lastDevelopmentTick: -1,
     dirty: true,
     dirtyReasons: ['initialization'],
     housingAssignments: [],
@@ -53,7 +54,7 @@ export function normalizeUrbanStates(world: WorldState): void {
   world.urbanStates = world.urbanStates.filter(item => validSettlementIds.has(item.settlementId));
   for (const settlement of world.settlements) {
     const state = ensureUrbanState(world, settlement.id);
-    state.version = 1;
+    state.version = 2;
     state.housingAssignments ??= [];
     state.problemRecords ??= [];
     state.projectQueue ??= [];
@@ -62,5 +63,10 @@ export function normalizeUrbanStates(world: WorldState): void {
     state.initializedTick ??= worldTick(world);
     state.lastSimulatedTick ??= -1;
     state.simulationCount ??= 0;
+    state.lastDevelopmentTick ??= -1;
+    for (const request of state.projectQueue) {
+      request.triggerProblemIds ??= [];
+      request.expectedRelief ??= [];
+    }
   }
 }

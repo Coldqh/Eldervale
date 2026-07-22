@@ -1824,7 +1824,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 25;
+  version: 26;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

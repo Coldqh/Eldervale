@@ -8,6 +8,7 @@ import { worldTick } from './scheduler';
 import { buildingCapacityProfile, ensureBuildingCapacityProfile } from './cityCapacity';
 import { clearCityDirty, ensureUrbanState, markAllCitiesDirty, normalizeUrbanStates } from './cityState';
 import { reconcileCityProjectQueue } from './cityProjects';
+import { synchronizeCityDevelopmentPlan } from './cityDevelopment';
 
 const CITY_VERSION = 2 as const;
 const RESIDENTIAL_TYPES = new Set<Building['type']>(['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle']);
@@ -86,6 +87,7 @@ function simulateSettlementCity(world: WorldState, settlement: Settlement): Sett
   settlement.households = projection.state.households;
   settlement.residentialCapacity = projection.state.housing.permanentBeds;
   updateProblemRecords(urban, projection.state.problems, tick);
+  synchronizeCityDevelopmentPlan(world, settlement, projection.state);
   urban.simulationCount += 1;
   reconcileCityProjectQueue(world, settlement.id);
   clearCityDirty(urban, tick);
@@ -294,7 +296,7 @@ export function cityIntegrityIssues(world: WorldState): string[] {
     if (!state) { issues.push(`${settlement.name}: отсутствует городской snapshot`); continue; }
     if (!urban) { issues.push(`${settlement.name}: отсутствует постоянное городское состояние`); continue; }
     if (state.version !== CITY_VERSION) issues.push(`${settlement.name}: устаревшая версия городского snapshot`);
-    if (urban.version !== 1) issues.push(`${settlement.name}: устаревшая версия постоянного городского состояния`);
+    if (urban.version !== 2) issues.push(`${settlement.name}: устаревшая версия постоянного городского состояния`);
     if (urban.dirty) issues.push(`${settlement.name}: городской ход завершён с dirty-состоянием`);
     if (state.population !== settlement.population) issues.push(`${settlement.name}: городской snapshot считает ${state.population} жителей, поселение хранит ${settlement.population}`);
     if (settlement.residentialCapacity !== state.housing.permanentBeds) issues.push(`${settlement.name}: агрегат жилья не совпадает с физическими спальными местами`);
