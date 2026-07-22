@@ -32,6 +32,7 @@ import { advanceDynastyLegacy, initializeDynastyLegacy } from './dynastyLegacy';
 import { advanceRaceDemography, initializeRaceDemography } from './raceDemography';
 import { applyInteriorMonthlyEffects } from './interiors';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
+import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -884,6 +885,7 @@ export function advanceOneMonth(
 
   if (world.month === 1) {
     runPhase(engine, 'Культура, вера, языки и образование', onPhase, () => advanceCultureSystem(world, new RNG(`${world.config.seed}:культура:${world.year}`), indexes));
+    runPhase(engine, 'Цивилизации, эпохи, технологии и рецепты', onPhase, () => advanceCivilizationSystem(world));
     runPhase(engine, 'Медленное расширение границ', onPhase, () => advanceModernTerritories(world, new RNG(`${world.config.seed}:современные-границы:${world.year}`)));
   }
 
@@ -950,6 +952,7 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeClimateSystem(world);
   initializeRaceDemography(world);
   synchronizeEmploymentLinks(world);
+  initializeCivilizationSystem(world);
   initializeCitySimulation(world);
 }
 

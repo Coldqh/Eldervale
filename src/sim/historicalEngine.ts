@@ -24,6 +24,7 @@ import { initializeSocialSystem } from './socialSystem';
 import { initializeHealthSystem } from './healthSystem';
 import { initializeCultureSystem } from './cultureSystem';
 import { initializeCitySimulation } from './citySimulation';
+import { initializeCivilizationSystem } from './civilizationSystem';
 
 interface EraPlan {
   kind: HistoricalEraKind;
@@ -119,6 +120,8 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   initializeHealthSystem(world);
   onProgress?.('Культуры, языки, вера и образование', 99.95, 100, 'формируем традиции, языки, храмы, школы, грамотность и культурные общины');
   initializeCultureSystem(world, new RNG(`${config.seed}:культура-вера-образование-v1`));
+  onProgress?.('Цивилизации, эпохи и технологии', 99.97, 100, 'связываем культуры, государства, города, ресурсы и воспроизводимые знания');
+  initializeCivilizationSystem(world, new RNG(`${config.seed}:цивилизации-и-технологии-v1`));
   onProgress?.('Городское ядро и реальная вместимость', 99.98, 100, 'считаем жильё, рабочие места, школы, склады, землю и городские проблемы');
   initializeCitySimulation(world);
   world.events.sort((a, b) => a.year - b.year || a.month - b.month || a.id - b.id);
@@ -144,7 +147,7 @@ export function buildHistoricalTimeline(world: WorldState, config: WorldConfig, 
   synchronizeMortalityIds(world);
   world.nextIds.artifact = Math.max(0, ...world.artifacts.map(artifact => artifact.id)) + 1;
   world.nextIds.book = Math.max(0, ...world.books.map(book => book.id)) + 1;
-  world.version = 26;
+  world.version = 27;
   onProgress?.('Живой мир готов', 100, 100, `${world.events.length} подробных событий · ${world.history.compressedEventCount} обычных изменений сведены в хроники`);
   return world;
 }

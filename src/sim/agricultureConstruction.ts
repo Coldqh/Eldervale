@@ -14,6 +14,7 @@ import { ensureBuildingCapacityProfile } from './cityCapacity';
 import { markCityDirty } from './cityState';
 import { pendingCityDevelopmentRequests } from './cityDevelopment';
 import { expandSettlementDistrict } from './cityExpansion';
+import { availableRecipesForSettlement } from './civilizationSystem';
 
 interface CropDefinition {
   crop: CropKind;
@@ -531,7 +532,7 @@ function createEstablishmentForBuilding(world: WorldState, building: Building, s
   const establishment: Establishment = {
     id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: building.name, type, ownerCharacterId: owner.id,
     workerIds: workers.map(worker => worker.id), supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
-    recipeIds: world.productionRecipes.filter(recipe => recipe.establishmentTypes.includes(type)).map(recipe => recipe.id), openHour: 7, closeHour: 19,
+    recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id), openHour: 7, closeHour: 19,
     reputation: rng.int(35, 65), cash: Math.max(20, owner.wealth * .35), debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {}, history: [`Открыто после завершения строительства в ${world.year} году.`],
   };
   world.establishments.push(establishment); settlement.establishmentIds.push(establishment.id); building.establishmentId = establishment.id; building.ownerCharacterId = owner.id; building.workerIds = [...establishment.workerIds];

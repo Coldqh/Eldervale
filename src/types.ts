@@ -1,5 +1,6 @@
 import type { BuildingInteriorPlan } from './interiorTypes';
 import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, UrbanState } from './cityTypes';
+import type { Civilization } from './civilizationTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -892,6 +893,7 @@ export interface ProductionRecipeInput { templateId: string; quantity: number; }
 export interface ProductionRecipeOutput { templateId: string; quantity: number; qualityBonus?: number; }
 export interface ProductionRecipe {
   id: number;
+  key: string;
   name: string;
   category: RecipeCategory;
   profession: string;
@@ -903,6 +905,7 @@ export interface ProductionRecipe {
   laborHours: number;
   minimumSkill: number;
   culture?: string;
+  requiredTechnologyId?: string;
   description: string;
 }
 
@@ -1113,6 +1116,7 @@ export interface SimulationRuntimeState {
   healthSystemVersion?: 1;
   battleSystemVersion?: 1;
   cultureSystemVersion?: 1;
+  civilizationSystemVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1170,6 +1174,7 @@ export interface Kingdom {
   diplomacy: DiplomacyRecord[];
   laws: string[];
   governmentStateId?: number;
+  civilizationId?: number;
 }
 
 export interface SettlementDistrict {
@@ -1210,6 +1215,7 @@ export interface Settlement {
   establishmentIds: number[];
   economy: SettlementEconomy;
   cultureStateId?: number;
+  civilizationId?: number;
 }
 
 export interface Character {
@@ -1824,7 +1830,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 26;
+  version: 27;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1872,6 +1878,7 @@ export interface WorldState {
   messages: Message[];
   settlementKnowledge: SettlementKnowledge[];
   cultures: CultureDefinition[];
+  civilizations: Civilization[];
   languages: LanguageDefinition[];
   religions: ReligionDefinition[];
   settlementCultures: SettlementCultureState[];

@@ -3,6 +3,7 @@ import {
   armyStatusLabel, artifactTypeLabel, materialLabel, monsterSpeciesLabel, monsterTierLabel,
   buildingTypeLabel, professionLabel, settlementTypeLabel, speciesLabel,
 } from '../i18n';
+import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { TextureIcon } from './TextureIcon';
 
 const labels: Record<EntityKind, string> = {
@@ -344,16 +345,21 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {row('Вход', entity.inputs.map((input: any) => `${itemTemplateName(world, input.templateId)} × ${formatNumber(input.quantity)}`).join(', '))}
     {row('Выход', entity.outputs.map((output: any) => `${itemTemplateName(world, output.templateId)} × ${formatNumber(output.quantity)}`).join(', '))}
     {row('Топливо', entity.fuelTemplateId ? `${itemTemplateName(world, entity.fuelTemplateId)} × ${entity.fuelQuantity ?? 1}` : 'не требуется')}
+    {row('Технология', entity.requiredTechnologyId ? CIVILIZATION_CONTENT.technologyById.get(entity.requiredTechnologyId)?.name ?? entity.requiredTechnologyId : 'базовый рецепт')}
     {row('Труд', `${entity.laborHours} ч.`)}{row('Минимальный навык', entity.minimumSkill)}{row('Культура', entity.culture ?? 'распространённый рецепт')}{row('Описание', entity.description)}
   </>;
   if (ref.kind === 'kingdom') {
     const diplomacy = entity.diplomacy.slice().sort((a: any, b: any) => a.score - b.score).slice(0, 5);
     const controlledTiles = world.tiles.filter(tile => tile.kingdomId === entity.id).length;
+    const civilization = entity.civilizationId ? world.civilizations.find(item => item.id === entity.civilizationId) : undefined;
+    const era = civilization ? CIVILIZATION_CONTENT.eraById.get(civilization.eraId) : undefined;
+    const recentTechnologies = civilization?.unlockedTechnologyIds.slice(-8).map(id => CIVILIZATION_CONTENT.technologyById.get(id)?.name ?? id).join(', ') ?? '';
     return <>
       {row('Правитель', link(getTitle(world, { kind: 'character', id: entity.rulerId }), { kind: 'character', id: entity.rulerId }, onSelect))}
       {row('Государственная система', entity.governmentStateId ? link(getTitle(world, { kind: 'kingdomGovernment', id: entity.governmentStateId }), { kind: 'kingdomGovernment', id: entity.governmentStateId }, onSelect) : 'не оформлена')}
       {row('Правящий дом', entity.dynastyId ? link(getTitle(world, { kind: 'dynasty', id: entity.dynastyId }), { kind: 'dynasty', id: entity.dynastyId }, onSelect) : 'не закреплён')}
       {row('Столица', link(getTitle(world, { kind: 'settlement', id: entity.capitalId }), { kind: 'settlement', id: entity.capitalId }, onSelect))}
+      {row('Цивилизация', civilization?.name ?? 'не сформирована')}{row('Технологическая эпоха', era?.name ?? 'не определена')}{civilization && row('Развитие знаний', `${civilization.unlockedTechnologyIds.length} технологий · инновации ${civilization.metrics.innovation.toFixed(1)}/год`)}{civilization && row('Освоенные технологии', recentTechnologies || 'только базовые знания')}
       {row('Народ', speciesLabel(entity.species))}{row('Культура', entity.cultureId ? link(getTitle(world, { kind: 'culture', id: entity.cultureId }), { kind: 'culture', id: entity.cultureId }, onSelect) : entity.culture)}{row('Вера', entity.religionId ? link(getTitle(world, { kind: 'religion', id: entity.religionId }), { kind: 'religion', id: entity.religionId }, onSelect) : entity.religion)}{row('Официальный язык', entity.officialLanguageId ? link(getTitle(world, { kind: 'language', id: entity.officialLanguageId }), { kind: 'language', id: entity.officialLanguageId }, onSelect) : 'не закреплён')}
       {row('Стабильность', `${entity.stability}%`)}{row('Казна', `${Math.round(entity.treasury)} крон`)}{row('Войско', `${entity.armyStrength} воинов`)}
       {row('Контролируемые земли', `${controlledTiles} глобальных клеток`)}{row('Освоение', controlledTiles ? 'границы растут от поселений, дорог и гарнизонов' : 'контроль ещё не закреплён')}
@@ -363,8 +369,13 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       {row('Отношения', <span className="relationship-stack">{diplomacy.map((record: any) => <span key={record.kingdomId}>{link(getTitle(world, { kind: 'kingdom', id: record.kingdomId }), { kind: 'kingdom', id: record.kingdomId }, onSelect)}<small>{record.status}, {record.score}: {record.reason}</small></span>)}</span>)}
     </>;
   }
-  if (ref.kind === 'settlement') return <>
+  if (ref.kind === 'settlement') {
+    const civilization = entity.civilizationId ? world.civilizations.find(item => item.id === entity.civilizationId) : undefined;
+    const era = civilization ? CIVILIZATION_CONTENT.eraById.get(civilization.eraId) : undefined;
+    const availableRecipes = world.productionRecipes.filter(recipe => !recipe.requiredTechnologyId || civilization?.unlockedTechnologyIds.includes(recipe.requiredTechnologyId)).length;
+    return <>
     {row('Государство', link(getTitle(world, { kind: 'kingdom', id: entity.kingdomId }), { kind: 'kingdom', id: entity.kingdomId }, onSelect))}
+    {row('Цивилизация', civilization?.name ?? 'не сформирована')}{row('Технологическая эпоха', era?.name ?? 'не определена')}{row('Доступные производственные рецепты', `${availableRecipes} из ${world.productionRecipes.length}`)}
     {row('Тип', settlementTypeLabel(entity.type))}{row('Население', `${entity.population} жителей`)}{row('Жилая вместимость', `${entity.residentialCapacity} мест`)}
     {row('Домохозяйства', entity.households)}{row('Глобальные квадраты', `${entity.districts.length} · ${entity.districts.map((item: any) => item.name).join(', ')}`)}{row('Ресурс', entity.resource)}
     {row('Благосостояние', `${entity.prosperity}%`)}{row('Защита', `${entity.defense}%`)}{row('Запасы пищи', entity.food)}
@@ -379,6 +390,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     {(() => { const knowledge = world.settlementKnowledge.find(item => item.settlementId === entity.id); return <>{row('Общие знания', knowledge ? links(world, knowledge.factIds.slice(-16).reverse().map((id: number) => ({ kind: 'knowledgeFact' as const, id })), onSelect) : 'нет')}{row('Подтверждённые сведения', knowledge?.verifiedFactIds.length ?? 0)}{row('Ходящие слухи', knowledge ? links(world, knowledge.rumorIds.slice(-12).reverse().map((id: number) => ({ kind: 'rumor' as const, id })), onSelect) : 'нет')}{row('Почта', links(world, world.messages.filter(item => item.fromSettlementId === entity.id || item.toSettlementId === entity.id).slice(-12).reverse().map(item => ({ kind: 'message' as const, id: item.id })), onSelect))}</>; })()}
     {row('Постройки по старому учёту', entity.buildings.join(', '))}{row('Склад', Object.entries(entity.stockpile).filter(([, value]) => Number(value) > 0).slice(0, 18).map(([name, value]) => `${name}: ${Math.round(Number(value))}`).join(', ') || 'пусто')}{row('Скот', Object.entries(entity.livestock).map(([name, value]) => `${name}: ${value}`).join(', ') || 'нет')}{row('История', entity.history.join(' '))}
   </>;
+  }
   if (ref.kind === 'character') {
     const relationships = world.relationships.filter(relation => entity.relationshipIds.includes(relation.id)).slice(0, 10);
     return <>

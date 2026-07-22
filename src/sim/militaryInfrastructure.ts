@@ -9,6 +9,7 @@ import { addMaterialItem } from './materialEconomy';
 import { archiveCharactersBatch } from './mortality';
 import { hashSeed, RNG } from './rng';
 import { controlledCapital, normalizeKingdomCapitals } from './kingdomState';
+import { availableRecipesForSettlement } from './civilizationSystem';
 
 const MILITARY_VERSION = 1;
 const ACTIVE_STATUSES = new Set<Army['status']>(['marching', 'hunting', 'raiding', 'battle']);
@@ -127,7 +128,7 @@ function ensureMilitaryEstablishment(world: WorldState, building: Building, army
   const establishment: Establishment = {
     id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: building.name, type,
     ownerCharacterId: owner.id, workerIds: [], supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
-    recipeIds: world.productionRecipes.filter(recipe => recipe.establishmentTypes.includes(type)).map(recipe => recipe.id),
+    recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id),
     openHour: 0, closeHour: 24, reputation: 65, cash: Math.max(25, world.kingdoms.find(item => item.id === army.kingdomId)?.treasury ?? 25),
     debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {}, history: [`Военное учреждение действует не позднее ${world.year} года.`],
   };

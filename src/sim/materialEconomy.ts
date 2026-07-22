@@ -9,128 +9,14 @@ import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { assignBuildingFootprint, buildingDimensions } from './spatial';
 import { operationalWorkerIds } from './interiors';
+import type { ResourceDefinition } from '../civilizationTypes';
+import { CIVILIZATION_CONTENT } from '../content/coreContent';
+import { stableRecipeKey } from '../content/coreRecipes';
+import { availableRecipesForSettlement, recipeAvailableToSettlement } from './civilizationSystem';
 
-interface ItemTemplate {
-  id: string;
-  name: string;
-  category: ItemCategory;
-  material: string;
-  unit: string;
-  weight: number;
-  perishability: number;
-  value: number;
-  equipmentSlot?: EquipmentSlot;
-  dye?: string;
-  warmth?: number;
-  armor?: number;
-  damage?: number;
-  toolType?: string;
-  requiredProfession?: string;
-  maxCondition?: number;
-}
+type ItemTemplate = ResourceDefinition;
 
-const ITEM_TEMPLATES: ItemTemplate[] = [
-  { id: 'grain', name: 'зерно', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 18, value: 7 },
-  { id: 'flour', name: 'мука', category: 'сырьё', material: 'мука', unit: 'мешок', weight: 20, perishability: 8, value: 11 },
-  { id: 'bread', name: 'хлеб', category: 'еда', material: 'выпечка', unit: 'буханка', weight: .7, perishability: 1, value: 2.2 },
-  { id: 'vegetables', name: 'овощи и коренья', category: 'еда', material: 'растительная пища', unit: 'корзина', weight: 8, perishability: 3, value: 5 },
-  { id: 'fruit', name: 'фрукты и ягоды', category: 'еда', material: 'растительная пища', unit: 'корзина', weight: 6, perishability: 2, value: 6 },
-  { id: 'meat', name: 'свежее мясо', category: 'еда', material: 'мясо', unit: 'туша', weight: 18, perishability: 1, value: 14 },
-  { id: 'smoked_meat', name: 'копчёное мясо', category: 'еда', material: 'мясо', unit: 'связка', weight: 6, perishability: 10, value: 13 },
-  { id: 'fish', name: 'свежая рыба', category: 'еда', material: 'рыба', unit: 'корзина', weight: 10, perishability: 1, value: 9 },
-  { id: 'salted_fish', name: 'солёная рыба', category: 'еда', material: 'рыба', unit: 'бочонок', weight: 14, perishability: 12, value: 16 },
-  { id: 'milk', name: 'молоко', category: 'еда', material: 'молоко', unit: 'кувшин', weight: 2, perishability: 1, value: 2 },
-  { id: 'eggs', name: 'яйца', category: 'еда', material: 'яйца', unit: 'десяток', weight: .7, perishability: 2, value: 2.4 },
-  { id: 'stew', name: 'горячая похлёбка', category: 'еда', material: 'готовое блюдо', unit: 'порция', weight: .6, perishability: 1, value: 2.8 },
-  { id: 'roast', name: 'жаркое', category: 'еда', material: 'готовое блюдо', unit: 'порция', weight: .7, perishability: 1, value: 4.4 },
-  { id: 'ale', name: 'эль', category: 'напиток', material: 'ячменный напиток', unit: 'кружка', weight: .6, perishability: 8, value: 1.7 },
-  { id: 'wine', name: 'вино', category: 'напиток', material: 'виноградный напиток', unit: 'бутыль', weight: 1.2, perishability: 60, value: 8 },
-  { id: 'water', name: 'чистая вода', category: 'напиток', material: 'вода', unit: 'бурдюк', weight: 3, perishability: 2, value: .4 },
-  { id: 'firewood', name: 'дрова', category: 'топливо', material: 'древесина', unit: 'вязанка', weight: 12, perishability: 0, value: 3 },
-  { id: 'charcoal', name: 'древесный уголь', category: 'топливо', material: 'уголь', unit: 'мешок', weight: 10, perishability: 0, value: 6 },
-  { id: 'timber', name: 'строевая древесина', category: 'сырьё', material: 'древесина', unit: 'бревно', weight: 45, perishability: 0, value: 10 },
-  { id: 'stone', name: 'тёсаный камень', category: 'сырьё', material: 'камень', unit: 'блок', weight: 35, perishability: 0, value: 8 },
-  { id: 'iron_ore', name: 'железная руда', category: 'сырьё', material: 'руда', unit: 'корзина', weight: 30, perishability: 0, value: 9 },
-  { id: 'iron', name: 'железная крица', category: 'сырьё', material: 'железо', unit: 'слиток', weight: 7, perishability: 0, value: 19 },
-  { id: 'wool', name: 'шерсть', category: 'сырьё', material: 'шерсть', unit: 'тюк', weight: 8, perishability: 0, value: 8 },
-  { id: 'cloth', name: 'ткань', category: 'сырьё', material: 'ткань', unit: 'рулон', weight: 4, perishability: 0, value: 18 },
-  { id: 'clothes', name: 'простая одежда', category: 'одежда', material: 'ткань', unit: 'комплект', weight: 2, perishability: 0, value: 26 },
-  { id: 'tools', name: 'рабочие инструменты', category: 'инструмент', material: 'железо и дерево', unit: 'набор', weight: 5, perishability: 0, value: 34 },
-  { id: 'weapon', name: 'обычное оружие', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 3, perishability: 0, value: 48 },
-  { id: 'furniture', name: 'простая мебель', category: 'мебель', material: 'древесина', unit: 'предмет', weight: 16, perishability: 0, value: 22 },
-  { id: 'herbal_medicine', name: 'лечебный отвар', category: 'лекарство', material: 'травы', unit: 'склянка', weight: .3, perishability: 4, value: 12 },
-  { id: 'salt', name: 'соль', category: 'сырьё', material: 'соль', unit: 'мешочек', weight: 2, perishability: 0, value: 4 },
-  { id: 'wheat_seed', name: 'семена пшеницы', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
-  { id: 'barley_seed', name: 'семена ячменя', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
-  { id: 'rye_seed', name: 'семена ржи', category: 'семена', material: 'семена', unit: 'мера', weight: 1, perishability: 24, value: 4 },
-  { id: 'flax_seed', name: 'семена льна', category: 'семена', material: 'семена', unit: 'мера', weight: .8, perishability: 24, value: 5 },
-  { id: 'vegetable_seed', name: 'семена овощей', category: 'семена', material: 'семена', unit: 'мешочек', weight: .6, perishability: 18, value: 5 },
-  { id: 'wheat', name: 'пшеница', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 18, value: 8 },
-  { id: 'barley', name: 'ячмень', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 18, value: 7 },
-  { id: 'rye', name: 'рожь', category: 'сырьё', material: 'зерно', unit: 'мешок', weight: 25, perishability: 20, value: 7 },
-  { id: 'flax', name: 'лён', category: 'сырьё', material: 'растительное волокно', unit: 'сноп', weight: 8, perishability: 10, value: 9 },
-  { id: 'straw', name: 'солома', category: 'сырьё', material: 'солома', unit: 'тюк', weight: 7, perishability: 18, value: 3 },
-  { id: 'planks', name: 'доски', category: 'сырьё', material: 'древесина', unit: 'связка', weight: 18, perishability: 0, value: 15 },
-  { id: 'clay', name: 'глина', category: 'сырьё', material: 'глина', unit: 'корзина', weight: 28, perishability: 0, value: 5 },
-  { id: 'bricks', name: 'обожжённый кирпич', category: 'сырьё', material: 'керамика', unit: 'партия', weight: 35, perishability: 0, value: 16 },
-  { id: 'lime', name: 'строительная известь', category: 'сырьё', material: 'известь', unit: 'мешок', weight: 20, perishability: 0, value: 12 },
-  { id: 'nails', name: 'железные гвозди', category: 'сырьё', material: 'железо', unit: 'короб', weight: 4, perishability: 0, value: 15 },
-  { id: 'rope', name: 'льняная верёвка', category: 'инструмент', material: 'лён', unit: 'моток', weight: 3, perishability: 0, value: 14, toolType: 'верёвка', maxCondition: 90 },
-  { id: 'flax_fiber', name: 'льняное волокно', category: 'сырьё', material: 'лён', unit: 'тюк', weight: 5, perishability: 0, value: 11 },
-  { id: 'linen_thread', name: 'льняная нить', category: 'сырьё', material: 'лён', unit: 'моток', weight: 1.5, perishability: 0, value: 15 },
-  { id: 'linen_cloth', name: 'льняная ткань', category: 'сырьё', material: 'лён', unit: 'рулон', weight: 3, perishability: 0, value: 23 },
-  { id: 'wool_yarn', name: 'шерстяная пряжа', category: 'сырьё', material: 'шерсть', unit: 'моток', weight: 2, perishability: 0, value: 14 },
-  { id: 'wool_cloth', name: 'шерстяная ткань', category: 'сырьё', material: 'шерсть', unit: 'рулон', weight: 4, perishability: 0, value: 28 },
-  { id: 'raw_hide', name: 'сырая шкура', category: 'сырьё', material: 'шкура', unit: 'шкура', weight: 6, perishability: 2, value: 10 },
-  { id: 'leather', name: 'дублёная кожа', category: 'сырьё', material: 'кожа', unit: 'лист', weight: 4, perishability: 0, value: 22 },
-  { id: 'dye_blue', name: 'синий краситель', category: 'краситель', material: 'вайда', unit: 'мешочек', weight: .3, perishability: 24, value: 18, dye: 'синий' },
-  { id: 'dye_red', name: 'красный краситель', category: 'краситель', material: 'марена', unit: 'мешочек', weight: .3, perishability: 24, value: 21, dye: 'красный' },
-  { id: 'dye_yellow', name: 'жёлтый краситель', category: 'краситель', material: 'резеда', unit: 'мешочек', weight: .3, perishability: 24, value: 14, dye: 'жёлтый' },
-  { id: 'dye_brown', name: 'коричневый краситель', category: 'краситель', material: 'кора и орех', unit: 'мешочек', weight: .4, perishability: 30, value: 9, dye: 'коричневый' },
-  { id: 'dye_purple', name: 'пурпурный краситель', category: 'краситель', material: 'редкий пигмент', unit: 'склянка', weight: .2, perishability: 36, value: 90, dye: 'пурпурный' },
-  { id: 'linen_hood', name: 'льняной капюшон', category: 'одежда', material: 'лён', unit: 'штука', weight: .3, perishability: 0, value: 11, equipmentSlot: 'head', warmth: 5, armor: 0, maxCondition: 70 },
-  { id: 'linen_shirt', name: 'льняная рубаха', category: 'одежда', material: 'лён', unit: 'штука', weight: .7, perishability: 0, value: 18, equipmentSlot: 'body', warmth: 7, armor: 0, maxCondition: 75 },
-  { id: 'wool_tunic', name: 'шерстяная туника', category: 'одежда', material: 'шерсть', unit: 'штука', weight: 1.1, perishability: 0, value: 30, equipmentSlot: 'body', warmth: 18, armor: 1, maxCondition: 85 },
-  { id: 'wool_trousers', name: 'шерстяные штаны', category: 'одежда', material: 'шерсть', unit: 'штука', weight: .8, perishability: 0, value: 22, equipmentSlot: 'legs', warmth: 12, armor: 0, maxCondition: 80 },
-  { id: 'leather_shoes', name: 'кожаные башмаки', category: 'одежда', material: 'кожа', unit: 'пара', weight: .9, perishability: 0, value: 27, equipmentSlot: 'feet', warmth: 7, armor: 1, maxCondition: 90 },
-  { id: 'leather_gloves', name: 'кожаные перчатки', category: 'одежда', material: 'кожа', unit: 'пара', weight: .4, perishability: 0, value: 19, equipmentSlot: 'hands', warmth: 6, armor: 1, maxCondition: 85 },
-  { id: 'wool_cloak', name: 'шерстяной плащ', category: 'одежда', material: 'шерсть', unit: 'штука', weight: 1.5, perishability: 0, value: 38, equipmentSlot: 'cloak', warmth: 22, armor: 1, maxCondition: 90 },
-  { id: 'royal_cloak', name: 'пурпурный придворный плащ', category: 'одежда', material: 'тонкая шерсть', unit: 'штука', weight: 1.2, perishability: 0, value: 180, equipmentSlot: 'cloak', dye: 'пурпурный', warmth: 20, armor: 1, maxCondition: 100 },
-  { id: 'padded_cap', name: 'стёганая шапка', category: 'броня', material: 'лён и шерсть', unit: 'штука', weight: .8, perishability: 0, value: 24, equipmentSlot: 'head', warmth: 10, armor: 3, maxCondition: 90 },
-  { id: 'gambeson', name: 'гамбезон', category: 'броня', material: 'стёганый лён', unit: 'штука', weight: 5, perishability: 0, value: 70, equipmentSlot: 'body', warmth: 18, armor: 7, maxCondition: 100 },
-  { id: 'leather_armor', name: 'кожаный доспех', category: 'броня', material: 'кожа', unit: 'штука', weight: 6, perishability: 0, value: 95, equipmentSlot: 'body', warmth: 12, armor: 10, maxCondition: 110 },
-  { id: 'chainmail', name: 'кольчуга', category: 'броня', material: 'железо', unit: 'штука', weight: 11, perishability: 0, value: 230, equipmentSlot: 'body', warmth: 4, armor: 18, maxCondition: 125 },
-  { id: 'iron_helmet', name: 'железный шлем', category: 'броня', material: 'железо', unit: 'штука', weight: 2.5, perishability: 0, value: 85, equipmentSlot: 'head', warmth: 2, armor: 14, maxCondition: 120 },
-  { id: 'wooden_shield', name: 'деревянный щит', category: 'броня', material: 'дерево и кожа', unit: 'штука', weight: 4, perishability: 0, value: 38, equipmentSlot: 'offHand', armor: 8, maxCondition: 95 },
-  { id: 'knife', name: 'рабочий нож', category: 'оружие', material: 'железо', unit: 'штука', weight: .5, perishability: 0, value: 18, equipmentSlot: 'mainHand', damage: 4, maxCondition: 85 },
-  { id: 'club', name: 'дубина', category: 'оружие', material: 'дерево', unit: 'штука', weight: 2, perishability: 0, value: 5, equipmentSlot: 'mainHand', damage: 5, maxCondition: 70 },
-  { id: 'spear', name: 'копьё', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 2.5, perishability: 0, value: 34, equipmentSlot: 'mainHand', damage: 8, maxCondition: 95 },
-  { id: 'sword', name: 'железный меч', category: 'оружие', material: 'железо', unit: 'штука', weight: 1.5, perishability: 0, value: 110, equipmentSlot: 'mainHand', damage: 11, maxCondition: 115 },
-  { id: 'longbow', name: 'длинный лук', category: 'оружие', material: 'дерево и сухожилия', unit: 'штука', weight: 1.2, perishability: 0, value: 65, equipmentSlot: 'mainHand', damage: 9, maxCondition: 90 },
-  { id: 'sickle', name: 'серп', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 1, perishability: 0, value: 22, equipmentSlot: 'workTool', toolType: 'земледелие', requiredProfession: 'farmer', maxCondition: 90 },
-  { id: 'hoe', name: 'мотыга', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2.5, perishability: 0, value: 28, equipmentSlot: 'workTool', toolType: 'земледелие', requiredProfession: 'farmer', maxCondition: 95 },
-  { id: 'pickaxe', name: 'кирка', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 4, perishability: 0, value: 46, equipmentSlot: 'workTool', toolType: 'добыча', requiredProfession: 'miner', maxCondition: 105 },
-  { id: 'wood_axe', name: 'лесной топор', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2.8, perishability: 0, value: 42, equipmentSlot: 'workTool', toolType: 'лесозаготовка', requiredProfession: 'carpenter', maxCondition: 100 },
-  { id: 'smith_hammer', name: 'кузнечный молот', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 3.5, perishability: 0, value: 55, equipmentSlot: 'workTool', toolType: 'кузнечное дело', requiredProfession: 'blacksmith', maxCondition: 115 },
-  { id: 'carpenter_saw', name: 'плотницкая пила', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: 2, perishability: 0, value: 48, equipmentSlot: 'workTool', toolType: 'плотницкое дело', requiredProfession: 'carpenter', maxCondition: 95 },
-  { id: 'fishing_net', name: 'рыболовная сеть', category: 'инструмент', material: 'лён', unit: 'штука', weight: 4, perishability: 0, value: 36, equipmentSlot: 'workTool', toolType: 'рыболовство', requiredProfession: 'fisher', maxCondition: 80 },
-  { id: 'herb_knife', name: 'нож травника', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: .4, perishability: 0, value: 19, equipmentSlot: 'workTool', toolType: 'собирательство', requiredProfession: 'herbalist', maxCondition: 80 },
-  { id: 'mortar', name: 'ступка и пестик', category: 'инструмент', material: 'камень', unit: 'набор', weight: 3, perishability: 0, value: 31, equipmentSlot: 'workTool', toolType: 'алхимия', requiredProfession: 'healer', maxCondition: 110 },
-  { id: 'tailoring_kit', name: 'набор портного', category: 'инструмент', material: 'железо, дерево и нить', unit: 'набор', weight: 1.2, perishability: 0, value: 39, equipmentSlot: 'workTool', toolType: 'портняжное дело', requiredProfession: 'tailor', maxCondition: 90 },
-  { id: 'spindle', name: 'веретено и челнок', category: 'инструмент', material: 'дерево', unit: 'набор', weight: .8, perishability: 0, value: 18, equipmentSlot: 'workTool', toolType: 'ткачество', requiredProfession: 'weaver', maxCondition: 80 },
-  { id: 'tanner_knife', name: 'нож кожевника', category: 'инструмент', material: 'железо и дерево', unit: 'штука', weight: .8, perishability: 0, value: 27, equipmentSlot: 'workTool', toolType: 'кожевенное дело', requiredProfession: 'tanner', maxCondition: 90 },
-  { id: 'crossbow', name: 'арбалет', category: 'оружие', material: 'дерево и железо', unit: 'штука', weight: 4.2, perishability: 0, value: 105, equipmentSlot: 'mainHand', damage: 13, maxCondition: 110 },
-  { id: 'arrow_bundle', name: 'колчан стрел', category: 'оружие', material: 'дерево, железо и перо', unit: 'колчан', weight: 2.2, perishability: 0, value: 22, maxCondition: 100 },
-  { id: 'bolt_bundle', name: 'связка арбалетных болтов', category: 'оружие', material: 'дерево и железо', unit: 'связка', weight: 2.8, perishability: 0, value: 28, maxCondition: 100 },
-  { id: 'lance', name: 'кавалерийское копьё', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 4.5, perishability: 0, value: 62, equipmentSlot: 'mainHand', damage: 14, maxCondition: 105 },
-  { id: 'mace', name: 'железная булава', category: 'оружие', material: 'железо и дерево', unit: 'штука', weight: 2.4, perishability: 0, value: 78, equipmentSlot: 'mainHand', damage: 12, maxCondition: 120 },
-  { id: 'bandages', name: 'чистые перевязочные материалы', category: 'лекарство', material: 'лён', unit: 'набор', weight: .6, perishability: 18, value: 10 },
-  { id: 'military_rations', name: 'походный паёк', category: 'еда', material: 'сухари, соль и сушёное мясо', unit: 'паёк', weight: 1.1, perishability: 12, value: 4.5 },
-  { id: 'tent', name: 'походная палатка', category: 'предмет быта', material: 'лён, кожа и дерево', unit: 'штука', weight: 18, perishability: 0, value: 65, maxCondition: 100 },
-  { id: 'wagon_parts', name: 'детали для повозок', category: 'инструмент', material: 'дерево и железо', unit: 'комплект', weight: 26, perishability: 0, value: 58, toolType: 'ремонт обоза', maxCondition: 110 },
-  { id: 'horse_feed', name: 'корм для лошадей', category: 'сырьё', material: 'овёс и сено', unit: 'мешок', weight: 20, perishability: 8, value: 6 },
-  { id: 'cobbler_tools', name: 'инструменты сапожника', category: 'инструмент', material: 'железо и дерево', unit: 'набор', weight: 1.4, perishability: 0, value: 36, equipmentSlot: 'workTool', toolType: 'сапожное дело', requiredProfession: 'cobbler', maxCondition: 95 },
-];
+const ITEM_TEMPLATES = CIVILIZATION_CONTENT.resources;
 const ITEM_BY_ID = new Map(ITEM_TEMPLATES.map(item => [item.id, item]));
 
 const PRODUCTION_TOOL_IDS: Partial<Record<string, string[]>> = {
@@ -252,64 +138,7 @@ function createMaterialRuntime(world: WorldState, indexes: WorldIndexes): Materi
   return runtime;
 }
 
-const recipeSeeds: Omit<ProductionRecipe, 'id'>[] = [
-  { name: 'Сбор хвороста и дров', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'firewood', quantity: 6 }], laborHours: 8, minimumSkill: 5, description: 'Сельские дворы заготавливают топливо в окрестных лесах и изгородях.' },
-  { name: 'Молочное хозяйство', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'milk', quantity: 7 }], laborHours: 10, minimumSkill: 6, description: 'Скот даёт молоко для семей, рынков и кухонь.' },
-  { name: 'Птичий двор', category: 'добыча', profession: 'farmer', establishmentTypes: ['ферма'], inputs: [], outputs: [{ templateId: 'eggs', quantity: 6 }], laborHours: 7, minimumSkill: 5, description: 'Домашняя птица даёт яйца и поддерживает повседневное питание.' },
-  { name: 'Заготовка древесины', category: 'добыча', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская'], inputs: [], outputs: [{ templateId: 'timber', quantity: 5 }, { templateId: 'firewood', quantity: 7 }], laborHours: 22, minimumSkill: 12, description: 'Лес превращается в брёвна и топливо.' },
-  { name: 'Рыбный промысел', category: 'добыча', profession: 'fisher', establishmentTypes: ['рыбный промысел'], inputs: [], outputs: [{ templateId: 'fish', quantity: 8 }], laborHours: 18, minimumSkill: 8, description: 'Рыбаки возвращаются с уловом.' },
-  { name: 'Добыча железной руды', category: 'добыча', profession: 'miner', establishmentTypes: ['рудник'], inputs: [], outputs: [{ templateId: 'iron_ore', quantity: 6 }, { templateId: 'stone', quantity: 4 }], laborHours: 26, minimumSkill: 12, description: 'Шахтёры добывают руду и камень.' },
-  { name: 'Помол муки', category: 'переработка', profession: 'miller', establishmentTypes: ['мельница'], inputs: [{ templateId: 'grain', quantity: 4 }], outputs: [{ templateId: 'flour', quantity: 4 }], laborHours: 8, minimumSkill: 8, description: 'Мельница превращает зерно в муку.' },
-  { name: 'Выпечка хлеба', category: 'готовка', profession: 'baker', establishmentTypes: ['пекарня'], inputs: [{ templateId: 'flour', quantity: 2 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'bread', quantity: 18 }], laborHours: 10, minimumSkill: 12, description: 'Пекари выпекают ежедневный хлеб.' },
-  { name: 'Похлёбка', category: 'готовка', profession: 'cook', establishmentTypes: ['таверна', 'постоялый двор'], inputs: [{ templateId: 'vegetables', quantity: 2 }, { templateId: 'grain', quantity: 1 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'stew', quantity: 14 }], laborHours: 7, minimumSkill: 7, description: 'Дешёвая горячая пища для жителей и путников.' },
-  { name: 'Мясное жаркое', category: 'готовка', profession: 'cook', establishmentTypes: ['таверна', 'постоялый двор'], inputs: [{ templateId: 'meat', quantity: 1 }, { templateId: 'vegetables', quantity: 1 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'roast', quantity: 10 }], laborHours: 9, minimumSkill: 16, description: 'Сытное блюдо из мяса и овощей.' },
-  { name: 'Копчение мяса', category: 'переработка', profession: 'cook', establishmentTypes: ['таверна', 'склад'], inputs: [{ templateId: 'meat', quantity: 2 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'smoked_meat', quantity: 4 }], laborHours: 12, minimumSkill: 12, description: 'Мясо хранится дольше после копчения.' },
-  { name: 'Засолка рыбы', category: 'переработка', profession: 'fisher', establishmentTypes: ['рыбный промысел', 'склад'], inputs: [{ templateId: 'fish', quantity: 2 }, { templateId: 'salt', quantity: 1 }], outputs: [{ templateId: 'salted_fish', quantity: 3 }], laborHours: 8, minimumSkill: 10, description: 'Рыбу засаливают для долгого пути.' },
-  { name: 'Варка эля', category: 'переработка', profession: 'brewer', establishmentTypes: ['пивоварня'], inputs: [{ templateId: 'grain', quantity: 3 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'ale', quantity: 28 }], laborHours: 20, minimumSkill: 14, description: 'Пивоварня превращает зерно в эль.' },
-  { name: 'Виноделие', category: 'переработка', profession: 'brewer', establishmentTypes: ['винодельня'], inputs: [{ templateId: 'fruit', quantity: 4 }], outputs: [{ templateId: 'wine', quantity: 8 }], laborHours: 24, minimumSkill: 18, description: 'Фрукты бродят и становятся вином.' },
-  { name: 'Выплавка железа', category: 'переработка', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron_ore', quantity: 3 }, { templateId: 'charcoal', quantity: 2 }], outputs: [{ templateId: 'iron', quantity: 2 }], laborHours: 18, minimumSkill: 18, description: 'Руда превращается в пригодное железо.' },
-  { name: 'Ковка инструментов', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tools', quantity: 1 }], laborHours: 14, minimumSkill: 20, description: 'Кузнец делает инструменты для других ремёсел.' },
-  { name: 'Ковка оружия', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'weapon', quantity: 1, qualityBonus: 5 }], laborHours: 22, minimumSkill: 28, description: 'Оружие требует больше железа и мастерства.' },
-  { name: 'Изготовление мебели', category: 'ремесло', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская'], inputs: [{ templateId: 'timber', quantity: 2 }, { templateId: 'tools', quantity: .05 }], outputs: [{ templateId: 'furniture', quantity: 1 }], laborHours: 18, minimumSkill: 18, description: 'Плотники делают кровати, столы и сундуки.' },
-  { name: 'Ткачество', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'cloth', quantity: 2 }], laborHours: 16, minimumSkill: 14, description: 'Шерсть превращается в ткань.' },
-  { name: 'Пошив одежды', category: 'ремесло', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'cloth', quantity: 2 }], outputs: [{ templateId: 'clothes', quantity: 1 }], laborHours: 15, minimumSkill: 18, description: 'Ткань превращается в одежду.' },
-  { name: 'Помол пшеницы', category: 'переработка', profession: 'miller', establishmentTypes: ['мельница'], inputs: [{ templateId: 'wheat', quantity: 4 }], outputs: [{ templateId: 'flour', quantity: 4 }], laborHours: 8, minimumSkill: 8, description: 'Пшеница превращается в хлебную муку.' },
-  { name: 'Помол ржи', category: 'переработка', profession: 'miller', establishmentTypes: ['мельница'], inputs: [{ templateId: 'rye', quantity: 4 }], outputs: [{ templateId: 'flour', quantity: 3 }], laborHours: 9, minimumSkill: 8, description: 'Рожь превращается в тёмную муку.' },
-  { name: 'Ячменный солод', category: 'переработка', profession: 'brewer', establishmentTypes: ['пивоварня'], inputs: [{ templateId: 'barley', quantity: 3 }, { templateId: 'firewood', quantity: 1 }], outputs: [{ templateId: 'ale', quantity: 30 }], laborHours: 20, minimumSkill: 14, description: 'Ячмень проращивают, сушат и варят в эль.' },
-  { name: 'Распиловка досок', category: 'переработка', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская'], inputs: [{ templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'planks', quantity: 3 }], laborHours: 12, minimumSkill: 14, description: 'Брёвна распускают на строительные доски.' },
-  { name: 'Обжиг кирпича', category: 'переработка', profession: 'carpenter', establishmentTypes: ['кирпичная мастерская'], inputs: [{ templateId: 'clay', quantity: 3 }, { templateId: 'firewood', quantity: 2 }], outputs: [{ templateId: 'bricks', quantity: 3 }], laborHours: 18, minimumSkill: 12, description: 'Глину формуют и обжигают в печи.' },
-  { name: 'Обжиг извести', category: 'переработка', profession: 'miner', establishmentTypes: ['кирпичная мастерская'], inputs: [{ templateId: 'stone', quantity: 3 }, { templateId: 'firewood', quantity: 2 }], outputs: [{ templateId: 'lime', quantity: 2 }], laborHours: 20, minimumSkill: 16, description: 'Известняк обжигают для строительного раствора.' },
-  { name: 'Ковка гвоздей', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'charcoal', quantity: 1 }], outputs: [{ templateId: 'nails', quantity: 4 }], laborHours: 12, minimumSkill: 18, description: 'Кузнец делает крепёж для стройки и кораблей.' },
-  { name: 'Витьё верёвки', category: 'ремесло', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax', quantity: 2 }], outputs: [{ templateId: 'rope', quantity: 2 }], laborHours: 12, minimumSkill: 14, description: 'Льняное волокно превращается в прочную верёвку.' },
-  { name: 'Добыча глины и камня', category: 'добыча', profession: 'miner', establishmentTypes: ['каменоломня'], inputs: [], outputs: [{ templateId: 'clay', quantity: 5 }, { templateId: 'stone', quantity: 4 }], laborHours: 24, minimumSkill: 10, description: 'Рабочие снимают глину и добывают строительный камень.' },
-  { name: 'Трепание льна', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax', quantity: 2 }], outputs: [{ templateId: 'flax_fiber', quantity: 2 }], laborHours: 12, minimumSkill: 10, description: 'Лён вымачивают, сушат и превращают в волокно.' },
-  { name: 'Прядение льняной нити', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'flax_fiber', quantity: 2 }], outputs: [{ templateId: 'linen_thread', quantity: 2 }], laborHours: 12, minimumSkill: 12, description: 'Волокно прядут в ровную льняную нить.' },
-  { name: 'Ткачество льняной ткани', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'linen_thread', quantity: 3 }], outputs: [{ templateId: 'linen_cloth', quantity: 2 }], laborHours: 18, minimumSkill: 16, description: 'Нить превращается в прочную льняную ткань.' },
-  { name: 'Прядение шерсти', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'wool_yarn', quantity: 2 }], laborHours: 12, minimumSkill: 12, description: 'Очищенную шерсть превращают в пряжу.' },
-  { name: 'Ткачество шерстяной ткани', category: 'переработка', profession: 'weaver', establishmentTypes: ['ткацкая мастерская'], inputs: [{ templateId: 'wool_yarn', quantity: 3 }], outputs: [{ templateId: 'wool_cloth', quantity: 2 }], laborHours: 18, minimumSkill: 16, description: 'Шерстяную пряжу ткут в тёплую ткань.' },
-  { name: 'Дубление кожи', category: 'переработка', profession: 'tanner', establishmentTypes: ['кожевенная мастерская'], inputs: [{ templateId: 'raw_hide', quantity: 2 }, { templateId: 'salt', quantity: 1 }], outputs: [{ templateId: 'leather', quantity: 2 }], laborHours: 24, minimumSkill: 14, description: 'Шкуры очищают и дубят для обуви, ремней и брони.' },
-  { name: 'Синий краситель из вайды', category: 'переработка', profession: 'dyer', establishmentTypes: ['красильня'], inputs: [{ templateId: 'flax', quantity: 1 }], outputs: [{ templateId: 'dye_blue', quantity: 2 }], laborHours: 14, minimumSkill: 14, description: 'Красильщики получают стойкий синий пигмент.' },
-  { name: 'Красный краситель из марены', category: 'переработка', profession: 'dyer', establishmentTypes: ['красильня'], inputs: [{ templateId: 'vegetables', quantity: 1 }], outputs: [{ templateId: 'dye_red', quantity: 2 }], laborHours: 14, minimumSkill: 14, description: 'Корни марены дают красный пигмент.' },
-  { name: 'Льняная одежда', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская'], inputs: [{ templateId: 'linen_cloth', quantity: 3 }], outputs: [{ templateId: 'linen_hood', quantity: 1 }, { templateId: 'linen_shirt', quantity: 1 }], laborHours: 20, minimumSkill: 16, description: 'Портной шьёт повседневную льняную одежду.' },
-  { name: 'Шерстяная одежда', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская'], inputs: [{ templateId: 'wool_cloth', quantity: 4 }], outputs: [{ templateId: 'wool_tunic', quantity: 1 }, { templateId: 'wool_trousers', quantity: 1 }, { templateId: 'wool_cloak', quantity: 1 }], laborHours: 30, minimumSkill: 20, description: 'Портной шьёт тёплый комплект одежды.' },
-  { name: 'Кожаная обувь и перчатки', category: 'ремесло', profession: 'cobbler', establishmentTypes: ['сапожная мастерская'], inputs: [{ templateId: 'leather', quantity: 3 }], outputs: [{ templateId: 'leather_shoes', quantity: 1 }, { templateId: 'leather_gloves', quantity: 1 }], laborHours: 22, minimumSkill: 18, description: 'Сапожник делает обувь и рабочие перчатки.' },
-  { name: 'Стёганый доспех', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'linen_cloth', quantity: 4 }, { templateId: 'wool', quantity: 2 }], outputs: [{ templateId: 'padded_cap', quantity: 1 }, { templateId: 'gambeson', quantity: 1 }], laborHours: 34, minimumSkill: 24, description: 'Бронник шьёт защитный стёганый комплект.' },
-  { name: 'Кожаный доспех', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'leather', quantity: 5 }, { templateId: 'iron', quantity: 1 }], outputs: [{ templateId: 'leather_armor', quantity: 1 }], laborHours: 36, minimumSkill: 28, description: 'Кожа усиливается металлическими пластинами.' },
-  { name: 'Кольчуга', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'iron', quantity: 8 }, { templateId: 'charcoal', quantity: 3 }], outputs: [{ templateId: 'chainmail', quantity: 1 }], laborHours: 80, minimumSkill: 42, description: 'Тысячи колец соединяются в тяжёлую кольчугу.' },
-  { name: 'Шлем и щит', category: 'ремесло', profession: 'armorer', establishmentTypes: ['бронная мастерская'], inputs: [{ templateId: 'iron', quantity: 3 }, { templateId: 'planks', quantity: 2 }, { templateId: 'leather', quantity: 1 }], outputs: [{ templateId: 'iron_helmet', quantity: 1 }, { templateId: 'wooden_shield', quantity: 1 }], laborHours: 36, minimumSkill: 30, description: 'Бронник делает шлем и щит.' },
-  { name: 'Ковка копья', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'spear', quantity: 1 }], laborHours: 18, minimumSkill: 20, description: 'Кузнец куёт наконечник и сажает его на древко.' },
-  { name: 'Ковка меча', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: 3 }, { templateId: 'charcoal', quantity: 2 }], outputs: [{ templateId: 'sword', quantity: 1, qualityBonus: 8 }], laborHours: 42, minimumSkill: 35, description: 'Клинок требует хорошего железа и долгой работы.' },
-  { name: 'Земледельческие инструменты', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'sickle', quantity: 1 }, { templateId: 'hoe', quantity: 1 }], laborHours: 24, minimumSkill: 20, description: 'Мастер делает серпы и мотыги.' },
-  { name: 'Инструменты шахтёра', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'pickaxe', quantity: 1 }], laborHours: 22, minimumSkill: 24, description: 'Мастер делает прочную кирку.' },
-  { name: 'Инструменты текстильщиков', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tailoring_kit', quantity: 1 }, { templateId: 'spindle', quantity: 1 }], laborHours: 18, minimumSkill: 18, description: 'Мастер делает ножницы, иглы, веретено и челнок.' },
-  { name: 'Инструменты кожевников', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 1 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tanner_knife', quantity: 1 }, { templateId: 'cobbler_tools', quantity: 1 }], laborHours: 20, minimumSkill: 20, description: 'Мастер делает ножи, шилья и колодки для кожи и обуви.' },
-  { name: 'Инструменты плотника', category: 'ремесло', profession: 'toolmaker', establishmentTypes: ['инструментальная мастерская'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'timber', quantity: 2 }], outputs: [{ templateId: 'wood_axe', quantity: 1 }, { templateId: 'carpenter_saw', quantity: 1 }], laborHours: 30, minimumSkill: 26, description: 'Мастер делает топор и пилу.' },
-  { name: 'Изготовление стрел', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['арсенал', 'оружейная лавка', 'кузница'], inputs: [{ templateId: 'iron', quantity: .4 }, { templateId: 'timber', quantity: .6 }], outputs: [{ templateId: 'arrow_bundle', quantity: 3 }], laborHours: 12, minimumSkill: 16, description: 'Кузнец и древодел готовят колчаны стрел.' },
-  { name: 'Изготовление арбалетов и болтов', category: 'ремесло', profession: 'blacksmith', establishmentTypes: ['арсенал', 'осадная мастерская', 'кузница'], inputs: [{ templateId: 'iron', quantity: 2 }, { templateId: 'planks', quantity: 2 }, { templateId: 'rope', quantity: 1 }], outputs: [{ templateId: 'crossbow', quantity: 1 }, { templateId: 'bolt_bundle', quantity: 2 }], laborHours: 34, minimumSkill: 32, description: 'Сложное метательное оружие собирается для гарнизонов.' },
-  { name: 'Походные пайки', category: 'готовка', profession: 'cook', establishmentTypes: ['казарма', 'замковое хозяйство', 'пекарня'], inputs: [{ templateId: 'bread', quantity: 4 }, { templateId: 'smoked_meat', quantity: 1 }, { templateId: 'salt', quantity: .3 }], outputs: [{ templateId: 'military_rations', quantity: 8 }], laborHours: 8, minimumSkill: 10, description: 'Сухие пайки готовятся для похода и осады.' },
-  { name: 'Походные палатки', category: 'ремесло', profession: 'tailor', establishmentTypes: ['портная мастерская', 'арсенал'], inputs: [{ templateId: 'linen_cloth', quantity: 6 }, { templateId: 'leather', quantity: 2 }, { templateId: 'timber', quantity: 1 }], outputs: [{ templateId: 'tent', quantity: 1 }], laborHours: 28, minimumSkill: 22, description: 'Портные шьют прочные армейские палатки.' },
-  { name: 'Ремонтные детали обоза', category: 'ремесло', profession: 'carpenter', establishmentTypes: ['плотницкая мастерская', 'осадная мастерская'], inputs: [{ templateId: 'planks', quantity: 3 }, { templateId: 'iron', quantity: 1 }, { templateId: 'nails', quantity: 1 }], outputs: [{ templateId: 'wagon_parts', quantity: 1 }], laborHours: 24, minimumSkill: 22, description: 'Колёса, оси и скобы готовятся для военных повозок.' },
-];
+const recipeSeeds = CIVILIZATION_CONTENT.recipes;
 
 const professionForEstablishment: Record<EstablishmentType, string[]> = {
   'таверна': ['cook', 'brewer', 'merchant'], 'постоялый двор': ['merchant', 'cook', 'brewer'], 'пекарня': ['baker', 'miller'], 'пивоварня': ['brewer'], 'винодельня': ['brewer'],
@@ -719,7 +548,7 @@ function createEstablishments(world: WorldState, rng: RNG): void {
       const establishment: Establishment = {
         id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: establishmentName(type, settlement, index, rng), type,
         ownerCharacterId: owner.id, workerIds: workers.map(worker => worker.id), supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
-        recipeIds: world.productionRecipes.filter(recipe => recipe.establishmentTypes.includes(type)).map(recipe => recipe.id), openHour: type === 'таверна' || type === 'постоялый двор' ? 10 : 7,
+        recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id), openHour: type === 'таверна' || type === 'постоялый двор' ? 10 : 7,
         closeHour: type === 'таверна' || type === 'постоялый двор' ? 1 : type === 'рынок' ? 17 : 19, reputation: rng.int(28, 82), cash: Math.max(20, Math.round(owner.wealth * .65 + rng.int(15, 120))),
         debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {}, history: [`Открыто в ${settlement.name} не позднее ${world.year} года.`],
       };
@@ -805,8 +634,13 @@ export function generatePhysicalEconomy(world: WorldState, rng: RNG, report?: (p
   world.nextIds.employment ??= 1;
   world.nextIds.shipment ??= 1;
   world.productionRecipes = world.productionRecipes.filter(recipe => !['Сбор урожая зерна', 'Сбор овощей и кореньев'].includes(recipe.name));
-  const knownRecipeNames = new Set(world.productionRecipes.map(recipe => recipe.name));
-  for (const recipe of recipeSeeds) if (!knownRecipeNames.has(recipe.name)) world.productionRecipes.push({ id: world.nextIds.productionRecipe++, ...recipe });
+  for (const recipe of world.productionRecipes) {
+    recipe.key ||= stableRecipeKey(recipe.name);
+    const definition = CIVILIZATION_CONTENT.recipeByKey.get(recipe.key) ?? CIVILIZATION_CONTENT.recipes.find(item => item.name === recipe.name);
+    if (definition) recipe.requiredTechnologyId = definition.requiredTechnologyId;
+  }
+  const knownRecipeKeys = new Set(world.productionRecipes.map(recipe => recipe.key));
+  for (const recipe of recipeSeeds) if (!knownRecipeKeys.has(recipe.key)) world.productionRecipes.push({ id: world.nextIds.productionRecipe++, ...recipe });
   world.nextIds.productionRecipe = Math.max(world.nextIds.productionRecipe, Math.max(0, ...world.productionRecipes.map(recipe => recipe.id)) + 1);
   if (world.buildings.length || world.households.length || world.establishments.length) return;
   report?.('Физические здания и имущество', 12, 'размещаем дома, склады и мастерские');
@@ -1035,7 +869,7 @@ function availableDye(world: WorldState, establishment: Establishment, quantity:
 }
 
 function runProduction(world: WorldState, establishment: Establishment, rng: RNG, elapsedMonths: number): void {
-  const recipes = establishment.recipeIds.map(id => activeRuntime?.recipeById.get(id) ?? world.productionRecipes.find(recipe => recipe.id === id)).filter((recipe): recipe is ProductionRecipe => Boolean(recipe));
+  const recipes = establishment.recipeIds.map(id => activeRuntime?.recipeById.get(id) ?? world.productionRecipes.find(recipe => recipe.id === id)).filter((recipe): recipe is ProductionRecipe => Boolean(recipe && recipeAvailableToSettlement(world, establishment.settlementId, recipe)));
   for (const recipe of recipes) {
     restockRecipeInputs(world, establishment, recipe, elapsedMonths);
     const skill = workerSkill(world, establishment, recipe.profession);

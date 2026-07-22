@@ -9,6 +9,7 @@ import { addMaterialItem, consumeOwnedMaterial, materialTemplateDetails, pruneEm
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { workplaceConnectionScore } from './socialSystem';
+import { availableRecipesForSettlement } from './civilizationSystem';
 
 const CLOTHING_SLOTS: EquipmentSlot[] = ['head', 'body', 'legs', 'feet', 'hands', 'cloak'];
 const FOOD_IDS = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'grain'] as const;
@@ -203,7 +204,7 @@ function synchronizeLivingEstablishments(world: WorldState): void {
     }
   }
   for (const establishment of world.establishments) {
-    const matching = world.productionRecipes.filter(recipe => recipe.establishmentTypes.includes(establishment.type)).map(recipe => recipe.id);
+    const matching = availableRecipesForSettlement(world, establishment.settlementId, establishment.type).map(recipe => recipe.id);
     establishment.recipeIds = [...new Set([...(establishment.recipeIds ?? []), ...matching])];
     seedSpecializedShop(world, establishment);
   }
