@@ -24,7 +24,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .15,
 });
 
-assert.equal(world.version, 29);
+assert.equal(world.version, 30);
 assert.equal(world.cityStates.length, world.settlements.length, 'каждое поселение должно иметь городской аудит');
 assert.ok(world.cityStates.every(state => state.land.freeBuildableCells >= 0), 'свободная земля не может быть отрицательной');
 assert.ok(world.buildings.every(building => building.cityCapacity?.version === 2), 'каждое здание должно иметь профиль функциональной вместимости');

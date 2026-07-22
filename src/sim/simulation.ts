@@ -34,6 +34,7 @@ import { applyInteriorMonthlyEffects } from './interiors';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
 import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
+import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -898,6 +899,7 @@ export function advanceOneMonth(
 
   if (schedule.runBooks) writeBooks(world, rng);
   runPhase(engine, 'Экспедиции, лагеря и основание поселений', onPhase, () => advanceSettlementLifecycle(world, rng, indexes, { allowFormation: schedule.runSettlementLifecycle, elapsedMonths: monthStep }));
+  runPhase(engine, 'Политические общины, автономия и формирование государств', onPhase, () => advanceStateFormation(world, new RNG(`${world.config.seed}:политические-общины:${world.year}:${world.month}`), indexes, { allowTransitions: world.month === 1 || world.month === 7, elapsedMonths: monthStep }));
 
   // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
   ensureEstablishmentOwners(world, indexes);
@@ -935,6 +937,7 @@ export function initializeWorldSystems(world: WorldState): void {
   synchronizeEmploymentLinks(world);
   initializeCivilizationSystem(world);
   initializeSettlementLifecycle(world);
+  initializeStateFormation(world);
   initializeCitySimulation(world);
 }
 

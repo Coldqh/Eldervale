@@ -28,17 +28,18 @@ import { initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
 import { normalizeSettlementLayouts } from './cityMorphology';
 import { initializeSettlementLifecycle } from './settlementLifecycle';
+import { initializeStateFormation } from './stateFormation';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-29`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-30`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 29;
+  localized.version = 30;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -72,6 +73,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.cultures ??= [];
   localized.civilizations ??= [];
   localized.settlementExpeditions ??= [];
+  localized.politicalCommunities ??= [];
+  localized.politicalTransitions ??= [];
   localized.languages ??= [];
   localized.religions ??= [];
   localized.settlementCultures ??= [];
@@ -120,6 +123,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 23) localized.simulation.cultureSystemVersion = undefined;
   if (sourceVersion < 27) localized.simulation.civilizationSystemVersion = undefined;
   if (sourceVersion < 29) localized.simulation.settlementLifecycleVersion = undefined;
+  if (sourceVersion < 30) localized.simulation.stateFormationVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -145,6 +149,8 @@ export function migrateWorld(input: unknown): WorldState {
     kingdom.claims ??= [];
     kingdom.diplomacy ??= [];
     kingdom.laws ??= ['королевский мир на дорогах', 'налог с рынков', 'воинская повинность'];
+    kingdom.predecessorKingdomIds ??= [];
+    kingdom.politicalOrigin ??= 'generated';
   }
   for (const settlement of localized.settlements) {
     settlement.resource ??= resourceForTerrain(localized, settlement.x, settlement.y, rng);
@@ -290,6 +296,10 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.civilization = Math.max(0, ...localized.civilizations.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.settlement = Math.max(0, ...localized.settlements.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.settlementExpedition = Math.max(0, ...localized.settlementExpeditions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.politicalCommunity = Math.max(0, ...localized.politicalCommunities.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.politicalTransition = Math.max(0, ...localized.politicalTransitions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.kingdom = Math.max(0, ...localized.kingdoms.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.army = Math.max(0, ...localized.armies.map((item: any) => item.id ?? 0)) + 1;
 
   normalizeKingdomCapitals(localized);
   normalizeSettlementLayouts(localized as WorldState);
@@ -316,6 +326,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
   initializeCivilizationSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-цивилизации-и-технологии-v1`));
   initializeSettlementLifecycle(localized as WorldState);
+  initializeStateFormation(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }

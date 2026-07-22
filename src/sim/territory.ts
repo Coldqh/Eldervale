@@ -49,6 +49,14 @@ export function advanceModernTerritories(world: WorldState, rng: RNG): void {
   }
 }
 
+export function recordKingdomFoundation(world: WorldState, kingdom: Kingdom, month = 1): boolean {
+  if (world.territoryHistory.some(change => change.kingdomId === kingdom.id && change.reason === 'основание столицы')) return false;
+  const capital = settlementById(world, kingdom.capitalId);
+  const tile = capital ? tileAt(world, capital.x, capital.y) : undefined;
+  if (!capital || !tile || tile.terrain === 'ocean') return false;
+  return claim(world, tile, kingdom.id, kingdom.foundedYear, month, 'основание столицы', capital.id, true);
+}
+
 export function transferKingdomTerritory(
   world: WorldState,
   fromKingdomId: number,
@@ -61,6 +69,47 @@ export function transferKingdomTerritory(
   for (const tile of world.tiles) {
     if (tile.kingdomId !== fromKingdomId) continue;
     if (claim(world, tile, toKingdomId, year, month, 'военное завоевание', sourceSettlementId)) transferred += 1;
+  }
+  return transferred;
+}
+
+
+export function transferPoliticalTerritory(
+  world: WorldState,
+  settlementIds: readonly number[],
+  fromKingdomIds: readonly number[],
+  toKingdomId: number,
+  year: number,
+  month: number,
+  reason: 'политическое отделение' | 'добровольное объединение',
+): number {
+  const memberIds = new Set(settlementIds);
+  const previousOwners = new Set(fromKingdomIds);
+  const settlements = world.settlements.filter(settlement => memberIds.has(settlement.id));
+  if (!settlements.length) return 0;
+  const candidates = world.tiles
+    .filter(tile => tile.terrain !== 'ocean')
+    .map(tile => {
+      const nearest = settlements.reduce((best, settlement) => {
+        const distance = Math.hypot(tile.x - settlement.x, tile.y - settlement.y);
+        return !best || distance < best.distance ? { settlement, distance } : best;
+      }, undefined as { settlement: Settlement; distance: number } | undefined);
+      return { tile, nearest };
+    })
+    .filter((entry): entry is { tile: Tile; nearest: { settlement: Settlement; distance: number } } => Boolean(entry.nearest))
+    .filter(({ tile, nearest }) => {
+      if (tile.settlementId && !memberIds.has(tile.settlementId)) return false;
+      const radius = nearest.settlement.type === 'city' || nearest.settlement.type === 'fortress' ? 2.6
+        : nearest.settlement.type === 'town' || nearest.settlement.type === 'port' ? 2.1 : 1.55;
+      if (nearest.distance > radius) return false;
+      return tile.kingdomId === toKingdomId || tile.kingdomId === undefined || previousOwners.has(tile.kingdomId);
+    })
+    .sort((a, b) => a.nearest.distance - b.nearest.distance || a.tile.y - b.tile.y || a.tile.x - b.tile.x);
+
+  let transferred = 0;
+  for (const { tile, nearest } of candidates) {
+    if (tile.kingdomId === toKingdomId) continue;
+    if (claim(world, tile, toKingdomId, year, month, reason, nearest.settlement.id)) transferred += 1;
   }
   return transferred;
 }

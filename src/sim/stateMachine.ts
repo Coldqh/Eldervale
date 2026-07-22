@@ -76,6 +76,44 @@ export function initializeStateMachine(world: WorldState, rng = new RNG(`${world
   world.simulation.stateMachineVersion = 1;
 }
 
+export function initializeKingdomGovernment(
+  world: WorldState,
+  kingdom: Kingdom,
+  rng = new RNG(`${world.config.seed}:государственная-машина:${kingdom.id}`),
+): KingdomGovernment {
+  world.kingdomGovernments ??= [];
+  world.nobleTitles ??= [];
+  world.vassalContracts ??= [];
+  world.courtOffices ??= [];
+  world.courtFactions ??= [];
+  world.royalOrders ??= [];
+  world.stateCrises ??= [];
+  world.diplomaticAgreements ??= [];
+  world.nextIds.kingdomGovernment ??= maxId(world.kingdomGovernments) + 1;
+  world.nextIds.nobleTitle ??= maxId(world.nobleTitles) + 1;
+  world.nextIds.vassalContract ??= maxId(world.vassalContracts) + 1;
+  world.nextIds.courtOffice ??= maxId(world.courtOffices) + 1;
+  world.nextIds.courtFaction ??= maxId(world.courtFactions) + 1;
+  world.nextIds.royalOrder ??= maxId(world.royalOrders) + 1;
+  world.nextIds.stateCrisis ??= maxId(world.stateCrises) + 1;
+  world.nextIds.diplomaticAgreement ??= maxId(world.diplomaticAgreements) + 1;
+  const tick = worldTick(world);
+  for (const character of world.characters) {
+    character.nobleTitleIds ??= [];
+    character.courtOfficeIds ??= [];
+    character.politicalInfluence ??= Math.max(1, Math.min(100, Math.round(character.renown * .45 + character.loyalty * .25 + (character.titles.length ? 16 : 0))));
+  }
+  normalizeKingdomCapitals(world);
+  const state = ensureKingdomGovernment(world, kingdom, rng, tick);
+  ensureRealmTitles(world, kingdom, state, rng);
+  ensureVassalContracts(world, kingdom, state, rng, tick);
+  ensureCourt(world, kingdom, state, rng, tick);
+  ensureFactions(world, kingdom, state, rng);
+  kingdom.governmentStateId = state.id;
+  world.simulation.stateMachineVersion = 1;
+  return state;
+}
+
 export function synchronizeStateMachineReferences(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
   if (!world.characters.some(character => character.alive)) {
@@ -980,6 +1018,7 @@ function factionMembers(world: WorldState, residents: Character[], state: Kingdo
 }
 
 function governmentFormFor(kingdom: Kingdom, rng: RNG): GovernmentForm {
+  if (kingdom.foundingGovernmentForm) return kingdom.foundingGovernmentForm;
   if (kingdom.species === 'orc') return rng.chance(.72) ? 'племенной союз' : 'военная диктатура';
   if (kingdom.species === 'dwarf') return rng.chance(.55) ? 'выборная монархия' : 'городской союз';
   if (kingdom.species === 'elf') return rng.chance(.35) ? 'теократия' : 'выборная монархия';

@@ -2,6 +2,7 @@ import type { BuildingInteriorPlan } from './interiorTypes';
 import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, SettlementLayoutPlan, UrbanState } from './cityTypes';
 import type { Civilization } from './civilizationTypes';
 import type { SettlementExpedition } from './settlementLifecycleTypes';
+import type { PoliticalCommunity, PoliticalTransition } from './stateFormationTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -1120,6 +1121,7 @@ export interface SimulationRuntimeState {
   cultureSystemVersion?: 1;
   civilizationSystemVersion?: 1;
   settlementLifecycleVersion?: 1;
+  stateFormationVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1178,6 +1180,10 @@ export interface Kingdom {
   laws: string[];
   governmentStateId?: number;
   civilizationId?: number;
+  foundingCommunityId?: number;
+  predecessorKingdomIds?: number[];
+  politicalOrigin?: 'generated' | 'secession' | 'league' | 'union' | 'conquest';
+  foundingGovernmentForm?: GovernmentForm;
 }
 
 export interface SettlementDistrict {
@@ -1222,6 +1228,7 @@ export interface Settlement {
   politicalStatus?: 'integrated' | 'frontier' | 'independent' | 'occupied';
   foundingExpeditionId?: number;
   claimantKingdomId?: number;
+  politicalCommunityId?: number;
   layout?: SettlementLayoutPlan;
 }
 
@@ -1766,7 +1773,7 @@ export interface TerritoryChange {
   kingdomId?: number;
   previousKingdomId?: number;
   sourceSettlementId?: number;
-  reason: 'основание столицы' | 'мирное освоение' | 'рост поселения' | 'торговый путь' | 'военное завоевание' | 'утрата контроля';
+  reason: 'основание столицы' | 'мирное освоение' | 'рост поселения' | 'торговый путь' | 'военное завоевание' | 'политическое отделение' | 'добровольное объединение' | 'утрата контроля';
 }
 
 export interface LocalMapEffect {
@@ -1838,7 +1845,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 29;
+  version: 30;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1849,6 +1856,8 @@ export interface WorldState {
   kingdoms: Kingdom[];
   settlements: Settlement[];
   settlementExpeditions: SettlementExpedition[];
+  politicalCommunities: PoliticalCommunity[];
+  politicalTransitions: PoliticalTransition[];
   characters: Character[];
   relationships: Relationship[];
   dynasties: Dynasty[];

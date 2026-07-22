@@ -354,10 +354,14 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     const civilization = entity.civilizationId ? world.civilizations.find(item => item.id === entity.civilizationId) : undefined;
     const era = civilization ? CIVILIZATION_CONTENT.eraById.get(civilization.eraId) : undefined;
     const recentTechnologies = civilization?.unlockedTechnologyIds.slice(-8).map(id => CIVILIZATION_CONTENT.technologyById.get(id)?.name ?? id).join(', ') ?? '';
+    const foundingCommunity = entity.foundingCommunityId ? world.politicalCommunities.find(item => item.id === entity.foundingCommunityId) : undefined;
+    const politicalOrigin = entity.politicalOrigin === 'secession' ? 'отделение общин' : entity.politicalOrigin === 'league' ? 'союз самостоятельных общин' : entity.politicalOrigin === 'union' ? 'добровольное объединение' : entity.politicalOrigin === 'conquest' ? 'завоевание' : 'изначальное государство мира';
     return <>
       {row('Правитель', link(getTitle(world, { kind: 'character', id: entity.rulerId }), { kind: 'character', id: entity.rulerId }, onSelect))}
       {row('Государственная система', entity.governmentStateId ? link(getTitle(world, { kind: 'kingdomGovernment', id: entity.governmentStateId }), { kind: 'kingdomGovernment', id: entity.governmentStateId }, onSelect) : 'не оформлена')}
       {row('Правящий дом', entity.dynastyId ? link(getTitle(world, { kind: 'dynasty', id: entity.dynastyId }), { kind: 'dynasty', id: entity.dynastyId }, onSelect) : 'не закреплён')}
+      {row('Происхождение государства', foundingCommunity ? `${politicalOrigin} · ${foundingCommunity.name}` : politicalOrigin)}
+      {(entity.predecessorKingdomIds?.length ?? 0) > 0 && row('Предшествующие державы', links(world, entity.predecessorKingdomIds.map((id: number) => ({ kind: 'kingdom' as const, id })), onSelect))}
       {row('Столица', link(getTitle(world, { kind: 'settlement', id: entity.capitalId }), { kind: 'settlement', id: entity.capitalId }, onSelect))}
       {row('Цивилизация', civilization?.name ?? 'не сформирована')}{row('Технологическая эпоха', era?.name ?? 'не определена')}{civilization && row('Развитие знаний', `${civilization.unlockedTechnologyIds.length} технологий · инновации ${civilization.metrics.innovation.toFixed(1)}/год`)}{civilization && row('Освоенные технологии', recentTechnologies || 'только базовые знания')}
       {row('Народ', speciesLabel(entity.species))}{row('Культура', entity.cultureId ? link(getTitle(world, { kind: 'culture', id: entity.cultureId }), { kind: 'culture', id: entity.cultureId }, onSelect) : entity.culture)}{row('Вера', entity.religionId ? link(getTitle(world, { kind: 'religion', id: entity.religionId }), { kind: 'religion', id: entity.religionId }, onSelect) : entity.religion)}{row('Официальный язык', entity.officialLanguageId ? link(getTitle(world, { kind: 'language', id: entity.officialLanguageId }), { kind: 'language', id: entity.officialLanguageId }, onSelect) : 'не закреплён')}
@@ -374,10 +378,18 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     const era = civilization ? CIVILIZATION_CONTENT.eraById.get(civilization.eraId) : undefined;
     const availableRecipes = world.productionRecipes.filter(recipe => !recipe.requiredTechnologyId || civilization?.unlockedTechnologyIds.includes(recipe.requiredTechnologyId)).length;
     const expeditions = (world.settlementExpeditions ?? []).filter(item => item.originSettlementId === entity.id || item.foundedSettlementId === entity.id).slice(-8).reverse();
-    const politicalStatus = entity.politicalStatus === 'frontier' ? 'пограничная община' : entity.politicalStatus === 'independent' ? 'независимая община' : entity.politicalStatus === 'occupied' ? 'оккупировано' : 'встроено в государство';
+    const politicalStatus = entity.politicalStatus === 'frontier' ? 'пограничная община' : entity.politicalStatus === 'independent' ? 'самоуправляемая община' : entity.politicalStatus === 'occupied' ? 'оккупировано' : 'встроено в государство';
+    const community = entity.politicalCommunityId ? world.politicalCommunities.find(item => item.id === entity.politicalCommunityId) : undefined;
+    const politicalTransitions = community ? world.politicalTransitions.filter(item => item.communityId === community.id || item.settlementIds.includes(entity.id)).slice(-6).reverse() : [];
+    const communityStatus = community?.status === 'integrated' ? 'встроена' : community?.status === 'frontier' ? 'пограничная' : community?.status === 'autonomous' ? 'автономна' : community?.status === 'independent' ? 'независима' : community?.status === 'organizing-state' ? 'создаёт государство' : community?.status === 'state-founded' ? 'основала государство' : community?.status ?? 'не оформлена';
     return <>
     {row('Государство', link(getTitle(world, { kind: 'kingdom', id: entity.kingdomId }), { kind: 'kingdom', id: entity.kingdomId }, onSelect))}
     {row('Политический статус', politicalStatus)}
+    {community && row('Политическая община', `${community.name} · ${communityStatus}`)}
+    {community && row('Местная власть', `автономия ${Math.round(community.autonomy)}% · власть ${Math.round(community.authority)}% · легитимность ${Math.round(community.legitimacy)}%`)}
+    {community && row('Политическое давление', `независимость ${Math.round(community.independencePressure)}% · сплочённость ${Math.round(community.cohesion)}% · военная поддержка ${Math.round(community.militarySupport)}%`)}
+    {community && row('Лидер общины', community.leaderCharacterId ? link(getTitle(world, { kind: 'character', id: community.leaderCharacterId }), { kind: 'character', id: community.leaderCharacterId }, onSelect) : 'не выбран')}
+    {community && row('Последние политические изменения', politicalTransitions.map(item => `${item.kind}: ${item.outcome}`).join('; ') || 'статус не менялся')}
     {entity.foundingExpeditionId && row('Происхождение', `основано экспедицией №${entity.foundingExpeditionId}`)}
     {row('Экспедиции основателей', expeditions.length ? <span className="relationship-stack">{expeditions.map(expedition => {
       const leader = world.characters.find(item => item.id === expedition.leaderCharacterId);

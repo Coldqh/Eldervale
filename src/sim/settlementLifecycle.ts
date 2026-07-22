@@ -17,6 +17,7 @@ import { worldTick } from './scheduler';
 import { initializeSettlementLife } from './settlementLife';
 import { assignBuildingFootprintAcrossSettlement, buildingDimensions } from './spatial';
 import { establishSettlementTerritory } from './territory';
+import { initializeStateFormation } from './stateFormation';
 
 const ACTIVE_STATUSES = new Set<SettlementExpedition['status']>(['forming', 'traveling', 'camped', 'returning']);
 const LAND_TERRAINS = new Set<Tile['terrain']>(['coast', 'plains', 'forest', 'hills', 'marsh', 'desert', 'tundra']);
@@ -432,6 +433,7 @@ function foundSettlement(world: WorldState, expedition: SettlementExpedition, rn
   initializeSettlementLife(world, new RNG(`${world.config.seed}:власть-нового-поселения:${id}`));
   initializeCultureSystem(world, new RNG(`${world.config.seed}:культура-нового-поселения:${id}`));
   initializeCivilizationSystem(world, new RNG(`${world.config.seed}:цивилизация-нового-поселения:${id}`));
+  initializeStateFormation(world);
   initializeCitySimulation(world);
   appendCausalEvent(world, {
     kind: 'settlement',
