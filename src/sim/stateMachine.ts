@@ -76,18 +76,33 @@ export function initializeStateMachine(world: WorldState, rng = new RNG(`${world
   world.simulation.stateMachineVersion = 1;
 }
 
-export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+export function synchronizeStateMachineReferences(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const tick = worldTick(world);
+  if (!world.characters.some(character => character.alive)) {
+    archiveGovernanceAfterTotalExtinction(world);
+    return;
+  }
   collapseExtinctRealms(world, rng, tick);
   if (world.simulation.stateMachineVersion !== 1 || world.kingdomGovernments.length !== world.kingdoms.length) initializeStateMachine(world, rng, indexes);
   normalizeKingdomCapitals(world);
   synchronizeRealmOwnership(world, rng, tick);
-
   for (const state of world.kingdomGovernments) {
     const kingdom = world.kingdoms.find(item => item.id === state.kingdomId);
     if (!kingdom) continue;
     synchronizeSuccession(world, kingdom, state, rng, tick);
     synchronizeCourt(world, kingdom, state, rng, tick);
+    synchronizeVassalReferences(world, state);
+    synchronizeFactionReferences(world, kingdom, state);
+  }
+}
+
+export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+  const tick = worldTick(world);
+  synchronizeStateMachineReferences(world, rng, indexes);
+
+  for (const state of world.kingdomGovernments) {
+    const kingdom = world.kingdoms.find(item => item.id === state.kingdomId);
+    if (!kingdom) continue;
     state.monthlyTaxIncome = 0;
     updateVassals(world, kingdom, state, rng, tick);
     runStateBudget(world, kingdom, state, rng, tick);
@@ -102,6 +117,37 @@ export function advanceStateMachine(world: WorldState, rng: RNG, indexes: WorldI
   trimStateCollections(world);
 }
 
+
+function archiveGovernanceAfterTotalExtinction(world: WorldState): void {
+  for (const kingdom of world.kingdoms) {
+    if (!world.history.fallenRealms.some(realm => realm.formerKingdomId === kingdom.id)) {
+      const capital = world.settlements.find(settlement => settlement.id === kingdom.capitalId)
+        ?? world.settlements.find(settlement => settlement.kingdomId === kingdom.id);
+      world.history.fallenRealms.push({
+        id: Math.max(0, ...world.history.fallenRealms.map(realm => realm.id)) + 1,
+        name: kingdom.name,
+        species: kingdom.species,
+        foundedYear: kingdom.foundedYear,
+        fallenYear: world.year,
+        capitalName: capital?.name ?? kingdom.name,
+        causeOfFall: 'полное исчезновение населения мира',
+        formerKingdomId: kingdom.id,
+        color: kingdom.color,
+      });
+    }
+    kingdom.rulerId = 0;
+    kingdom.stability = 0;
+  }
+  world.kingdomGovernments = [];
+  world.nobleTitles = [];
+  world.vassalContracts = [];
+  world.courtOffices = [];
+  world.courtFactions = [];
+  world.royalOrders = [];
+  world.stateCrises = [];
+  world.diplomaticAgreements = [];
+  world.simulation.stateMachineVersion = 1;
+}
 
 function collapseExtinctRealms(world: WorldState, rng: RNG, tick: number): void {
   const livingByKingdom = new Map<number, number>();
@@ -471,6 +517,39 @@ function synchronizeCourt(world: WorldState, kingdom: Kingdom, state: KingdomGov
   }
   const filled = state.courtOfficeIds.map(id => world.courtOffices.find(item => item.id === id)).filter((item): item is CourtOffice => Boolean(item?.holderCharacterId));
   state.administration = clamp(15 + average(filled.map(item => item.competence)) * .65 - state.corruption * .25, 5, 100);
+}
+
+function synchronizeVassalReferences(world: WorldState, state: KingdomGovernment): void {
+  const sovereignTitle = world.nobleTitles.find(item => item.id === state.sovereignTitleId);
+  const sovereign = sovereignTitle ? livingCharacter(world, sovereignTitle.holderCharacterId) : livingCharacter(world, state.sovereignCharacterId);
+  for (const contractId of state.vassalContractIds) {
+    const contract = world.vassalContracts.find(item => item.id === contractId);
+    if (!contract) continue;
+    const title = world.nobleTitles.find(item => item.id === contract.vassalTitleId);
+    const vassal = title ? livingCharacter(world, title.holderCharacterId) : undefined;
+    if (sovereign) contract.liegeCharacterId = sovereign.id;
+    if (vassal) contract.vassalCharacterId = vassal.id;
+  }
+}
+
+function synchronizeFactionReferences(world: WorldState, kingdom: Kingdom, state: KingdomGovernment): void {
+  const livingRealm = world.characters.filter(character => character.alive && character.kingdomId === kingdom.id);
+  for (const factionId of state.factionIds) {
+    const faction = world.courtFactions.find(item => item.id === factionId);
+    if (!faction) continue;
+    faction.memberIds = faction.memberIds.filter(id => livingCharacter(world, id));
+    let leader = livingCharacter(world, faction.leaderCharacterId);
+    if (!leader) {
+      leader = factionMembers(world, livingRealm, state, faction.kind)
+        .sort((a, b) => factionLeadershipScore(b, faction.kind) - factionLeadershipScore(a, faction.kind))[0]
+        ?? strongestRealmCandidate(world, kingdom.id)
+        ?? livingCharacter(world, state.sovereignCharacterId);
+      if (!leader) continue;
+      faction.leaderCharacterId = leader.id;
+      addUnique(faction.memberIds, leader.id);
+      faction.history.push(`${leader.name} возглавил группировку после выбытия прежнего лидера.`);
+    }
+  }
 }
 
 function updateVassals(world: WorldState, kingdom: Kingdom, state: KingdomGovernment, rng: RNG, tick: number): void {

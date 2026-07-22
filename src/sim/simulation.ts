@@ -18,7 +18,7 @@ import { advanceModernTerritories, captureTerritoryAroundSettlement } from './te
 import { advanceBurials, archiveCharacter, archiveCharactersBatch, archiveMonster, burialForSubject } from './mortality';
 import { advanceKnowledgeSystem, markKnowledgeDecision, registerWorldEventKnowledge } from './knowledgeSystem';
 import { advanceSettlementLife, synchronizeSettlementGovernmentLeaders } from './settlementLife';
-import { advanceStateMachine } from './stateMachine';
+import { advanceStateMachine, synchronizeStateMachineReferences } from './stateMachine';
 import { decisionKnowledge, initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { advanceMindSystem, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { advanceSocialSystem, settlementConnectionScore } from './socialSystem';
@@ -30,7 +30,8 @@ import { advanceClimateSystem, initializeClimateSystem } from './climateSystem';
 import { advanceDailyLife, initializeDailyLife } from './dailyLife';
 import { advanceDynastyLegacy, initializeDynastyLegacy } from './dynastyLegacy';
 import { advanceRaceDemography, initializeRaceDemography } from './raceDemography';
-import { applyInteriorMonthlyEffects, interiorExpansionNeeds } from './interiors';
+import { applyInteriorMonthlyEffects } from './interiors';
+import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -924,8 +925,10 @@ export function advanceOneMonth(
   });
 
   synchronizeSettlementGovernmentLeaders(world, indexes);
+  synchronizeStateMachineReferences(world, new RNG(`${world.config.seed}:state-references:${world.year}:${world.month}`), indexes);
   synchronizeEmploymentLinks(world, indexes);
   synchronizeSettlementPopulation(engine);
+  advanceCitySimulation(world);
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
 }
@@ -946,6 +949,7 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeDynastyLegacy(world);
   initializeClimateSystem(world);
   initializeRaceDemography(world);
+  initializeCitySimulation(world);
   synchronizeEmploymentLinks(world);
 }
 
@@ -994,29 +998,20 @@ export function advanceWorldSystems(
     },
   );
 
+  onPhase?.('Городское ядро, жильё, школы, работа и земля');
+  advanceCitySimulation(engine.world);
+
   onPhase?.('Физические интерьеры, сон и износ мебели');
   applyInteriorMonthlyEffects(engine.world, monthStep);
-  for (const need of interiorExpansionNeeds(engine.world)) {
-    const settlement = engine.indexes.settlementById.get(need.settlementId);
-    if (!settlement || settlement.prosperity < 18) continue;
-    requestConstructionProject(
-      engine.world,
-      settlement,
-      need.requestedType,
-      need.reason,
-      new RNG(`${engine.world.config.seed}:интерьер-расширение:${need.buildingId}:${engine.world.year}:${engine.world.month}`),
-    );
-    const building = engine.indexes.buildingById.get(need.buildingId);
-    const note = `В ${engine.world.year}.${String(engine.world.month).padStart(2, '0')} выявлен дефицит интерьера: ${need.shortage} мест.`;
-    if (building && !building.history.includes(note)) building.history.push(note);
-  }
 
   onPhase?.('Династии, поколения и наследие');
   advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });
 
   synchronizeSettlementGovernmentLeaders(engine.world, engine.indexes);
+  synchronizeStateMachineReferences(engine.world, new RNG(`${engine.world.config.seed}:state-references:${engine.world.year}:${engine.world.month}`), engine.indexes);
   synchronizeEmploymentLinks(engine.world, engine.indexes);
   synchronizeSettlementPopulation(engine);
+  advanceCitySimulation(engine.world);
   return monthStep;
 }
 

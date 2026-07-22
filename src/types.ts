@@ -1,4 +1,5 @@
 import type { BuildingInteriorPlan } from './interiorTypes';
+import type { BuildingCapacityProfile, HousingStatus, SettlementCityState } from './cityTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -769,6 +770,7 @@ export interface Building {
   hasHearth: boolean;
   history: string[];
   interior?: BuildingInteriorPlan;
+  cityCapacity?: BuildingCapacityProfile;
 }
 
 
@@ -1261,6 +1263,8 @@ export interface Character {
   wantedForCrimeIds?: number[];
   sentenceUntilTick?: number;
   homeless?: boolean;
+  housingStatus?: HousingStatus;
+  temporaryShelterBuildingId?: number;
   nobleTitleIds?: number[];
   courtOfficeIds?: number[];
   courtFactionId?: number;
@@ -1819,7 +1823,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 23;
+  version: 24;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1872,6 +1876,7 @@ export interface WorldState {
   settlementCultures: SettlementCultureState[];
   settlementGovernments: SettlementGovernment[];
   districtCivicStates: DistrictCivicState[];
+  cityStates: SettlementCityState[];
   civicPatrols: CivicPatrol[];
   crimes: CrimeIncident[];
   courtCases: CourtCase[];

@@ -51,7 +51,7 @@ const ruler = person(7, 'Король Эрдан', 46, 'ruler', 4);
 ruler.titles = ['Правитель'];
 
 const world = {
-  version: 23, language: 'ru', appVersion: '4.2.3',
+  version: 24, language: 'ru', appVersion: '5.0.0',
   config: { seed: 'deep-interiors-smoke', width: 1, height: 1, historyYears: 90, kingdomCount: 1, settlementCount: 1, populationScale: 1, magic: .5, warlike: .2, monsterDensity: .1, artifactDensity: .1, localMapSize: SIZE, ecologyDensity: .1, huntingPressure: 1 },
   name: 'Проверка интерьеров', year: 90, month: 6,
   tiles: [{ x: 0, y: 0, terrain: 'plains', elevation: .5, moisture: .5, kingdomId: 1, settlementId: 1, settlementDistrict: 'Центр' }],
@@ -75,7 +75,7 @@ const world = {
   ],
   shipments: [], travelingMerchants: [], marketTransactions: [], knowledgeFacts: [], memories: [], rumors: [], messages: [], settlementKnowledge: [], cultures: [], languages: [], religions: [], settlementCultures: [],
   settlementGovernments: [{ id: 1, settlementId: 1, leaderCharacterId: 7, councilCharacterIds: [], treasury: 50, monthlyTaxIncome: 0, monthlyExpenses: 0, corruption: 0, guardIds: [], judgeIds: [], firefighterIds: [], teacherIds: [5], gravediggerIds: [], prisonerIds: [], laws: [], activeDecision: '', history: [] }],
-  districtCivicStates: [], civicPatrols: [], crimes: [], courtCases: [], fireIncidents: [], kingdomGovernments: [], nobleTitles: [], vassalContracts: [], courtOffices: [], courtFactions: [], royalOrders: [], stateCrises: [], diplomaticAgreements: [], socialObligations: [], healthConditions: [], pregnancies: [], epidemics: [], decisions: [], stateDeltas: [], territoryHistory: [], events: [], localMapChanges: [],
+  districtCivicStates: [], cityStates: [], civicPatrols: [], crimes: [], courtCases: [], fireIncidents: [], kingdomGovernments: [], nobleTitles: [], vassalContracts: [], courtOffices: [], courtFactions: [], royalOrders: [], stateCrises: [], diplomaticAgreements: [], socialObligations: [], healthConditions: [], pregnancies: [], epidemics: [], decisions: [], stateDeltas: [], territoryHistory: [], events: [], localMapChanges: [],
   simulation: { schedulerVersion: 1, clockTick: 1085, activeRegionKeys: ['0:0'], sleepingRegionCount: 0, queuedActions: [] },
   history: { engineVersion: 2, generatedYears: 90, eras: [], landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [] },
   nextIds: { relationship: 1, personalLifeEvent: 1 },

@@ -6,6 +6,8 @@ import type {
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { raceDefinition } from '../raceCatalog';
+import type { BuildingCapacityProfile } from '../cityTypes';
+import { buildingCapacityProfile, circulationCell } from './cityCapacity';
 
 const PLAN_CACHE = new WeakMap<WorldState, Map<number, BuildingInteriorPlan>>();
 const INITIALIZED_WORLDS = new WeakSet<WorldState>();
@@ -56,7 +58,9 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   let cache = PLAN_CACHE.get(world);
   if (!cache) { cache = new Map(); PLAN_CACHE.set(world, cache); }
   const demand = collectDemand(world, building);
-  const signature = planSignature(world, building, demand);
+  const capacityProfile = buildingCapacityProfile(building);
+  building.cityCapacity = capacityProfile;
+  const signature = planSignature(world, building, demand, capacityProfile);
   const cached = cache.get(building.id);
   if (cached?.signature === signature) return cached;
   if (building.interior?.version === INTERIOR_VERSION && building.interior.signature === signature) {
@@ -66,7 +70,7 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
 
   const previous = building.interior;
   const materials = materialProfile(world, building);
-  const requests = roomRequests(building, demand);
+  const requests = roomRequests(building, capacityProfile);
   const rooms = layoutRooms(building, requests);
   const fixtures: InteriorFixture[] = [];
   const assignments: InteriorAssignment[] = [];
@@ -136,18 +140,21 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   };
 
   const unassignedSleeperIds: number[] = [];
-  for (const sleeper of demand.sleepers) {
+  const sleeperLimit = building.type === 'prison' ? capacityProfile.prisonBeds
+    : building.type === 'healer' ? capacityProfile.treatmentBeds
+      : building.type === 'shelter' ? capacityProfile.shelterBeds
+        : capacityProfile.permanentBeds;
+  for (const [index, sleeper] of demand.sleepers.entries()) {
+    if (index >= sleeperLimit) { unassignedSleeperIds.push(sleeper.id); continue; }
     const fixtureKind = sleepFixtureKind(building, sleeper);
-    let fixture = addFixture(fixtureKind, sleepLabel(fixtureKind, sleeper), sleepRooms(building), 1, true);
-    if (!fixture && !['prison', 'healer'].includes(building.type)) {
-      fixture = addFixture('floor-pallet', `Временная постель ${sleeper.name}`, sleepRooms(building), 1, true, true);
-    }
+    const fixture = addFixture(fixtureKind, sleepLabel(fixtureKind, sleeper), sleepRooms(building), 1, true);
     if (fixture) assign(sleeper, building.type === 'prison' ? 'prison' : building.type === 'healer' ? 'treatment' : 'sleep', fixture);
     else unassignedSleeperIds.push(sleeper.id);
   }
 
   const unassignedStudentIds: number[] = [];
-  for (const student of demand.students) {
+  for (const [index, student] of demand.students.entries()) {
+    if (index >= capacityProfile.studentSeats) { unassignedStudentIds.push(student.id); continue; }
     const fixture = addFixture('student-desk', `Парта ${student.name}`, ['classroom'], 1, true);
     if (!fixture) { unassignedStudentIds.push(student.id); continue; }
     const room = rooms.find(item => item.id === fixture.roomId);
@@ -158,7 +165,8 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
   const governmentTeachers = world.settlementGovernments.find(item => item.settlementId === building.settlementId)?.teacherIds ?? [];
   const teacherIds = new Set([...governmentTeachers, ...demand.workers.filter(worker => ['teacher', 'scribe'].includes(worker.profession)).map(worker => worker.id)]);
   const unassignedWorkerIds: number[] = [];
-  for (const worker of demand.workers) {
+  for (const [index, worker] of demand.workers.entries()) {
+    if (index >= capacityProfile.workstations) { unassignedWorkerIds.push(worker.id); continue; }
     const fixtureKind = workstationKind(building, worker);
     const label = teacherIds.has(worker.id) && building.type === 'school'
       ? `Учительский стол ${worker.name}`
@@ -168,20 +176,11 @@ export function interiorPlanForBuilding(world: WorldState, building: Building): 
     else unassignedWorkerIds.push(worker.id);
   }
 
-  for (const prisoner of demand.prisoners.filter(character => !assignments.some(item => item.characterId === character.id && item.kind === 'prison'))) {
-    const fixture = addFixture('prison-bed', `Койка заключённого ${prisoner.name}`, ['cell'], 1, true);
-    if (fixture) assign(prisoner, 'prison', fixture);
-  }
-  for (const patient of demand.patients.filter(character => !assignments.some(item => item.characterId === character.id && item.kind === 'treatment'))) {
-    const fixture = addFixture('treatment-bed', `Лечебная койка ${patient.name}`, ['ward'], 1, true);
-    if (fixture) assign(patient, 'treatment', fixture);
-  }
-
   addDecorativeCore(building, materials, addFixture);
-  addPublicSeating(building, demand, addFixture);
+  addPublicSeating(building, capacityProfile, addFixture);
 
   const functional = (fixture: InteriorFixture) => fixture.functional && !fixture.blocked && fixture.condition > 0;
-  const availableBeds = fixtures.filter(item => functional(item) && ['bed', 'double-bed', 'bunk-bed', 'prison-bed', 'treatment-bed', 'floor-pallet'].includes(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
+  const availableBeds = fixtures.filter(item => functional(item) && ['bed', 'double-bed', 'bunk-bed', 'prison-bed', 'treatment-bed'].includes(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
   const availableDesks = fixtures.filter(item => functional(item) && item.kind === 'student-desk').reduce((sum, item) => sum + item.capacity, 0);
   const availableWorkstations = fixtures.filter(item => functional(item) && isWorkstation(item.kind)).reduce((sum, item) => sum + item.capacity, 0);
   const warnings: string[] = [];
@@ -570,12 +569,11 @@ export function schoolBuildingForCharacter(world: WorldState, character: Charact
   return schools[hashSeed(`${world.config.seed}:школа:${character.id}`) % schools.length];
 }
 
-function roomRequests(building: Building, demand: Demand): RoomRequest[] {
-  const bedrooms = Math.max(1, Math.ceil(demand.sleepers.length / (building.type === 'barracks' ? 12 : building.type === 'tenement' ? 6 : 4)));
-  const classroomCapacity = Math.max(6, Math.min(18, Math.floor(Math.max(12, (building.localWidth - 2) * (building.localHeight - 2)) / 3)));
-  const classrooms = Math.max(1, Math.ceil(demand.students.length / classroomCapacity));
-  const cells = Math.max(1, Math.ceil(demand.prisoners.length / 2));
-  const workshops = Math.max(1, Math.ceil(demand.workers.length / 12));
+function roomRequests(building: Building, capacity: BuildingCapacityProfile): RoomRequest[] {
+  const bedrooms = Math.max(1, Math.ceil(capacity.permanentBeds / (building.type === 'barracks' ? 12 : building.type === 'tenement' ? 6 : 4)));
+  const classrooms = Math.max(1, capacity.classrooms);
+  const cells = Math.max(1, Math.ceil(capacity.prisonBeds / 2));
+  const workshops = Math.max(1, Math.ceil(capacity.workstations / 8));
   const requests: RoomRequest[] = [];
   const add = (kind: InteriorRoomKind, name: string, count = 1) => requests.push({ kind, name, count });
   if (building.type === 'house' || building.type === 'tenement') {
@@ -593,9 +591,9 @@ function roomRequests(building: Building, demand: Demand): RoomRequest[] {
   } else if (building.type === 'barracks') {
     add('barracks', 'Спальная казарма', Math.max(1, bedrooms)); add('armory', 'Оружейная'); add('mess-hall', 'Солдатская столовая'); add('guard-room', 'Караульная'); add('storage', 'Склад снабжения');
   } else if (building.type === 'temple' || building.type === 'monastery') {
-    add('sanctuary', 'Святилище'); add('chapel', 'Молельный зал'); add('vestry', 'Ризница'); add('library', 'Храмовая библиотека'); if (demand.sleepers.length) add('bedroom', 'Кельи', bedrooms); add('storage', 'Кладовая');
+    add('sanctuary', 'Святилище'); add('chapel', 'Молельный зал'); add('vestry', 'Ризница'); add('library', 'Храмовая библиотека'); if (capacity.permanentBeds > 0) add('bedroom', 'Кельи', bedrooms); add('storage', 'Кладовая');
   } else if (building.type === 'healer' || building.type === 'bathhouse') {
-    add('ward', 'Палата', Math.max(1, Math.ceil(Math.max(demand.patients.length, 1) / 6))); add('apothecary', 'Лекарская'); add('workshop', 'Процедурная'); add('storage', 'Склад лекарств');
+    add('ward', 'Палата', Math.max(1, Math.ceil(Math.max(capacity.treatmentBeds, 1) / 6))); add('apothecary', 'Лекарская'); add('workshop', 'Процедурная'); add('storage', 'Склад лекарств');
   } else if (building.type === 'prison') {
     add('cell', 'Камера', cells); add('guard-room', 'Караульная'); add('workshop', 'Тюремная работа'); add('storage', 'Склад');
   } else if (building.type === 'market' || building.type === 'shop') {
@@ -603,7 +601,7 @@ function roomRequests(building: Building, demand: Demand): RoomRequest[] {
   } else if (building.type === 'stable') {
     add('stable', 'Стойла'); add('storage', 'Сеновал'); add('workshop', 'Сбруйная');
   } else {
-    add('entry', 'Вход'); add('workshop', 'Рабочий зал', workshops); add('storage', 'Склад'); if (demand.sleepers.length) add('bedroom', 'Спальные помещения', bedrooms);
+    add('entry', 'Вход'); add('workshop', 'Рабочий зал', workshops); add('storage', 'Склад'); if (capacity.permanentBeds > 0) add('bedroom', 'Спальные помещения', bedrooms);
   }
   return requests;
 }
@@ -694,6 +692,7 @@ function fixtureFits(
   if (x <= building.localX || y <= building.localY || x + footprint.width > buildingRight || y + footprint.height > buildingBottom) return false;
   for (let dy = 0; dy < footprint.height; dy += 1) for (let dx = 0; dx < footprint.width; dx += 1) {
     if (occupied.has(`${x + dx}:${y + dy}`)) return false;
+    if (circulationCell(building, x + dx, y + dy, room.floor)) return false;
     if (room.floor === 0 && x + dx === building.entranceX && y + dy === building.entranceY) return false;
   }
   return true;
@@ -761,15 +760,12 @@ function addDecorativeCore(
 
 function addPublicSeating(
   building: Building,
-  demand: Demand,
+  capacity: BuildingCapacityProfile,
   add: (kind: InteriorFixtureKind, label: string, rooms: InteriorRoomKind[], capacity?: number, functional?: boolean, temporary?: boolean) => InteriorFixture | undefined,
 ): void {
   const socialBuildings: Building['type'][] = ['house', 'tenement', 'manor', 'tavern', 'inn', 'temple', 'monastery', 'castle', 'barracks', 'school', 'market', 'shop', 'townHall', 'courthouse', 'healer', 'bathhouse'];
-  if (!socialBuildings.includes(building.type)) return;
-  const target = building.type === 'tavern' || building.type === 'inn' ? Math.max(8, Math.min(building.capacity, 48))
-    : building.type === 'temple' ? Math.max(8, Math.min(building.capacity, 64))
-      : building.type === 'castle' ? Math.max(12, Math.min(building.capacity, 72))
-        : Math.max(4, Math.min(16, demand.sleepers.length + demand.workers.length));
+  if (!socialBuildings.includes(building.type) || capacity.publicSeats <= 0) return;
+  const target = capacity.publicSeats;
   const roomKinds: InteriorRoomKind[] = building.type === 'school' ? ['classroom', 'teacher-room']
     : building.type === 'healer' || building.type === 'bathhouse' ? ['ward', 'workshop']
       : building.type === 'townHall' || building.type === 'courthouse' ? ['workshop', 'entry']
@@ -1014,9 +1010,10 @@ function baseFunctionalFixtureCount(building: Building): number {
   return 5;
 }
 
-function planSignature(world: WorldState, building: Building, demand: Demand): string {
+function planSignature(world: WorldState, building: Building, demand: Demand, capacity: BuildingCapacityProfile): string {
   return [
     building.id, building.type, building.localX, building.localY, building.localWidth, building.localHeight, building.floors, building.condition,
+    capacity.permanentBeds, capacity.studentSeats, capacity.workstations, capacity.storageVolume,
     ...demand.sleepers.map(item => `s${item.id}`), ...demand.students.map(item => `d${item.id}`), ...demand.workers.map(item => `w${item.id}`),
     world.settlements.find(item => item.id === building.settlementId)?.prosperity ?? 0,
   ].join(':');
