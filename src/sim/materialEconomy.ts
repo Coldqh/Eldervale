@@ -1348,6 +1348,12 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   const householdIds = new Set(world.households.map(item => item.id));
   const establishmentIds = new Set(world.establishments.map(item => item.id));
   const itemIds = new Set(world.items.map(item => item.id));
+  const activeExpeditions = (world.settlementExpeditions ?? []).filter(item => ['forming', 'traveling', 'camped', 'returning'].includes(item.status));
+  const expeditionHouseholdIds = new Set(activeExpeditions.flatMap(item => item.householdIds));
+  const expeditionCharacterIds = new Set(activeExpeditions.flatMap(item => item.memberIds));
+  const expeditionItemIds = new Set<number>();
+  for (const household of world.households) if (expeditionHouseholdIds.has(household.id)) for (const itemId of household.inventoryItemIds) expeditionItemIds.add(itemId);
+  for (const character of world.characters) if (expeditionCharacterIds.has(character.id)) for (const itemId of character.inventoryItemIds ?? []) expeditionItemIds.add(itemId);
   const locations = new Map<number, number>();
   const countLocation = (ids: number[]) => { for (const id of ids) locations.set(id, (locations.get(id) ?? 0) + 1); };
   for (const settlement of world.settlements) {
@@ -1361,7 +1367,7 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
     countLocation(building.inventoryItemIds);
   }
   for (const household of world.households) {
-    if (!settlementIds.has(household.settlementId)) issues.push(`Домохозяйство ${household.id}: нет поселения`);
+    if (!settlementIds.has(household.settlementId) && !expeditionHouseholdIds.has(household.id)) issues.push(`Домохозяйство ${household.id}: нет поселения`);
     if (household.memberIds.some(id => !characterIds.has(id))) issues.push(`Домохозяйство ${household.id}: отсутствует член семьи`);
     if (household.homeBuildingId && !buildingIds.has(household.homeBuildingId)) issues.push(`Домохозяйство ${household.id}: нет дома`);
     countLocation(household.inventoryItemIds);
@@ -1376,7 +1382,7 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   for (const wagon of world.supplyWagons ?? []) countLocation(wagon.inventoryItemIds ?? []);
   for (const item of world.items) {
     if (item.quantity <= 0) issues.push(`${item.name} ${item.id}: неположительное количество`);
-    if (!settlementIds.has(item.settlementId)) issues.push(`${item.name} ${item.id}: нет поселения`);
+    if (!settlementIds.has(item.settlementId) && !expeditionItemIds.has(item.id)) issues.push(`${item.name} ${item.id}: нет поселения`);
     if ((locations.get(item.id) ?? 0) === 0 && !item.ownerCharacterId) issues.push(`${item.name} ${item.id}: предмет не находится ни в одном инвентаре`);
     if ((locations.get(item.id) ?? 0) > 3) issues.push(`${item.name} ${item.id}: предмет продублирован в инвентарях`);
   }

@@ -105,7 +105,7 @@ export function buildWorldIndexes(world: WorldState): WorldIndexes {
 
 export function addResidentToIndexes(indexes: WorldIndexes, character: Character): void {
   indexes.characterById.set(character.id, character);
-  if (!character.alive) return;
+  if (!character.alive || character.settlementId <= 0) return;
   const residents = indexes.residentsBySettlement.get(character.settlementId) ?? [];
   residents.push(character);
   residents.sort((a, b) => a.id - b.id);

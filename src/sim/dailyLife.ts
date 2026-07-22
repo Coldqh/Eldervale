@@ -9,6 +9,8 @@ import {
   isSchoolAgeCharacter, schoolBuildingForCharacter,
 } from './interiors';
 import type { InteriorAssignmentKind } from '../interiorTypes';
+import type { SettlementExpedition } from '../settlementLifecycleTypes';
+import { activeExpeditionForCharacter } from './settlementLifecycle';
 
 export const DAY_PHASES: DayPhase[] = ['morning', 'day', 'evening', 'night'];
 const MAX_ROUTINES = 1_200;
@@ -40,11 +42,17 @@ export function advanceDailyLife(
     .map(characterId => indexes.characterById.get(characterId))
     .filter((character): character is Character => Boolean(character?.alive && !isAwayWithArmy(character)));
   const forcedIds = new Set(forcedTargets.map(character => character.id));
+  const expeditionTargets = (world.settlementExpeditions ?? [])
+    .filter(expedition => ['traveling', 'camped', 'returning'].includes(expedition.status))
+    .flatMap(expedition => expedition.memberIds)
+    .map(characterId => indexes.characterById.get(characterId))
+    .filter((character): character is Character => Boolean(character?.alive && !forcedIds.has(character.id)));
+  const expeditionIds = new Set(expeditionTargets.map(character => character.id));
   const regularTargets = settlementIds
     .flatMap(settlementId => residents(indexes, settlementId))
-    .filter(character => character.alive && !isAwayWithArmy(character) && !forcedIds.has(character.id))
+    .filter(character => character.alive && !isAwayWithArmy(character) && !forcedIds.has(character.id) && !expeditionIds.has(character.id))
     .sort((a, b) => detailScore(world, b) - detailScore(world, a) || a.id - b.id);
-  const targets = [...forcedTargets, ...regularTargets].slice(0, MAX_DETAILED_CHARACTERS);
+  const targets = [...forcedTargets, ...expeditionTargets, ...regularTargets].slice(0, MAX_DETAILED_CHARACTERS);
 
   const refreshedIds = new Set(targets.map(character => character.id));
   const newRoutines = targets.map(character => buildDailyRoutine(world, character, tick));
@@ -95,7 +103,6 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
   const tile = world.tiles[map.globalY * world.config.width + map.globalX]
     ?? world.tiles.find(item => item.x === map.globalX && item.y === map.globalY);
   const settlement = tile?.settlementId ? world.settlements.find(item => item.id === tile.settlementId) : undefined;
-  if (!settlement) return { ...map, markers: [...map.markers, ...furniture] };
 
   const fixedMarkers = map.markers.filter(marker => {
     if (marker.kind !== 'person') return true;
@@ -117,7 +124,9 @@ export function applyDailyLifePhaseToMap(world: WorldState, map: LocalMapData, p
   const outdoor: { character: Character; stop: DailyRoutineStop }[] = [];
 
   for (const character of world.characters) {
-    if (!character.alive || character.settlementId !== settlement.id || armyIds.has(character.id) || merchantIds.has(character.id) || patrolIds.has(character.id)) continue;
+    if (!character.alive || armyIds.has(character.id) || merchantIds.has(character.id) || patrolIds.has(character.id)) continue;
+    const expedition = activeExpeditionForCharacter(world, character.id);
+    if (!expedition && (!settlement || character.settlementId !== settlement.id)) continue;
     const stop = routineStopForCharacter(world, character, phase);
     if (stop.globalX !== map.globalX || stop.globalY !== map.globalY) continue;
     if (stop.buildingId) {
@@ -255,7 +264,10 @@ function isAwayWithArmy(character: Character): boolean {
 }
 
 function buildDailyRoutine(world: WorldState, character: Character, tick: number): DailyRoutine {
-  const settlement = world.settlements.find(item => item.id === character.settlementId)!;
+  const expedition = activeExpeditionForCharacter(world, character.id);
+  if (expedition) return expeditionDailyRoutine(world, character, expedition, tick);
+  const settlement = world.settlements.find(item => item.id === character.settlementId);
+  if (!settlement) return strandedDailyRoutine(world, character, tick);
   const home = character.homeBuildingId ? world.buildings.find(item => item.id === character.homeBuildingId) : undefined;
   const work = character.workplaceBuildingId ? world.buildings.find(item => item.id === character.workplaceBuildingId) : undefined;
   const buildings = world.buildings.filter(item => item.settlementId === settlement.id);
@@ -321,6 +333,43 @@ function buildDailyRoutine(world: WorldState, character: Character, tick: number
   else night = stopInSettlement(world, character, settlement, 'night', 'ночует на улице или в общем приюте', 'street');
 
   return { characterId: character.id, tick, year: world.year, month: world.month, stops: [morning, day, evening, night] };
+}
+
+
+function expeditionDailyRoutine(world: WorldState, character: Character, expedition: SettlementExpedition, tick: number): DailyRoutine {
+  const size = world.config.localMapSize ?? 128;
+  const center = Math.floor(size / 2);
+  const stop = (phase: DayPhase, activity: string, offset: number): DailyRoutineStop => {
+    const seed = hashSeed(`${world.config.seed}:экспедиция-распорядок:${expedition.id}:${character.id}:${phase}:${world.year}:${world.month}`);
+    return {
+      phase,
+      activity,
+      placeKind: phase === 'night' ? 'street' : 'public',
+      placeLabel: expedition.status === 'camped' ? `Лагерь основателей №${expedition.id}` : `Экспедиция основателей №${expedition.id}`,
+      settlementId: 0,
+      globalX: expedition.currentX,
+      globalY: expedition.currentY,
+      localX: Math.max(4, Math.min(size - 5, center + (seed % (offset * 2 + 1)) - offset)),
+      localY: Math.max(4, Math.min(size - 5, center + (Math.floor(seed / 101) % (offset * 2 + 1)) - offset)),
+    };
+  };
+  const traveling = expedition.status === 'traveling' || expedition.status === 'returning';
+  const morning = stop('morning', traveling ? 'собирает лагерь, проверяет припасы и готовится к переходу' : 'просыпается в лагере и распределяет воду и еду', 7);
+  const day = stop('day', traveling ? 'идёт по маршруту вместе с переселенцами' : character.age >= 14 ? 'строит жильё, расчищает землю и готовит первые поля' : 'остаётся рядом с семьями в лагере', traveling ? 10 : 14);
+  const evening = stop('evening', traveling ? 'ставит палатки, готовит пищу и чинит снаряжение' : 'возвращается к кострам после работы на месте будущего поселения', 9);
+  const night = stop('night', 'спит в палатке под дежурством взрослых', 6);
+  return { characterId: character.id, tick, year: world.year, month: world.month, stops: [morning, day, evening, night] };
+}
+
+function strandedDailyRoutine(world: WorldState, character: Character, tick: number): DailyRoutine {
+  const size = world.config.localMapSize ?? 128;
+  const x = 5 + hashSeed(`${world.config.seed}:нет-поселения:${character.id}:x`) % Math.max(1, size - 10);
+  const y = 5 + hashSeed(`${world.config.seed}:нет-поселения:${character.id}:y`) % Math.max(1, size - 10);
+  const stop = (phase: DayPhase): DailyRoutineStop => ({
+    phase, activity: 'пытается добраться до ближайшего поселения', placeKind: 'street', placeLabel: 'вне постоянного поселения', settlementId: 0,
+    globalX: 0, globalY: 0, localX: x, localY: y,
+  });
+  return { characterId: character.id, tick, year: world.year, month: world.month, stops: DAY_PHASES.map(stop) };
 }
 
 function workActivity(character: Character): string {
@@ -468,31 +517,32 @@ function createRoutineEvents(world: WorldState, rng: RNG, indexes: WorldIndexes,
     const evening = routine.stops.find(stop => stop.phase === 'evening')!;
     advanceGoalFromRoutine(world, character, day, evening, elapsedMonths);
     const roll = hashSeed(`${world.config.seed}:личное-событие:${routine.tick}:${character.id}`) % 100;
+    const eventSettlementId = activeExpeditionForCharacter(world, character.id)?.originSettlementId ?? character.settlementId;
 
     if (character.health < 48 && roll < 65) {
-      addPersonalEvent(world, character.id, [], 'day', 'health', `${character.name} провёл день в слабости`, `${day.placeLabel}: здоровье мешало обычным делам.`, character.settlementId, [{ kind: 'character', id: character.id }], 1);
+      addPersonalEvent(world, character.id, [], 'day', 'health', `${character.name} провёл день в слабости`, `${day.placeLabel}: здоровье мешало обычным делам.`, eventSettlementId, [{ kind: 'character', id: character.id }], 1);
       continue;
     }
     if (character.needs.hunger > 55 && roll < 72) {
-      addPersonalEvent(world, character.id, [], 'evening', 'need', `${character.name} остался голодным`, 'Денег или запасов не хватило на нормальную вечернюю еду.', character.settlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 1);
+      addPersonalEvent(world, character.id, [], 'evening', 'need', `${character.name} остался голодным`, 'Денег или запасов не хватило на нормальную вечернюю еду.', eventSettlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 1);
       continue;
     }
     if (day.placeKind === 'work' && day.interiorFixtureId && roll < Math.min(55, 13 * elapsedMonths)) {
       const skill = character.skills[character.profession] ?? 0;
       character.skills[character.profession] = Math.min(100, Math.round((skill + .2 + rng.next() * .6) * 100) / 100);
-      addPersonalEvent(world, character.id, [], 'day', 'work', `${character.name} хорошо справился с работой`, `${day.activity}. Навык постепенно вырос.`, character.settlementId, day.buildingId ? [{ kind: 'building', id: day.buildingId }] : [], 0);
+      addPersonalEvent(world, character.id, [], 'day', 'work', `${character.name} хорошо справился с работой`, `${day.activity}. Навык постепенно вырос.`, eventSettlementId, day.buildingId ? [{ kind: 'building', id: day.buildingId }] : [], 0);
       continue;
     }
     if (evening.placeKind === 'tavern' && roll < 42) {
-      addPersonalEvent(world, character.id, [], 'evening', 'routine', `${character.name} провёл вечер в заведении`, `${evening.placeLabel}: еда, разговоры и местные новости.`, character.settlementId, evening.establishmentId ? [{ kind: 'establishment', id: evening.establishmentId }] : [], 0);
+      addPersonalEvent(world, character.id, [], 'evening', 'routine', `${character.name} провёл вечер в заведении`, `${evening.placeLabel}: еда, разговоры и местные новости.`, eventSettlementId, evening.establishmentId ? [{ kind: 'establishment', id: evening.establishmentId }] : [], 0);
       continue;
     }
     if (evening.placeKind === 'temple' && roll < 48) {
-      addPersonalEvent(world, character.id, [], 'evening', 'faith', `${character.name} посетил храм`, `${evening.placeLabel}: молитва и разговоры с прихожанами.`, character.settlementId, evening.buildingId ? [{ kind: 'building', id: evening.buildingId }] : [], 0);
+      addPersonalEvent(world, character.id, [], 'evening', 'faith', `${character.name} посетил храм`, `${evening.placeLabel}: молитва и разговоры с прихожанами.`, eventSettlementId, evening.buildingId ? [{ kind: 'building', id: evening.buildingId }] : [], 0);
       continue;
     }
     if (evening.placeKind === 'home' && character.childIds.length && roll < 30) {
-      addPersonalEvent(world, character.id, character.childIds.slice(0, 3), 'evening', 'family', `${character.name} провёл вечер с семьёй`, 'Домочадцы ели вместе и обсуждали дела дома.', character.settlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 0);
+      addPersonalEvent(world, character.id, character.childIds.slice(0, 3), 'evening', 'family', `${character.name} провёл вечер с семьёй`, 'Домочадцы ели вместе и обсуждали дела дома.', eventSettlementId, character.householdId ? [{ kind: 'household', id: character.householdId }] : [], 0);
     }
   }
 }
@@ -525,6 +575,7 @@ function advanceGoalFromRoutine(
   goal.updatedTick = worldTick(world);
   const crossed = [25, 50, 75, 100].find(value => before < value && goal.progress >= value);
   if (!crossed) return;
+  const eventSettlementId = activeExpeditionForCharacter(world, character.id)?.originSettlementId ?? character.settlementId;
   addPersonalEvent(
     world,
     character.id,
@@ -533,7 +584,7 @@ function advanceGoalFromRoutine(
     'goal',
     crossed >= 100 ? `${character.name} достиг важной жизненной цели` : `${character.name} продвинулся к своей цели`,
     `${goal.reason}. Прогресс: ${Math.round(goal.progress)}%.`,
-    character.settlementId,
+    eventSettlementId,
     [{ kind: 'character', id: character.id }, ...(goal.targetRef ? [goal.targetRef] : [])],
     crossed >= 100 ? 2 : 1,
   );

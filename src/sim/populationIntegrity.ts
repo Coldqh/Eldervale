@@ -7,6 +7,8 @@ export function populationIntegrityIssues(world: WorldState): string[] {
   const buildingById = new Map(world.buildings.map(item => [item.id, item]));
   const householdById = new Map(world.households.map(item => [item.id, item]));
   const establishmentById = new Map(world.establishments.map(item => [item.id, item]));
+  const activeExpeditionByCharacter = new Map<number, number>();
+  for (const expedition of world.settlementExpeditions ?? []) if (['forming', 'traveling', 'camped', 'returning'].includes(expedition.status)) for (const characterId of expedition.memberIds) activeExpeditionByCharacter.set(characterId, expedition.id);
 
   for (const settlement of world.settlements) {
     const residents = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
@@ -33,7 +35,8 @@ export function populationIntegrityIssues(world: WorldState): string[] {
     if (memberSettlement !== undefined && household.settlementId !== memberSettlement) {
       issues.push(`Домохозяйство №${household.id}: поселение семьи ${household.settlementId}, поселение членов ${memberSettlement}`);
     }
-    if (!settlementById.has(household.settlementId)) issues.push(`Домохозяйство №${household.id}: отсутствует поселение ${household.settlementId}`);
+    const travelingHousehold = household.settlementId === 0 && members.length > 0 && members.every(member => activeExpeditionByCharacter.has(member.id));
+    if (!settlementById.has(household.settlementId) && !travelingHousehold) issues.push(`Домохозяйство №${household.id}: отсутствует поселение ${household.settlementId}`);
     if (household.homeBuildingId !== undefined) {
       const home = buildingById.get(household.homeBuildingId);
       if (!home) issues.push(`Домохозяйство №${household.id}: отсутствует дом ${household.homeBuildingId}`);

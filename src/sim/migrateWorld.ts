@@ -27,17 +27,18 @@ import { initializeCultureSystem } from './cultureSystem';
 import { initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
 import { normalizeSettlementLayouts } from './cityMorphology';
+import { initializeSettlementLifecycle } from './settlementLifecycle';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-28`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-29`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 28;
+  localized.version = 29;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -70,6 +71,7 @@ export function migrateWorld(input: unknown): WorldState {
   localized.settlementKnowledge ??= [];
   localized.cultures ??= [];
   localized.civilizations ??= [];
+  localized.settlementExpeditions ??= [];
   localized.languages ??= [];
   localized.religions ??= [];
   localized.settlementCultures ??= [];
@@ -117,6 +119,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 22) localized.simulation.battleSystemVersion = undefined;
   if (sourceVersion < 23) localized.simulation.cultureSystemVersion = undefined;
   if (sourceVersion < 27) localized.simulation.civilizationSystemVersion = undefined;
+  if (sourceVersion < 29) localized.simulation.settlementLifecycleVersion = undefined;
   localized.history ??= {
     engineVersion: 1, generatedYears: localized.config.historyYears ?? localized.year ?? 1, eras: [],
     landmarkEventIds: [], fallenRealms: [], compressedEventCount: 0, logicWarnings: [],
@@ -161,6 +164,7 @@ export function migrateWorld(input: unknown): WorldState {
     settlement.buildingIds ??= [];
     settlement.householdIds ??= [];
     settlement.establishmentIds ??= [];
+    settlement.politicalStatus ??= settlement.foundingExpeditionId ? 'frontier' : 'integrated';
     settlement.economy ??= { currency: 'крона', coinSupply: Math.max(100, settlement.population * 12), priceIndex: 1, wageIndex: 1, rentIndex: 1, taxRate: .08, prices: {}, supply: {}, demand: {}, imports: {}, exports: {}, lastMonthlyTrade: 0, bankruptcies: 0 };
     settlement.livestock ??= { куры: Math.round(settlement.population / 8), козы: Math.round(settlement.population / 18), лошади: Math.round(settlement.population / 45) };
     for (const district of settlement.districts) {
@@ -284,6 +288,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.civilization = Math.max(0, ...localized.civilizations.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.settlement = Math.max(0, ...localized.settlements.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.settlementExpedition = Math.max(0, ...localized.settlementExpeditions.map((item: any) => item.id ?? 0)) + 1;
 
   normalizeKingdomCapitals(localized);
   normalizeSettlementLayouts(localized as WorldState);
@@ -309,6 +315,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeBattleSystem(localized as WorldState);
   initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
   initializeCivilizationSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-цивилизации-и-технологии-v1`));
+  initializeSettlementLifecycle(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);
 
   for (const effect of localized.localMapChanges) { effect.month ??= 1; }

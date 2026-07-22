@@ -1,6 +1,6 @@
 import type { Character, EntityRef, Kingdom, Monster, Relationship, Settlement, SimulationPhaseProfile, TradeRoute, War, WorldEvent, WorldState, CausalEventInput } from '../types';
 import { RNG } from './rng';
-import { personName, placeName } from './names';
+import { personName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
 import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems } from './materialEconomy';
@@ -33,6 +33,7 @@ import { advanceRaceDemography, initializeRaceDemography } from './raceDemograph
 import { applyInteriorMonthlyEffects } from './interiors';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
+import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -724,26 +725,6 @@ function writeBooks(world: WorldState, rng: RNG): void {
   });
 }
 
-function restoreAndFound(world: WorldState, rng: RNG): void {
-  if (world.month !== 3) return;
-  for (const settlement of world.settlements) {
-    if (settlement.population <= 3 && !settlement.history.some(line => line.includes('окончательно опустел'))) {
-      settlement.history.push(`В ${world.year} году поселение окончательно опустело и стало руинами.`);
-      const dungeonId = Math.max(0, ...world.dungeons.map(dungeon => dungeon.id)) + 1;
-      world.dungeons.push({
-        id: dungeonId, name: `Руины ${settlement.name}`, x: settlement.x, y: settlement.y, origin: 'покинутое поселение', purpose: 'бывшие дома, склады и укрепления', builtYear: settlement.foundedYear,
-        danger: rng.int(2, 7), depth: 1, currentInhabitants: rng.pick(['разбойники', 'дикие звери', 'нежить', 'никто']), ownerKingdomId: settlement.kingdomId, discovered: true, artifactIds: [], history: [...settlement.history],
-      });
-      world.tiles[settlement.y * world.config.width + settlement.x]!.dungeonId = dungeonId;
-      for (let index = 0; index < 16; index += 1) addLocalEffect(world, settlement.x, settlement.y, 'rubble', `Руины ${settlement.name}`, rng, { kind: 'dungeon', id: dungeonId });
-      addEvent(world, {
-        kind: 'settlement', title: `${settlement.name} стал руинами`, description: `Последние жители покинули поселение.`, cause: settlement.shortages.length ? 'голод и разрушения' : 'война, упадок и отток людей',
-        consequences: ['на карте появились руины', 'здания могут занять чудовища или разбойники'], entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'dungeon', id: dungeonId }], importance: 4,
-      });
-    }
-  }
-}
-
 
 function advanceHousing(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   for (const settlement of world.settlements) {
@@ -916,7 +897,7 @@ export function advanceOneMonth(
   if (!fastForward || world.month === 1 || world.armies.some(army => army.status !== 'garrison' && army.status !== 'recovering')) runPhase(engine, 'Полевые лагеря, отдельные солдаты и походные колонны', onPhase, () => advancePhysicalArmySystem(world, rng, indexes));
 
   if (schedule.runBooks) writeBooks(world, rng);
-  if (schedule.runSettlementLifecycle) restoreAndFound(world, rng);
+  runPhase(engine, 'Экспедиции, лагеря и основание поселений', onPhase, () => advanceSettlementLifecycle(world, rng, indexes, { allowFormation: schedule.runSettlementLifecycle, elapsedMonths: monthStep }));
 
   // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
   ensureEstablishmentOwners(world, indexes);
@@ -953,6 +934,7 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeRaceDemography(world);
   synchronizeEmploymentLinks(world);
   initializeCivilizationSystem(world);
+  initializeSettlementLifecycle(world);
   initializeCitySimulation(world);
 }
 

@@ -65,6 +65,21 @@ export function transferKingdomTerritory(
   return transferred;
 }
 
+
+export function establishSettlementTerritory(
+  world: WorldState,
+  settlement: Settlement,
+  kingdomId: number,
+  year: number,
+  month: number,
+): boolean {
+  const tile = tileAt(world, settlement.x, settlement.y);
+  if (!tile || tile.terrain === 'ocean') return false;
+  if (tile.kingdomId !== undefined && tile.kingdomId !== kingdomId) return false;
+  if (tile.kingdomId === kingdomId) return true;
+  return claim(world, tile, kingdomId, year, month, 'мирное освоение', settlement.id);
+}
+
 export function captureTerritoryAroundSettlement(
   world: WorldState,
   target: Settlement,

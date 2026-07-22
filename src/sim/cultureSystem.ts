@@ -173,8 +173,11 @@ function profileFor(world: WorldState, character: Character, rng: RNG): Characte
   const culture = world.cultures.find(item => item.id === cultureId) ?? world.cultures[0]!;
   const religionId = settlementState?.religionShares.find((_, index) => index > 0 && rng.chance(.13))?.id
     ?? settlementState?.dominantReligionId ?? kingdom?.religionId ?? world.religions[0]?.id ?? 1;
-  const settlement = world.settlements.find(item => item.id === character.settlementId)!;
-  const literacy = baseLiteracy(character, settlement);
+  const expedition = character.expeditionId ? world.settlementExpeditions?.find(item => item.id === character.expeditionId) : undefined;
+  const settlement = world.settlements.find(item => item.id === character.settlementId)
+    ?? (expedition ? world.settlements.find(item => item.id === expedition.originSettlementId) : undefined)
+    ?? world.settlements[0];
+  const literacy = settlement ? baseLiteracy(character, settlement) : 0;
   const languages = [{ languageId: culture.languageId, fluency: 100 }];
   if (['merchant', 'scribe', 'priest'].includes(character.profession) && world.languages.length > 1 && rng.chance(.48)) {
     const foreign = rng.pick(world.languages.filter(language => language.id !== culture.languageId));

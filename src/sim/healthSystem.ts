@@ -333,7 +333,7 @@ function startPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes): v
 
 function detectPhysicalInjuries(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
   const injured = world.characters
-    .filter(character => character.alive && character.health < 62 && !character.healthProfile!.activeConditionIds.some(id => world.healthConditions.find(item => item.id === id)?.kind === 'травма'))
+    .filter(character => character.alive && character.settlementId > 0 && character.health < 62 && !character.healthProfile!.activeConditionIds.some(id => world.healthConditions.find(item => item.id === id)?.kind === 'травма'))
     .sort((a, b) => a.health - b.health || a.id - b.id)
     .slice(0, 40);
   for (const character of injured) {
