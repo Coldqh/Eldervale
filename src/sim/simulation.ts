@@ -181,7 +181,13 @@ function addRelationship(world: WorldState, indexes: WorldIndexes, a: Character,
   indexRelationship(indexes, relationship);
 }
 
-function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+export interface PopulationAdvanceOptions {
+  mortalityScale?: number;
+  hungerRiskScale?: number;
+  familyFormationScale?: number;
+}
+
+export function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes, options: PopulationAdvanceOptions = {}): void {
   const deaths: { character: Character; cause: string; settlement?: Settlement }[] = [];
   for (const character of world.characters) {
     character.age = Math.max(0, world.year - character.birthYear);
@@ -191,12 +197,13 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
       character.workplace = workplaceFor(character.profession);
     }
     const settlement = indexes.settlementById.get(character.settlementId);
-    const hungerRisk = settlement?.shortages.includes('пища') ? .028 : 0;
+    const hungerRisk = settlement?.shortages.includes('пища') ? .028 * Math.max(0, options.hungerRiskScale ?? 1) : 0;
     const speciesAge = character.species === 'elf' ? character.age / 2.8 : character.species === 'dwarf' ? character.age / 1.45 : character.species === 'orc' ? character.age / .82 : character.age;
     const mortality = speciesAge < 2 ? .006 : speciesAge < 45 ? .0015 : speciesAge < 65 ? .007 : speciesAge < 82 ? .034 : speciesAge < 96 ? .11 : .28;
     const frailtyRisk = (character.healthProfile?.frailty ?? 20) / 5000;
     const healthRisk = Math.max(0, 55 - character.health) / 2200;
-    if (rng.chance(mortality + hungerRisk + frailtyRisk + healthRisk)) {
+    const chronicRisk = (mortality + frailtyRisk + healthRisk) * Math.max(0, options.mortalityScale ?? 1);
+    if (rng.chance(chronicRisk + hungerRisk)) {
       const activeCondition = character.healthProfile?.activeConditionIds.map(id => world.healthConditions.find(item => item.id === id)).find(item => item && (item.status === 'активно' || item.status === 'выздоровление'));
       deaths.push({ character, cause: hungerRisk ? 'голод и истощение' : activeCondition?.name ?? (speciesAge >= 65 ? 'старость и ослабление организма' : 'внезапное ухудшение здоровья'), settlement });
     }
@@ -217,18 +224,22 @@ function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes): 
     const localResidents = residents(indexes, settlement.id);
     settlement.population = localResidents.length;
     const adults = localResidents.filter(character => character.age >= 18 && character.age <= 48);
-    const unmarried = adults.filter(character => !character.spouseId && character.age <= 60);
-    if (unmarried.length >= 2 && rng.chance(.2)) {
+    const familyFormationScale = Math.max(0, options.familyFormationScale ?? 1);
+    const attempts = Math.max(1, Math.min(8, Math.ceil(familyFormationScale)));
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const unmarried = adults.filter(character => !character.spouseId && character.age <= 60);
+      if (unmarried.length < 2 || !rng.chance(Math.min(.85, .2 * familyFormationScale))) break;
       const a = rng.pick(unmarried);
-      const candidates = unmarried.filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24);
-      if (candidates.length) {
-        const b = rng.pick(candidates);
-        a.spouseId = b.id;
-        b.spouseId = a.id;
-        addRelationship(world, indexes, a, b, 'любовь', rng.int(45, 92), `брак в ${settlement.name}`);
-        a.biography.push(`В ${world.year} году вступил в брак с ${b.name}.`);
-        b.biography.push(`В ${world.year} году вступил в брак с ${a.name}.`);
-      }
+      const compatible = unmarried.filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24);
+      const reproductive = compatible.filter(character => character.sex !== a.sex);
+      const candidates = reproductive.length ? reproductive : compatible;
+      if (!candidates.length) break;
+      const b = rng.pick(candidates);
+      a.spouseId = b.id;
+      b.spouseId = a.id;
+      addRelationship(world, indexes, a, b, 'любовь', rng.int(45, 92), `брак в ${settlement.name}`);
+      a.biography.push(`В ${world.year} году вступил в брак с ${b.name}.`);
+      b.biography.push(`В ${world.year} году вступил в брак с ${a.name}.`);
     }
   }
 }
@@ -831,7 +842,7 @@ function runPhase<T>(engine: SimulationEngine, phase: string, onPhase: ((phase: 
 export function advanceOneMonth(
   engine: SimulationEngine,
   onPhase?: (phase: string) => void,
-  options: { fastForward?: boolean; monthStep?: number; deferCitySimulation?: boolean } = {},
+  options: { fastForward?: boolean; monthStep?: number; deferCitySimulation?: boolean; historicalPopulation?: boolean } = {},
 ): number {
   const { world, indexes } = engine;
   const fastForward = Boolean(options.fastForward);
@@ -853,13 +864,13 @@ export function advanceOneMonth(
   if (schedule.economySettlementIds.size) runPhase(engine, 'Поселения и торговые пути', onPhase, () => advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds));
 
   if (schedule.runPopulation) {
-    runPhase(engine, 'Жители, семьи и наследование', onPhase, () => advancePopulation(world, rng, indexes));
+    runPhase(engine, 'Жители, семьи и наследование', onPhase, () => advancePopulation(world, rng, indexes, options.historicalPopulation ? { mortalityScale: .25, hungerRiskScale: .05, familyFormationScale: 4 } : undefined));
     rebuildRelationshipIndexes(indexes, world.relationships);
   }
   if (schedule.runHousing) {
     runPhase(engine, 'Строительство и переселения', onPhase, () => advanceHousing(world, rng, indexes));
   }
-  runPhase(engine, 'Здоровье, болезни, беременность и лечение', onPhase, () => advanceHealthSystem(world, rng, indexes, { fastForward, elapsedMonths: monthStep }));
+  runPhase(engine, 'Здоровье, болезни, беременность и лечение', onPhase, () => advanceHealthSystem(world, rng, indexes, { fastForward, elapsedMonths: monthStep, demographyOnly: options.historicalPopulation }));
 
   if (schedule.ecologySettlementIds.size || schedule.runSeasonalEcology) runPhase(engine, schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы', onPhase, () => advanceEcology(world, rng, indexes, {
     settlementIds: schedule.ecologySettlementIds, activeSettlementIds: schedule.activeSettlementIds, updateAnimals: schedule.runSeasonalEcology,
@@ -927,6 +938,7 @@ export interface WorldSystemAdvanceOptions {
   monthStep?: number;
   forceCharacterIds?: readonly number[];
   onPhase?: (phase: string) => void;
+  historicalPopulation?: boolean;
 }
 
 export function initializeWorldSystems(world: WorldState): void {
@@ -967,7 +979,7 @@ export function advanceWorldSystems(
   const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
   const onPhase = options.onPhase;
 
-  advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true });
+  advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true, historicalPopulation: options.historicalPopulation });
 
   onPhase?.('Климат, сезоны и природное давление');
   advanceClimateSystem(engine.world, { elapsedMonths: monthStep });

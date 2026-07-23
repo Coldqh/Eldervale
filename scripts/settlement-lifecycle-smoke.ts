@@ -30,8 +30,8 @@ const config = {
 };
 
 const world = generateHistoricalWorld(config);
-assert.equal(world.version, 30, 'новый мир должен использовать схему 30');
-assert.deepEqual(world.settlementExpeditions, [], 'сгенерированный мир не должен начинаться с выдуманных активных экспедиций');
+assert.equal(world.version, 31, 'новый мир должен использовать схему 31');
+assert.ok(!world.settlementExpeditions.some(item => ['forming', 'traveling', 'camped', 'returning'].includes(item.status)), 'сгенерированный мир не должен оставлять незавершённые исторические экспедиции');
 const baselineIntegrityErrors = new Set(inspectWorldIntegrity(world).errors);
 const returnWorld = structuredClone(world);
 const automaticWorld = structuredClone(world);

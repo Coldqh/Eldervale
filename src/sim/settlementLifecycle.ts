@@ -856,8 +856,8 @@ export function settlementLifecycleIntegrityIssues(world: WorldState): string[] 
     if (expeditionIds.has(expedition.id)) issues.push(`Экспедиция №${expedition.id}: повтор идентификатора`);
     expeditionIds.add(expedition.id);
     if (!settlementIds.has(expedition.originSettlementId)) issues.push(`Экспедиция №${expedition.id}: отсутствует исходное поселение`);
-    if (!world.kingdoms.some(item => item.id === expedition.sponsorKingdomId)) issues.push(`Экспедиция №${expedition.id}: отсутствует государство-покровитель`);
-    if (!characterById.has(expedition.leaderCharacterId)) issues.push(`Экспедиция №${expedition.id}: отсутствует лидер`);
+    if (ACTIVE_STATUSES.has(expedition.status) && !world.kingdoms.some(item => item.id === expedition.sponsorKingdomId)) issues.push(`Экспедиция №${expedition.id}: у активной группы отсутствует государство-покровитель`);
+    if (ACTIVE_STATUSES.has(expedition.status) && !characterById.has(expedition.leaderCharacterId)) issues.push(`Экспедиция №${expedition.id}: у активной группы отсутствует лидер`);
     if (!expedition.route.length) issues.push(`Экспедиция №${expedition.id}: отсутствует маршрут`);
     if (expedition.routeIndex < 0 || expedition.routeIndex >= Math.max(1, expedition.route.length)) issues.push(`Экспедиция №${expedition.id}: неверная позиция на маршруте`);
     const routePoint = expedition.route[expedition.routeIndex];
@@ -889,10 +889,9 @@ export function settlementLifecycleIntegrityIssues(world: WorldState): string[] 
       if (!expedition.foundedSettlementId || !settlementIds.has(expedition.foundedSettlementId)) issues.push(`Экспедиция №${expedition.id}: основанное поселение отсутствует`);
       const settlement = world.settlements.find(item => item.id === expedition.foundedSettlementId);
       if (settlement && settlement.foundingExpeditionId !== expedition.id) issues.push(`${settlement.name}: не хранит ссылку на экспедицию-основателя`);
-      if (settlement) for (const characterId of expedition.memberIds) {
-        const character = characterById.get(characterId);
-        if (character?.alive && character.settlementId !== settlement.id) issues.push(`${character.name}: живой основатель не числится в ${settlement.name}`);
-      }
+      // После основания семьи могут уехать, перейти в другую державу или умереть.
+      // Постоянный инвариант — связь поселения с экспедицией, а не вечное
+      // проживание каждого основателя в одной клетке.
     }
   }
   for (const character of world.characters) {

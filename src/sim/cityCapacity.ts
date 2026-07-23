@@ -50,11 +50,12 @@ export function calculateBuildingCapacityProfile(building: Building): BuildingCa
   };
 
   if (RESIDENTIAL.has(building.type)) {
-    const cellsPerBed = building.type === 'tenement' || building.type === 'barracks' ? 4
-      : building.type === 'castle' ? 8
-        : building.type === 'manor' ? 7
-          : building.type === 'monastery' ? 5
-            : 6;
+    const cellsPerBed = building.type === 'house' ? 4
+      : building.type === 'tenement' || building.type === 'barracks' ? 4
+        : building.type === 'castle' ? 8
+          : building.type === 'manor' ? 7
+            : building.type === 'monastery' ? 5
+              : 6;
     const beds = Math.max(1, Math.floor(functionalCells / cellsPerBed));
     if (building.type === 'house' || building.type === 'tenement' || building.type === 'manor') profile.householdBeds = beds;
     else profile.institutionalBeds = beds;

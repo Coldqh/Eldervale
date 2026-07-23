@@ -36,6 +36,7 @@ const DISEASES: DiseaseDefinition[] = [
 export interface HealthAdvanceOptions {
   fastForward?: boolean;
   elapsedMonths?: number;
+  demographyOnly?: boolean;
 }
 
 export function initializeHealthSystem(world: WorldState): void {
@@ -81,14 +82,16 @@ export function advanceHealthSystem(world: WorldState, rng: RNG, indexes: WorldI
   const elapsedMonths = Math.max(1, Math.floor(options.elapsedMonths ?? 1));
 
   processPregnancies(world, rng, indexes, tick);
-  processActiveConditions(world, rng, indexes, elapsedMonths);
-  processEpidemics(world, rng, indexes, elapsedMonths);
+  if (!options.demographyOnly) {
+    processActiveConditions(world, rng, indexes, elapsedMonths);
+    processEpidemics(world, rng, indexes, elapsedMonths);
+  }
 
   const seasonal = [1, 4, 7, 10].includes(world.month) || elapsedMonths >= 3;
   if (seasonal) {
-    seedDiseasePressure(world, rng, indexes);
-    startPregnancies(world, rng, indexes);
-    detectPhysicalInjuries(world, rng, indexes);
+    if (!options.demographyOnly) seedDiseasePressure(world, rng, indexes);
+    startPregnancies(world, rng, indexes, options.demographyOnly ? 4 : 1);
+    if (!options.demographyOnly) detectPhysicalInjuries(world, rng, indexes);
   }
   if (world.month === 1 || elapsedMonths >= 12) refreshLifeStages(world, tick);
   trimHealthCollections(world);
@@ -295,28 +298,28 @@ function seedDiseasePressure(world: WorldState, rng: RNG, indexes: WorldIndexes)
   }
 }
 
-function startPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+function startPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes, fertilityBoost = 1): void {
   const activePregnancies = world.pregnancies.filter(item => item.status === 'беременность').length;
   if (activePregnancies >= MAX_ACTIVE_PREGNANCIES) return;
   const tick = worldTick(world);
   for (const settlement of world.settlements) {
     const residents = indexes.residentsBySettlement.get(settlement.id) ?? [];
     const spareHousing = Math.max(0, settlement.residentialCapacity - settlement.population);
-    if (spareHousing <= 0 || settlement.food < 28) continue;
+    if (spareHousing <= 0 || settlement.food < (fertilityBoost > 1 ? 8 : 28)) continue;
     const candidates = residents
       .filter(character => character.alive && character.spouseId && character.id < character.spouseId! && !character.healthProfile!.pregnancyId)
       .map(character => [character, indexes.characterById.get(character.spouseId!)] as const)
       .filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]?.alive && pair[1]?.settlementId === settlement.id && !pair[1]?.healthProfile?.pregnancyId))
-      .filter(([a, b]) => a.sex !== b.sex && fertile(a) && fertile(b));
+      .filter(([a, b]) => a.sex !== b.sex && fertile(a, fertilityBoost > 1) && fertile(b, fertilityBoost > 1));
     if (!candidates.length) continue;
-    const target = Math.min(6, spareHousing, Math.ceil(candidates.length * .06));
+    const target = Math.min(Math.ceil(6 * fertilityBoost), spareHousing, Math.max(1, Math.ceil(candidates.length * .06 * fertilityBoost)));
     let created = 0;
     for (const [a, b] of candidates) {
       if (created >= target || world.pregnancies.filter(item => item.status === 'беременность').length >= MAX_ACTIVE_PREGNANCIES) break;
       const gestating = a.sex === 'female' ? a : b;
       const partner = gestating.id === a.id ? b : a;
       const fertility = (gestating.healthProfile!.fertility + partner.healthProfile!.fertility) / 2;
-      const chance = Math.min(.28, .025 + fertility / 750 + settlement.prosperity / 1600 - (settlement.shortages.length ? .04 : 0));
+      const chance = Math.min(.72, (.025 + fertility / 750 + settlement.prosperity / 1600 - (settlement.shortages.length ? .04 : 0)) * fertilityBoost);
       if (!rng.chance(chance)) continue;
       const pregnancy: Pregnancy = {
         id: world.nextIds.pregnancy++, parentAId: a.id, parentBId: b.id, gestatingParentId: gestating.id,
@@ -492,8 +495,8 @@ function weightedDisease(rng: RNG, cleanliness: number, water: number, crowding:
   })));
 }
 
-function fertile(character: Character): boolean {
-  if (!character.healthProfile || character.health < 45 || character.healthProfile.activeConditionIds.length > 1) return false;
+function fertile(character: Character, historical = false): boolean {
+  if (!character.healthProfile || (!historical && (character.health < 45 || character.healthProfile.activeConditionIds.length > 1))) return false;
   const [min, max] = character.species === 'elf' ? [24, 120] : character.species === 'dwarf' ? [22, 70] : character.species === 'orc' ? [16, 40] : [18, 44];
   return character.age >= min && character.age <= max;
 }

@@ -1010,16 +1010,51 @@ export interface HistoricalEraSummary {
   summary: string;
 }
 
+export interface GenesisSitePlan {
+  id: number;
+  originalSettlementId: number;
+  originalName: string;
+  x: number;
+  y: number;
+  terrain: Terrain;
+  resource: string;
+  sponsorKingdomId: number;
+  targetYear: number;
+  status: 'planned' | 'traveling' | 'founded' | 'failed';
+  attempts: number;
+  lastAttemptYear?: number;
+  expeditionId?: number;
+  foundedSettlementId?: number;
+  foundedYear?: number;
+}
+
+export interface LivedHistoryGenesisSummary {
+  version: 1;
+  initialSettlementIds: number[];
+  initialKingdomIds: number[];
+  initialPopulation: number;
+  plannedSiteCount: number;
+  foundedSiteCount: number;
+  failedSiteCount: number;
+  coarseSteps: number;
+  detailedMonths: number;
+  sitePlans: GenesisSitePlan[];
+  finalSettlementIds: number[];
+  formedKingdomIds: number[];
+  finalPopulation: number;
+}
+
 export interface HistoricalState {
-  engineVersion: 1 | 2;
+  engineVersion: 1 | 2 | 3;
   generatedYears: number;
   eras: HistoricalEraSummary[];
   landmarkEventIds: number[];
   fallenRealms: FallenRealm[];
   compressedEventCount: number;
   logicWarnings: string[];
-  historicalSimulationVersion?: 1;
+  historicalSimulationVersion?: 1 | 2;
   livedDecisionIds?: number[];
+  genesis?: LivedHistoryGenesisSummary;
 }
 
 export interface WorldSlotMeta {
@@ -1845,7 +1880,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 30;
+  version: 31;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

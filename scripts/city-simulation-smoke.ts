@@ -24,7 +24,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .15,
 });
 
-assert.equal(world.version, 30);
+assert.equal(world.version, 31);
 assert.equal(world.cityStates.length, world.settlements.length, 'каждое поселение должно иметь городской аудит');
 assert.ok(world.cityStates.every(state => state.land.freeBuildableCells >= 0), 'свободная земля не может быть отрицательной');
 assert.ok(world.buildings.every(building => building.cityCapacity?.version === 2), 'каждое здание должно иметь профиль функциональной вместимости');
@@ -89,6 +89,7 @@ assert.ok(crowdedUrban.problemRecords.some(problem => problem.status === 'active
 
 const automaticHousingRequest = crowdedUrban.projectQueue.find(request => request.triggerProblemIds.some(id => id.includes('overcrowding') || id.includes('housing-shortage')));
 assert.ok(automaticHousingRequest, 'реальный жилищный дефицит должен создать постоянную городскую заявку');
+if (!automaticHousingRequest) throw new Error('городская заявка не создана');
 assert.ok(automaticHousingRequest.expectedRelief.some(kind => kind === 'overcrowding' || kind === 'housing-shortage'), 'заявка должна хранить ожидаемый эффект');
 const developmentMonth = world.month;
 world.month = 2;
