@@ -1,4 +1,4 @@
-import { useMemo, type ChangeEvent, type MouseEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
 import type { EntityRef, WorldState } from '../types';
 import { WorldMap, type MapLayer } from './WorldMap';
 import { EntityPanel } from './EntityPanel';
@@ -11,6 +11,7 @@ import { DynastyHousesView, DynastyLegacyPanel } from './DynastyHousesView';
 import { ClimateCrisisView, SettlementClimatePanel } from './ClimateCrisisView';
 import { PopulationEntityPanel, PopulationView } from './PopulationView';
 import { CityView, SettlementCityPanel } from './CityView';
+import { AppIcon, type AppIconName } from './AppIcon';
 
 export type WorldView = 'map' | 'archive' | 'chronicle' | 'stories' | 'houses' | 'population' | 'city' | 'climate' | 'atlas' | 'local';
 export interface LocalPosition { x: number; y: number; level: number }
@@ -44,6 +45,14 @@ export function WorldWorkspace({
   onAdvanceToNextEvent: () => void;
   onAdvanceCharacter: (characterId: number) => void;
 }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMoreOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [moreOpen]);
+  const navigate = (next: WorldView) => { setView(next); setMoreOpen(false); };
   const stats = useMemo(() => ({
     population: world.characters.length,
     activeWars: world.wars.filter(war => war.active).length,
@@ -55,25 +64,24 @@ export function WorldWorkspace({
 
   return <div className="app-shell app-shell-v2">
     <header className="topbar topbar-v2">
-      <button className="brand" disabled={busy} onClick={() => setView('map')}><img src="./crest.svg" alt="" /><span><strong>Eldervale</strong><small>{world.name}</small></span></button>
-      <nav className="desktop-view-tabs" aria-label="Разделы мира">
-        <ViewButton active={view === 'map'} icon="⌾" label="Карта" disabled={busy} onClick={() => setView('map')} />
-        <ViewButton active={view === 'archive'} icon="⌕" label="Архив" disabled={busy} onClick={() => setView('archive')} />
-        <ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" disabled={busy} onClick={() => setView('chronicle')} />
-        <ViewButton active={view === 'stories'} icon="✦" label={`Истории${watchedCharacterIds.length ? ` ${watchedCharacterIds.length}` : ''}`} disabled={busy} onClick={() => setView('stories')} />
-        <ViewButton active={view === 'houses'} icon="◆" label="Роды" disabled={busy} onClick={() => setView('houses')} />
-        <ViewButton active={view === 'population'} icon="◌" label="Население" disabled={busy} onClick={() => setView('population')} />
-        <ViewButton active={view === 'city'} icon="▦" label="Города" disabled={busy} onClick={() => setView('city')} />
-        <ViewButton active={view === 'climate'} icon="≈" label="Климат" disabled={busy} onClick={() => setView('climate')} />
-        <ViewButton active={view === 'atlas'} icon="◫" label="Атлас" disabled={busy} onClick={() => setView('atlas')} />
-        {localPosition && <ViewButton active={view === 'local'} icon="▦" label="Местность" disabled={busy} onClick={() => setView('local')} />}
+      <button className="brand" disabled={busy} onClick={() => navigate('map')}><span className="brand-mark" aria-hidden="true">E</span><span><strong>Eldervale</strong><small>{world.name}</small></span></button>
+      <nav className="desktop-view-tabs" aria-label="Основные разделы мира">
+        <ViewButton active={view === 'map'} icon="map" label="Карта" disabled={busy} onClick={() => navigate('map')} />
+        <ViewButton active={view === 'stories'} icon="stories" label="Истории" badge={watchedCharacterIds.length || undefined} disabled={busy} onClick={() => navigate('stories')} />
+        <ViewButton active={view === 'archive'} icon="archive" label="Архив" disabled={busy} onClick={() => navigate('archive')} />
+        <ViewButton active={view === 'chronicle'} icon="chronicle" label="Хроника" disabled={busy} onClick={() => navigate('chronicle')} />
+        <ViewButton active={view === 'atlas'} icon="atlas" label="Атлас" disabled={busy} onClick={() => navigate('atlas')} />
+        <button className={secondaryViews.includes(view) ? 'active nav-more-button' : 'nav-more-button'} disabled={busy} onClick={() => setMoreOpen(value => !value)} aria-expanded={moreOpen} aria-controls="desktop-more-menu"><AppIcon name="more" /><span>Ещё</span></button>
+        {moreOpen && <div id="desktop-more-menu" className="nav-more-menu">
+          <SecondaryNavItems view={view} busy={busy} localPosition={localPosition} navigate={navigate} />
+        </div>}
       </nav>
       <div className="world-clock"><span>Год {world.year}</span><strong>{monthName(world.month)}</strong></div>
       <div className="top-actions">
-        <button className="ghost-button new-world-button" disabled={busy} onClick={onNewWorld} title="Создать новый мир"><span className="desktop-label">Новый мир</span><span className="mobile-label">＋</span></button>
-        <button className="icon-button" disabled={busy} onClick={onSettings} title="Настройки" aria-label="Настройки">⚙</button>
-        <button className="icon-button secondary-top-action" disabled={busy} onClick={onExport} title="Экспортировать мир" aria-label="Экспортировать мир">⇩</button>
-        <button className="icon-button secondary-top-action" disabled={busy} onClick={onImport} title="Импортировать мир" aria-label="Импортировать мир">⇧</button>
+        <button className="ghost-button new-world-button" disabled={busy} onClick={onNewWorld} title="Создать новый мир"><AppIcon name="plus" /><span className="desktop-label">Новый мир</span></button>
+        <button className="icon-button" disabled={busy} onClick={onSettings} title="Настройки" aria-label="Настройки"><AppIcon name="settings" /></button>
+        <button className="icon-button secondary-top-action" disabled={busy} onClick={onExport} title="Экспортировать мир" aria-label="Экспортировать мир"><AppIcon name="download" /></button>
+        <button className="icon-button secondary-top-action" disabled={busy} onClick={onImport} title="Импортировать мир" aria-label="Импортировать мир"><AppIcon name="upload" /></button>
       </div>
     </header>
 
@@ -107,19 +115,33 @@ export function WorldWorkspace({
       </section>}
     </main>
 
-    <nav className="mobile-nav"><ViewButton active={view === 'archive'} icon="⌕" label="Архив" disabled={busy} onClick={() => setView('archive')} /><ViewButton active={view === 'map' || view === 'atlas' || view === 'local'} icon="⌾" label="Карта" disabled={busy} onClick={() => setView('map')} /><ViewButton active={view === 'stories'} icon="✦" label="Истории" disabled={busy} onClick={() => setView('stories')} /><ViewButton active={view === 'houses'} icon="◆" label="Роды" disabled={busy} onClick={() => setView('houses')} /><ViewButton active={view === 'chronicle'} icon="▤" label="Хроника" disabled={busy} onClick={() => setView('chronicle')} /></nav>
+    <nav className="mobile-nav" aria-label="Основная навигация"><ViewButton active={view === 'map' || view === 'local'} icon="map" label="Карта" disabled={busy} onClick={() => navigate('map')} /><ViewButton active={view === 'stories'} icon="stories" label="Истории" badge={watchedCharacterIds.length || undefined} disabled={busy} onClick={() => navigate('stories')} /><ViewButton active={view === 'archive'} icon="archive" label="Архив" disabled={busy} onClick={() => navigate('archive')} /><ViewButton active={view === 'chronicle'} icon="chronicle" label="Хроника" disabled={busy} onClick={() => navigate('chronicle')} /><button className={moreOpen || secondaryViews.includes(view) ? 'active' : ''} disabled={busy} onClick={() => setMoreOpen(true)} aria-label="Открыть остальные разделы"><AppIcon name="more" /><span>Ещё</span></button></nav>
+    {moreOpen && <div className="mobile-more-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) setMoreOpen(false); }}><section className="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="Все разделы и действия"><header><div><span className="eyebrow">Навигация</span><strong>Весь мир</strong></div><button className="window-control" onClick={() => setMoreOpen(false)} aria-label="Закрыть"><AppIcon name="close" /></button></header><div className="mobile-more-grid"><SecondaryNavItems view={view} busy={busy} localPosition={localPosition} navigate={navigate} /></div><div className="mobile-more-actions"><button onClick={onNewWorld}><AppIcon name="plus" />Новый мир</button><button onClick={onSettings}><AppIcon name="settings" />Настройки</button><button onClick={onExport}><AppIcon name="download" />Экспорт</button><button onClick={onImport}><AppIcon name="upload" />Импорт</button></div></section></div>}
     {selected && <EntityWindow world={world} selected={selected} canGoBack={canGoBack} busy={busy} watched={selected.kind === 'character' && watchedCharacterIds.includes(selected.id)} onBack={onBackEntity} onClose={onCloseEntity} onSelect={onSelect} onOpenLocal={onOpenLocal} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} />}
   </div>;
 }
 
+
+const secondaryViews: WorldView[] = ['houses', 'population', 'city', 'climate', 'local'];
+function SecondaryNavItems({ view, busy, localPosition, navigate }: { view: WorldView; busy: boolean; localPosition?: LocalPosition; navigate: (view: WorldView) => void }) {
+  const items: { view: WorldView; icon: AppIconName; label: string; hint: string }[] = [
+    { view: 'houses', icon: 'houses', label: 'Роды', hint: 'Династии и наследие' },
+    { view: 'population', icon: 'population', label: 'Население', hint: 'Народы и переселения' },
+    { view: 'city', icon: 'city', label: 'Города', hint: 'Застройка и институты' },
+    { view: 'climate', icon: 'climate', label: 'Климат', hint: 'Кризисы и сезоны' },
+  ];
+  if (localPosition) items.push({ view: 'local', icon: 'local', label: 'Местность', hint: 'Последняя открытая клетка' });
+  return <>{items.map(item => <button key={item.view} className={view === item.view ? 'active' : ''} disabled={busy} onClick={() => navigate(item.view)}><AppIcon name={item.icon} /><span><strong>{item.label}</strong><small>{item.hint}</small></span><AppIcon name="chevron" size={15} /></button>)}</>;
+}
+
 const mapLayers: MapLayer[] = ['terrain', 'realms', 'danger', 'population', 'ecology', 'trade'];
-function ViewButton({ active, icon, label, disabled, onClick }: { active: boolean; icon: string; label: string; disabled?: boolean; onClick: () => void }) { return <button disabled={disabled} className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span>{label}</button>; }
+function ViewButton({ active, icon, label, badge, disabled, onClick }: { active: boolean; icon: AppIconName; label: string; badge?: number; disabled?: boolean; onClick: () => void }) { return <button disabled={disabled} className={active ? 'active' : ''} onClick={onClick}><AppIcon name={icon} /><span>{label}</span>{badge ? <b className="nav-badge">{badge}</b> : null}</button>; }
 function Stat({ value, label }: { value: string | number; label: string }) { return <div><strong>{value}</strong><span>{label}</span></div>; }
 function monthName(month: number) { return ['Глубокая зима', 'Поздняя зима', 'Оттепель', 'Посев', 'Зелень', 'Высокое солнце', 'Жатва', 'Золотой месяц', 'Туманы', 'Листопад', 'Первые морозы', 'Долгая ночь'][month - 1]; }
 function layerLabel(layer: MapLayer) { return ({ terrain: 'Земля', realms: 'Владения', danger: 'Опасность', population: 'Население', ecology: 'Природа', trade: 'Торговля' } as const)[layer]; }
 
 function EntityWindow({ world, selected, canGoBack, busy, watched, onBack, onClose, onSelect, onOpenLocal, onToggleWatch, onAdvanceCharacter }: { world: WorldState; selected: EntityRef; canGoBack: boolean; busy: boolean; watched: boolean; onBack: () => void; onClose: () => void; onSelect: (ref: EntityRef) => void; onOpenLocal: (x: number, y: number, level?: number) => void; onToggleWatch: (characterId: number) => void; onAdvanceCharacter: (characterId: number) => void }) {
-  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}>←</button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}>×</button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} />{selected.kind === 'character' && <><CharacterStoryPanel world={world} characterId={selected.id} watched={watched} busy={busy} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} onSelect={onSelect} /><PersonalLifePanel world={world} characterId={selected.id} /></>}{selected.kind === 'dynasty' && <DynastyLegacyPanel world={world} dynastyId={selected.id} onSelect={onSelect} />}{(selected.kind === 'settlement' || selected.kind === 'kingdom') && <PopulationEntityPanel world={world} entityRef={{ kind: selected.kind, id: selected.id }} />}{selected.kind === 'settlement' && <><SettlementCityPanel world={world} settlementId={selected.id} /><SettlementClimatePanel world={world} settlementId={selected.id} /></>}</div></section></div>;
+  return <div className="entity-window-backdrop" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-window" role="dialog" aria-modal="true" aria-label="Карточка объекта мира"><header className="entity-window-header"><div className="entity-window-nav"><button className="window-control" disabled={!canGoBack} onClick={onBack}><AppIcon name="back" /></button><span>Карточка мира</span></div><div className="entity-window-header-actions">{localCoordinates(world, selected) && <button className="entity-local-button" onClick={() => { const point = localCoordinates(world, selected); if (point) onOpenLocal(point.x, point.y); }}>Открыть местность</button>}<button className="window-control close-control" onClick={onClose}><AppIcon name="close" /></button></div></header><div className="entity-window-body"><EntityPanel world={world} selected={selected} onSelect={onSelect} />{selected.kind === 'character' && <><CharacterStoryPanel world={world} characterId={selected.id} watched={watched} busy={busy} onToggleWatch={onToggleWatch} onAdvanceCharacter={onAdvanceCharacter} onSelect={onSelect} /><PersonalLifePanel world={world} characterId={selected.id} /></>}{selected.kind === 'dynasty' && <DynastyLegacyPanel world={world} dynastyId={selected.id} onSelect={onSelect} />}{(selected.kind === 'settlement' || selected.kind === 'kingdom') && <PopulationEntityPanel world={world} entityRef={{ kind: selected.kind, id: selected.id }} />}{selected.kind === 'settlement' && <><SettlementCityPanel world={world} settlementId={selected.id} /><SettlementClimatePanel world={world} settlementId={selected.id} /></>}</div></section></div>;
 }
 
 function localCoordinates(world: WorldState, ref: EntityRef): { x: number; y: number } | undefined {

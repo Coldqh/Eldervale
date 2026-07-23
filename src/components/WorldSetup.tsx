@@ -2,41 +2,46 @@ import { useState } from 'react';
 import type { WorldConfig } from '../types';
 import { defaultConfig } from '../sim/generator';
 import { APP_VERSION } from '../version';
+import { AppIcon } from './AppIcon';
 
-const deviceProfiles: { label: string; hint: string; config: Partial<WorldConfig> }[] = [
-  { label: 'Телефон', hint: 'Быстрая генерация и меньше нагрев', config: { width: 46, height: 30, settlementCount: 24, populationScale: .58, historyYears: 240, localMapSize: 96, ecologyDensity: .8, huntingPressure: .85 } },
-  { label: 'Стандарт', hint: 'Оптимально для iPhone 14 Pro и ноутбука', config: { width: 54, height: 34, settlementCount: 30, populationScale: .72, historyYears: 320, localMapSize: 128, ecologyDensity: 1, huntingPressure: 1 } },
-  { label: 'Большой мир', hint: 'Больше территорий, людей и истории', config: { width: 68, height: 42, settlementCount: 42, populationScale: .92, historyYears: 480, localMapSize: 160, ecologyDensity: 1.2, huntingPressure: 1.1 } },
+const deviceProfiles: { id: string; label: string; hint: string; config: Partial<WorldConfig> }[] = [
+  { id: 'phone', label: 'Телефон', hint: 'Быстрая генерация и меньше нагрев', config: { width: 46, height: 30, settlementCount: 24, populationScale: .58, historyYears: 240, localMapSize: 96, ecologyDensity: .8, huntingPressure: .85 } },
+  { id: 'standard', label: 'Стандарт', hint: 'Оптимально для iPhone 14 Pro и ноутбука', config: { width: 54, height: 34, settlementCount: 30, populationScale: .72, historyYears: 320, localMapSize: 128, ecologyDensity: 1, huntingPressure: 1 } },
+  { id: 'large', label: 'Большой мир', hint: 'Больше территорий, людей и истории', config: { width: 68, height: 42, settlementCount: 42, populationScale: .92, historyYears: 480, localMapSize: 160, ecologyDensity: 1.2, huntingPressure: 1.1 } },
 ];
 
 export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { initial?: WorldConfig; onGenerate: (config: WorldConfig) => void; onClose?: () => void; onOpenSettings: () => void }) {
   const [config, setConfig] = useState<WorldConfig>(() => ({ ...(initial ?? defaultConfig), seed: randomWorldSeed() }));
+  const [selectedProfile, setSelectedProfile] = useState('standard');
   const set = <K extends keyof WorldConfig>(key: K, value: WorldConfig[K]) => setConfig(current => ({ ...current, [key]: value }));
-  const applyProfile = (profile: Partial<WorldConfig>) => setConfig(current => ({ ...current, ...profile }));
+  const applyProfile = (id: string, profile: Partial<WorldConfig>) => { setSelectedProfile(id); setConfig(current => ({ ...current, ...profile })); };
 
   return <div className="setup-screen">
-    <div className="setup-art">
-      <div className="crest-mark">E</div>
-      <p>СИМУЛЯТОР ЖИВОГО МИРА</p>
-      <h1>Eldervale</h1>
-      <span>Королевства рождаются, армии идут на войну, драконы жгут города, а каждый житель оставляет след.</span>
-    </div>
+    <aside className="setup-art">
+      <div className="setup-brand"><div className="crest-mark">E</div><div><p>СИМУЛЯТОР ЖИВОГО МИРА</p><h1>Eldervale</h1></div></div>
+      <span>Создай мир, который проживёт века по единым законам. Здесь города, знания и государства возникают из решений живых людей.</span>
+      <div className="setup-preview" aria-label="Сводка будущего мира">
+        <div className="setup-preview-map"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        <div className="setup-preview-copy"><small>Будущая хроника</small><strong>{config.historyYears} лет причинной истории</strong><span>{config.settlementCount} поселений · карта {config.width}×{config.height}</span></div>
+      </div>
+      <div className="setup-preview-grid"><span><b>{config.kingdomCount}</b> исходных держав</span><span><b>{Math.round(config.populationScale * 100)}%</b> масштаб населения</span><span><b>{Math.round(config.magic * 100)}%</b> насыщенность магией</span></div>
+    </aside>
 
     <div className="setup-panel">
       <div className="setup-heading">
         <div><span className="eyebrow">Создание мира</span><h2>Настрой первую эпоху</h2></div>
-        <div className="setup-heading-actions"><button className="icon-button" onClick={onOpenSettings} aria-label="Открыть настройки">⚙</button>{onClose && <button className="icon-button" onClick={onClose} aria-label="Закрыть настройки">×</button>}</div>
+        <div className="setup-heading-actions"><button className="icon-button" onClick={onOpenSettings} aria-label="Открыть настройки"><AppIcon name="settings" /></button>{onClose && <button className="icon-button" onClick={onClose} aria-label="Закрыть создание мира"><AppIcon name="close" /></button>}</div>
       </div>
 
       <div className="profile-grid">
-        {deviceProfiles.map(profile => <button key={profile.label} onClick={() => applyProfile(profile.config)}>
-          <strong>{profile.label}</strong><span>{profile.hint}</span>
+        {deviceProfiles.map(profile => <button className={selectedProfile === profile.id ? 'selected' : ''} aria-pressed={selectedProfile === profile.id} key={profile.id} onClick={() => applyProfile(profile.id, profile.config)}>
+          <AppIcon name={profile.id === 'phone' ? 'device' : 'world'} /><span><strong>{profile.label}</strong><small>{profile.hint}</small></span>{selectedProfile === profile.id && <i>Выбран</i>}
         </button>)}
       </div>
 
       <div className="seed-field-row">
         <label className="field compact-field"><span>Ключ мира</span><input value={config.seed} onChange={e => set('seed', e.target.value)} /></label>
-        <button type="button" onClick={() => set('seed', randomWorldSeed())}>Новый ключ</button>
+        <button type="button" onClick={() => set('seed', randomWorldSeed())}><AppIcon name="spark" />Новый ключ</button>
       </div>
 
       <div className="field-grid primary-settings">
@@ -67,7 +72,7 @@ export function WorldSetup({ initial, onGenerate, onClose, onOpenSettings }: { i
         <button onClick={() => setConfig({ ...defaultConfig, seed: `Тихие-королевства-${Date.now()}`, warlike: .18, monsterDensity: .5 })}>Тихие королевства</button>
       </div>
 
-      <button className="primary-button" onClick={() => onGenerate({ ...config, seed: config.seed.trim() || randomWorldSeed() })}>Сотворить Eldervale <span>→</span></button>
+      <button className="primary-button" onClick={() => onGenerate({ ...config, seed: config.seed.trim() || randomWorldSeed() })}>Сотворить Eldervale <AppIcon name="chevron" /></button>
       <p className="setup-note">Каждый житель получает имя и собственную запись жизни. Животные существуют популяциями, природные ресурсы восстанавливаются по сезонам, а локальная карта каждого квадрата имеет размер {config.localMapSize}×{config.localMapSize}. Версия приложения: {APP_VERSION}.</p>
     </div>
   </div>;

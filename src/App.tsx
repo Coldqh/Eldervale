@@ -10,6 +10,7 @@ import { forceUpdate } from './lib/appUpdate';
 import { useWorldController } from './hooks/useWorldController';
 import { useWatchedCharacters } from './hooks/useWatchedCharacters';
 import './styles.css';
+import './designSystem.css';
 
 export default function App() {
   const controller = useWorldController();

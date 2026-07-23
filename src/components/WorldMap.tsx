@@ -38,7 +38,11 @@ export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }
   }, [viewport]);
 
   useEffect(() => {
-    applyViewport({ zoom: 1, camera: { x: 0, y: 0 } });
+    const frame = window.requestAnimationFrame(() => {
+      const canvas = ref.current;
+      applyViewport({ zoom: canvas ? overviewZoom(canvas, world) : 1, camera: { x: 0, y: 0 } });
+    });
+    return () => window.cancelAnimationFrame(frame);
     // Сброс нужен только когда меняется сама сетка мира.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world.config.width, world.config.height]);
@@ -49,7 +53,10 @@ export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }
     const draw = () => drawWorldMap(canvas, world, layer, historicalState, viewportRef.current);
     draw();
     const observer = new ResizeObserver(() => {
-      const normalized = normalizeViewport(canvas, world, viewportRef.current);
+      const current = viewportRef.current;
+      const autoCentered = Math.abs(current.camera.x) < .01 && Math.abs(current.camera.y) < .01 && current.zoom <= 1.6;
+      const candidate = autoCentered ? { zoom: overviewZoom(canvas, world), camera: { x: 0, y: 0 } } : current;
+      const normalized = normalizeViewport(canvas, world, candidate);
       viewportRef.current = normalized;
       setViewport(normalized);
       drawWorldMap(canvas, world, layer, historicalState, normalized);
@@ -188,9 +195,18 @@ export function WorldMap({ world, layer, onSelect, historicalState, onOpenTile }
       <button onClick={() => { const point = centerClient(); zoomAt(point.x, point.y, viewportRef.current.zoom / 1.35); }} aria-label="Отдалить карту">−</button>
       <strong>{Math.round(viewport.zoom * 100)}%</strong>
       <button onClick={() => { const point = centerClient(); zoomAt(point.x, point.y, viewportRef.current.zoom * 1.35); }} aria-label="Приблизить карту">＋</button>
-      <button className="world-map-center" onClick={() => applyViewport({ zoom: 1, camera: { x: 0, y: 0 } })}>Центр</button>
+      <button className="world-map-center" onClick={() => { const canvas = ref.current; applyViewport({ zoom: canvas ? overviewZoom(canvas, world) : 1, camera: { x: 0, y: 0 } }); }}>Центр</button>
     </div>
   </div>;
+}
+
+
+function overviewZoom(canvas: HTMLCanvasElement, world: WorldState): number {
+  if (typeof window === 'undefined' || window.innerWidth > 820) return 1;
+  const box = canvas.getBoundingClientRect();
+  if (!box.width || !box.height) return 1;
+  const portraitPressure = box.height * world.config.width / Math.max(1, box.width * world.config.height);
+  return clamp(portraitPressure * .88, 1, 1.85);
 }
 
 function drawWorldMap(canvas: HTMLCanvasElement, world: WorldState, layer: MapLayer, historicalState: AtlasMapState | undefined, viewport: Viewport) {

@@ -4,6 +4,7 @@ import { armyStatusLabel, buildingTypeLabel, materialLabel, monsterSpeciesLabel,
 import { getTitle } from './EntityPanel';
 import { TextureIcon } from './TextureIcon';
 import { aggregateArchiveRows, type ArchiveCatalogRow } from '../lib/archiveCatalog';
+import { AppIcon } from './AppIcon';
 
 const groups: { kind: EntityKind; label: string }[] = [
   { kind: 'character', label: 'Живые личности' }, { kind: 'household', label: 'Домохозяйства' }, { kind: 'settlement', label: 'Поселения' }, { kind: 'building', label: 'Типы зданий' }, { kind: 'establishment', label: 'Типы заведений' }, { kind: 'item', label: 'Типы предметов' }, { kind: 'productionRecipe', label: 'Рецепты производства' }, { kind: 'field', label: 'Типы полей' }, { kind: 'constructionProject', label: 'Стройки' }, { kind: 'dynasty', label: 'Династии' }, { kind: 'kingdom', label: 'Государства' },
@@ -36,17 +37,20 @@ export function Encyclopedia({ world, onSelect }: { world: WorldState; onSelect:
     return listFor(world, kind).filter(item => !normalized || getTitle(world, { kind, id: item.id }).toLowerCase().includes(normalized)).slice(0, 220);
   }, [world, kind, query, aggregateRows]);
   return <div className="encyclopedia">
-    <div className="search-box"><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Найти имя, место или книгу…" /></div>
-    <div className="chip-row">{groups.map(group => <button className={kind === group.kind ? 'chip active' : 'chip'} key={group.kind} onClick={() => setKind(group.kind)}>{group.label}<small>{categoryCounts.get(group.kind) ?? 0}</small></button>)}</div>
-    <div className="entity-list">{rows.map(item => {
+    <div className="archive-tools"><label className="search-box"><AppIcon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Найти имя, место или книгу…" aria-label="Поиск по архиву" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Очистить поиск"><AppIcon name="close" size={15} /></button>}</label><div className="archive-result-count"><strong>{rows.length}</strong><span>{query ? 'совпадений' : 'объектов в разделе'}</span></div></div>
+    <div className="chip-row" role="tablist" aria-label="Категории архива">{groups.map(group => <button role="tab" aria-selected={kind === group.kind} className={kind === group.kind ? 'chip active' : 'chip'} key={group.kind} onClick={() => setKind(group.kind)}><span>{group.label}</span><small>{categoryCounts.get(group.kind) ?? 0}</small></button>)}</div>
+    {rows.length ? <div className="entity-list">{rows.map(item => {
       const aggregate = aggregateRows ? item as ArchiveCatalogRow : undefined;
       const id = aggregate?.representativeId ?? item.id;
       const ref: EntityRef = { kind, id };
+      const title = aggregate?.title ?? getTitle(world, ref);
+      const details = aggregate?.subtitle ?? subtitle(kind, item);
       return <button key={aggregate?.key ?? item.id} className="entity-card" onClick={() => onSelect(ref)}>
-        <TextureIcon kind={kind} subtype={aggregate?.subtype ?? (kind === 'monster' ? item.species : undefined)} className="entity-rune" />
-        <span><strong>{aggregate?.title ?? getTitle(world, ref)}</strong><small>{aggregate?.subtitle ?? subtitle(kind, item)}</small></span>
+        <div className="entity-card-visual"><TextureIcon kind={kind} subtype={aggregate?.subtype ?? (kind === 'monster' ? item.species : undefined)} className="entity-rune" /><span>{groups.find(group => group.kind === kind)?.label ?? 'Объект мира'}</span></div>
+        <span className="entity-card-body"><strong title={title}>{title}</strong><small>{details}</small></span>
+        <span className="entity-card-action">Открыть <AppIcon name="chevron" size={14} /></span>
       </button>;
-    })}</div>
+    })}</div> : <div className="empty-state archive-empty"><AppIcon name="search" size={28} /><strong>Ничего не найдено</strong><p>Попробуй другой запрос или выбери соседнюю категорию.</p></div>}
   </div>;
 }
 
