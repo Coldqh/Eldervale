@@ -6,6 +6,11 @@ import { appendCausalEvent } from './causality';
 import { initializeCultureSystem } from './cultureSystem';
 import { registerWorldEventKnowledge } from './knowledgeSystem';
 import { RNG } from './rng';
+import {
+  advanceTechnologyKnowledge, availableRecipesForSettlement as localAvailableRecipesForSettlement,
+  establishLocalTechnology, initializeTechnologyKnowledge, recipeAvailableToSettlement as localRecipeAvailableToSettlement,
+  selectDiscoverySettlement, synchronizeTechnologyRecipes, technologyKnowledgeIntegrityIssues,
+} from './technologyKnowledge';
 
 const BASELINE_TECHNOLOGIES = ['controlled-fire', 'oral-tradition'] as const;
 
@@ -235,22 +240,12 @@ export function civilizationForSettlement(world: WorldState, settlementId: numbe
   return settlement?.civilizationId ? world.civilizations.find(item => item.id === settlement.civilizationId) : undefined;
 }
 
-export function recipeAvailableToSettlement(world: WorldState, settlementId: number, recipe: ProductionRecipe): boolean {
-  if (!recipe.requiredTechnologyId) return true;
-  const civilization = civilizationForSettlement(world, settlementId);
-  return Boolean(civilization?.unlockedTechnologyIds.includes(recipe.requiredTechnologyId));
-}
+export const recipeAvailableToSettlement = localRecipeAvailableToSettlement;
 
-export function availableRecipesForSettlement(world: WorldState, settlementId: number, type?: EstablishmentType): ProductionRecipe[] {
-  return world.productionRecipes.filter(recipe => (!type || recipe.establishmentTypes.includes(type)) && recipeAvailableToSettlement(world, settlementId, recipe));
-}
+export const availableRecipesForSettlement = localAvailableRecipesForSettlement;
 
 export function synchronizeCivilizationRecipes(world: WorldState): void {
-  for (const establishment of world.establishments) {
-    const available = availableRecipesForSettlement(world, establishment.settlementId, establishment.type).map(recipe => recipe.id);
-    establishment.recipeIds = [...new Set(available)];
-  }
-  for (const civilization of world.civilizations) civilization.knownRecipeKeys = knownRecipeKeys(civilization);
+  synchronizeTechnologyRecipes(world);
 }
 
 export function initializeCivilizationSystem(world: WorldState, rng = new RNG(`${world.config.seed}:civilizations-v1`)): void {
@@ -270,8 +265,9 @@ export function initializeCivilizationSystem(world: WorldState, rng = new RNG(`$
     civilization.eraId = eraForCivilization(civilization).id;
     civilization.lastAdvancedYear = Math.max(civilization.lastAdvancedYear ?? world.year, world.year);
   }
-  synchronizeCivilizationRecipes(world);
   world.simulation.civilizationSystemVersion = 1;
+  initializeTechnologyKnowledge(world, new RNG(`${world.config.seed}:локальные-носители-знаний-v1`));
+  synchronizeCivilizationRecipes(world);
 }
 
 function candidateTechnologies(world: WorldState, civilization: Civilization): TechnologyDefinition[] {
@@ -295,7 +291,12 @@ function candidateTechnologies(world: WorldState, civilization: Civilization): T
 function recordTechnologyDiscovery(world: WorldState, civilization: Civilization, technology: TechnologyDefinition): void {
   const unlockedRecipes = CIVILIZATION_CONTENT.recipes.filter(recipe => recipe.requiredTechnologyId === technology.id).map(recipe => recipe.name);
   const unlockedResources = CIVILIZATION_CONTENT.resources.filter(resource => resource.requiredTechnologyId === technology.id).map(resource => resource.name);
-  const capital = world.settlements.find(item => item.id === civilization.capitalSettlementId);
+  const discoverySettlement = selectDiscoverySettlement(world, civilization.id, technology);
+  if (discoverySettlement) establishLocalTechnology(world, discoverySettlement.id, technology.id, 'discovery', {
+    mastery: 74,
+    reason: `В ${world.year} году местные мастера закрепили открытие «${technology.name}».`,
+  });
+  const capital = discoverySettlement ?? world.settlements.find(item => item.id === civilization.capitalSettlementId);
   const kingdom = capital ? world.kingdoms.find(item => item.id === capital.kingdomId) : civilizationKingdoms(world, civilization.id)[0];
   civilization.history.push(`В ${world.year} году освоена технология «${technology.name}».`);
   const event = appendCausalEvent(world, {
@@ -361,6 +362,7 @@ export function advanceCivilizationSystem(world: WorldState): void {
     }
     advanceCivilization(world, civilization, elapsedYears);
   }
+  advanceTechnologyKnowledge(world);
   synchronizeCivilizationRecipes(world);
 }
 
@@ -394,5 +396,6 @@ export function civilizationIntegrityIssues(world: WorldState): string[] {
       if (recipe && !recipeAvailableToSettlement(world, establishment.settlementId, recipe)) issues.push(`${establishment.name}: использует недоступный рецепт «${recipe.name}».`);
     }
   }
+  issues.push(...technologyKnowledgeIntegrityIssues(world));
   return [...new Set(issues)];
 }

@@ -42,7 +42,7 @@ import { advanceDynastyLegacy } from './dynastyLegacy';
 import { APP_VERSION } from '../version';
 
 const GENESIS_VERSION = 1 as const;
-const SCHEMA_VERSION = 31;
+const SCHEMA_VERSION = 32;
 
 interface GenesisPreparation {
   initialSettlementIds: number[];
@@ -235,6 +235,8 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
   world.rumors = [];
   world.messages = [];
   world.settlementKnowledge = [];
+  world.settlementTechnologyKnowledge = [];
+  world.technologyTransmissions = [];
   world.militaryUnits = [];
   world.supplyWagons = [];
   world.armyCamps = [];

@@ -63,7 +63,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .12,
 });
 
-assert.equal(world.version, 31, 'новый мир должен использовать схему 31');
+assert.equal(world.version, 32, 'новый мир должен использовать схему 32');
 assert.ok(world.civilizations.length > 0, 'историческая генерация должна сформировать цивилизации');
 assert.ok(world.civilizations.length <= world.kingdoms.length, 'одна цивилизация может объединять несколько государств общей культуры');
 assert.ok(world.kingdoms.every(kingdom => world.civilizations.some(civilization => civilization.id === kingdom.civilizationId)), 'каждое государство должно быть связано с цивилизацией');
@@ -95,16 +95,10 @@ const gatedRecipe = world.productionRecipes.find(recipe => recipe.requiredTechno
   && world.establishments.some(establishment => establishment.recipeIds.includes(recipe.id) && recipe.establishmentTypes.includes(establishment.type)));
 assert.ok(gatedRecipe, 'для проверки нужен технологически ограниченный рецепт, реально используемый заведением');
 const establishment = world.establishments.find(item => item.recipeIds.includes(gatedRecipe!.id) && gatedRecipe!.establishmentTypes.includes(item.type))!;
-const civilization = world.civilizations.find(item => item.id === world.settlements.find(settlement => settlement.id === establishment.settlementId)!.civilizationId)!;
-const originalTechnologies = [...civilization.unlockedTechnologyIds];
-civilization.unlockedTechnologyIds = civilization.unlockedTechnologyIds.filter(id => id !== gatedRecipe!.requiredTechnologyId);
+assert.equal(recipeAvailableToSettlement(world, establishment.settlementId, gatedRecipe!), true, 'рецепт должен быть доступен только там, где существует локальная практика');
+assert.ok(world.settlementTechnologyKnowledge.some(item => item.settlementId === establishment.settlementId && item.technologyId === gatedRecipe!.requiredTechnologyId && item.active), 'доступный рецепт должен иметь местных живых носителей');
 synchronizeCivilizationRecipes(world);
-assert.equal(recipeAvailableToSettlement(world, establishment.settlementId, gatedRecipe!), false, 'рецепт должен закрываться при утрате требуемой технологии');
-assert.ok(!establishment.recipeIds.includes(gatedRecipe!.id), 'закрытый рецепт должен исчезнуть из производственного заведения');
-civilization.unlockedTechnologyIds = originalTechnologies;
-synchronizeCivilizationRecipes(world);
-assert.equal(recipeAvailableToSettlement(world, establishment.settlementId, gatedRecipe!), true, 'рецепт должен открываться после восстановления технологии');
-assert.ok(establishment.recipeIds.includes(gatedRecipe!.id), 'открытый рецепт должен вернуться в подходящее заведение');
-assert.deepEqual(civilizationIntegrityIssues(world), [], 'после пересчёта рецептов мир должен оставаться целостным');
+assert.ok(establishment.recipeIds.includes(gatedRecipe!.id), 'локально известный рецепт должен оставаться в подходящем заведении');
+assert.deepEqual(civilizationIntegrityIssues(world), [], 'после пересчёта локальных рецептов мир должен оставаться целостным');
 
 console.log(`OK CIVILIZATIONS: ${world.civilizations.length} цивилизаций, ${CIVILIZATION_CONTENT.technologies.length} технологий, ${world.productionRecipes.length} рецептов.`);

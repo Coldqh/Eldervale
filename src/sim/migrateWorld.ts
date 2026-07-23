@@ -26,6 +26,7 @@ import { initializeBattleSystem } from './battleSystem';
 import { initializeCultureSystem } from './cultureSystem';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
+import { initializeTechnologyKnowledge } from './technologyKnowledge';
 import { normalizeSettlementLayouts } from './cityMorphology';
 import { initializeSettlementLifecycle } from './settlementLifecycle';
 import { initializeStateFormation } from './stateFormation';
@@ -35,11 +36,11 @@ export function migrateWorld(input: unknown): WorldState {
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-31`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-32`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 31;
+  localized.version = 32;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -70,6 +71,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.rumors ??= [];
   localized.messages ??= [];
   localized.settlementKnowledge ??= [];
+  localized.settlementTechnologyKnowledge ??= [];
+  localized.technologyTransmissions ??= [];
   localized.cultures ??= [];
   localized.civilizations ??= [];
   localized.settlementExpeditions ??= [];
@@ -122,6 +125,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 22) localized.simulation.battleSystemVersion = undefined;
   if (sourceVersion < 23) localized.simulation.cultureSystemVersion = undefined;
   if (sourceVersion < 27) localized.simulation.civilizationSystemVersion = undefined;
+  if (sourceVersion < 32) { localized.simulation.technologyKnowledgeVersion = undefined; localized.simulation.lastTechnologyKnowledgeAdvanceYear = undefined; }
   if (sourceVersion < 29) localized.simulation.settlementLifecycleVersion = undefined;
   if (sourceVersion < 30) localized.simulation.stateFormationVersion = undefined;
   localized.history ??= {
@@ -144,6 +148,12 @@ export function migrateWorld(input: unknown): WorldState {
       effect.localY = Math.max(1, Math.min(localized.config.localMapSize - 2, Math.round(effect.localY * ratio)));
     }
   }
+
+  for (const character of localized.characters) {
+    character.technologyIds ??= [];
+    character.technologyLearning ??= {};
+  }
+  for (const book of localized.books) book.technologyIds ??= [];
 
   for (const kingdom of localized.kingdoms) {
     kingdom.claims ??= [];
@@ -294,6 +304,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.cemetery = Math.max(0, ...localized.cemeteries.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.burial = Math.max(0, ...localized.burials.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.civilization = Math.max(0, ...localized.civilizations.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.settlementTechnologyKnowledge = Math.max(0, ...localized.settlementTechnologyKnowledge.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.technologyTransmission = Math.max(0, ...localized.technologyTransmissions.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.settlement = Math.max(0, ...localized.settlements.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.settlementExpedition = Math.max(0, ...localized.settlementExpeditions.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.politicalCommunity = Math.max(0, ...localized.politicalCommunities.map((item: any) => item.id ?? 0)) + 1;
@@ -325,6 +337,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeBattleSystem(localized as WorldState);
   initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
   initializeCivilizationSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-цивилизации-и-технологии-v1`));
+  initializeTechnologyKnowledge(localized as WorldState, new RNG(`${localized.config.seed}:переход-локальные-знания-v1`));
   initializeSettlementLifecycle(localized as WorldState);
   initializeStateFormation(localized as WorldState);
   if (!hadTerritoryHistory) rebuildTerritoryHistoryFromCurrent(localized as WorldState);

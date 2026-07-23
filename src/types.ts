@@ -1,6 +1,7 @@
 import type { BuildingInteriorPlan } from './interiorTypes';
 import type { BuildingCapacityProfile, HousingStatus, SettlementCityState, SettlementLayoutPlan, UrbanState } from './cityTypes';
 import type { Civilization } from './civilizationTypes';
+import type { SettlementTechnologyKnowledge, TechnologyTransmission } from './technologyKnowledgeTypes';
 import type { SettlementExpedition } from './settlementLifecycleTypes';
 import type { PoliticalCommunity, PoliticalTransition } from './stateFormationTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
@@ -1155,6 +1156,8 @@ export interface SimulationRuntimeState {
   battleSystemVersion?: 1;
   cultureSystemVersion?: 1;
   civilizationSystemVersion?: 1;
+  technologyKnowledgeVersion?: 1;
+  lastTechnologyKnowledgeAdvanceYear?: number;
   settlementLifecycleVersion?: 1;
   stateFormationVersion?: 1;
   cemeteryPlacementVersion?: 1;
@@ -1315,6 +1318,8 @@ export interface Character {
   servicePayArrears?: number;
   visualRole?: string;
   knowledge: CharacterKnowledgeState;
+  technologyIds?: string[];
+  technologyLearning?: Record<string, number>;
   legalStatus?: LegalStatus;
   wantedForCrimeIds?: number[];
   sentenceUntilTick?: number;
@@ -1712,6 +1717,7 @@ export interface Book {
   copies: number;
   settlementId: number;
   referencedEventIds: number[];
+  technologyIds?: string[];
 }
 
 export interface Dungeon {
@@ -1880,7 +1886,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 31;
+  version: 32;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1930,6 +1936,8 @@ export interface WorldState {
   rumors: Rumor[];
   messages: Message[];
   settlementKnowledge: SettlementKnowledge[];
+  settlementTechnologyKnowledge: SettlementTechnologyKnowledge[];
+  technologyTransmissions: TechnologyTransmission[];
   cultures: CultureDefinition[];
   civilizations: Civilization[];
   languages: LanguageDefinition[];

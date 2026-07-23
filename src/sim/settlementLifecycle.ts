@@ -9,6 +9,7 @@ import { initializeAgricultureAndConstruction } from './agricultureConstruction'
 import { initializeCitySimulation } from './citySimulation';
 import { buildSettlementLayout } from './cityMorphology';
 import { initializeCivilizationSystem } from './civilizationSystem';
+import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './technologyKnowledge';
 import { initializeCultureSystem } from './cultureSystem';
 import { addMaterialItem } from './materialEconomy';
 import { placeName } from './names';
@@ -136,7 +137,10 @@ export function formSettlementExpedition(
     .sort((a, b) => leadershipScore(b) - leadershipScore(a) || a.id - b.id)[0];
   if (!leader) return undefined;
   const id = world.nextIds.settlementExpedition++;
-  const civilization = world.civilizations.find(item => item.id === origin.civilizationId);
+  const localTechnologyIds = world.settlementTechnologyKnowledge
+    .filter(item => item.settlementId === origin.id && item.level !== 'lost')
+    .map(item => item.technologyId);
+  const carriedTechnologyIds = members.flatMap(member => member.technologyIds ?? []);
   const foodDays = members.length * rng.int(75, 125);
   const expedition: SettlementExpedition = {
     id,
@@ -168,7 +172,7 @@ export function formSettlementExpedition(
       livestock: Math.max(2, Math.min(12, Math.round(members.length / 4))),
       coin: Math.max(30, Math.round(members.reduce((sum, member) => sum + member.wallet, 0) * .45)),
     },
-    knownTechnologyIds: [...new Set(civilization?.unlockedTechnologyIds ?? [])],
+    knownTechnologyIds: [...new Set([...localTechnologyIds, ...carriedTechnologyIds])],
     history: [`В ${world.year}.${String(world.month).padStart(2, '0')} ${members.length} жителей вышли из ${origin.name}: ${expeditionReason(cause, origin)}.`],
   };
 
@@ -437,6 +441,8 @@ function foundSettlement(world: WorldState, expedition: SettlementExpedition, rn
   initializeSettlementLife(world, new RNG(`${world.config.seed}:власть-нового-поселения:${id}`));
   initializeCultureSystem(world, new RNG(`${world.config.seed}:культура-нового-поселения:${id}`));
   initializeCivilizationSystem(world, new RNG(`${world.config.seed}:цивилизация-нового-поселения:${id}`));
+  initializeTechnologyKnowledge(world, new RNG(`${world.config.seed}:знания-нового-поселения:${id}`));
+  reconcileTechnologyKnowledge(world);
   initializeStateFormation(world);
   initializeCitySimulation(world);
   appendCausalEvent(world, {

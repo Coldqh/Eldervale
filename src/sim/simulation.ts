@@ -33,6 +33,8 @@ import { advanceRaceDemography, initializeRaceDemography } from './raceDemograph
 import { applyInteriorMonthlyEffects } from './interiors';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
+import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './technologyKnowledge';
+import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 
@@ -719,13 +721,16 @@ function writeBooks(world: WorldState, rng: RNG): void {
   const author = rng.pick(authors);
   const recent = world.events.filter(event => event.year >= world.year - 8).slice(-30);
   const source = recent.length ? rng.pick(recent) : undefined;
-  const subject = source ? source.title : rng.pick(['чудовища', 'история династий', 'торговые пути', 'богословие', 'охота и миграции животных', 'алхимические составы']);
+  const authorTechnologies = [...new Set(author.technologyIds ?? [])].filter(id => CIVILIZATION_CONTENT.technologyById.has(id));
+  const recordedTechnologyIds = authorTechnologies.length && rng.chance(.7) ? [rng.pick(authorTechnologies)] : [];
+  const technologySubject = recordedTechnologyIds[0] ? CIVILIZATION_CONTENT.technologyById.get(recordedTechnologyIds[0])?.name : undefined;
+  const subject = technologySubject ?? (source ? source.title : rng.pick(['чудовища', 'история династий', 'торговые пути', 'богословие', 'охота и миграции животных', 'алхимические составы']));
   const book = {
     id: world.nextIds.book++, title: `${rng.pick(['Хроника', 'Свидетельство', 'Рассуждение', 'Песни'])}: ${subject}`, authorId: author.id, yearWritten: world.year,
     language: world.kingdoms.find(kingdom => kingdom.id === author.kingdomId)?.culture ?? 'общий язык', subject, reliability: rng.int(35, 95),
     bias: rng.pick(['лояльность правителю', 'личный взгляд автора', 'религиозное толкование', 'страх перед чудовищами']),
     summary: source ? `Автор описывает событие «${source.title}» и объясняет его причины по-своему.` : `Автор собирает сведения о теме «${subject}».`,
-    copies: rng.int(1, 12), settlementId: author.settlementId, referencedEventIds: source ? [source.id] : [],
+    copies: rng.int(1, 12), settlementId: author.settlementId, referencedEventIds: source ? [source.id] : [], technologyIds: recordedTechnologyIds,
   };
   world.books.push(book);
   author.bookIds.push(book.id);
@@ -911,6 +916,7 @@ export function advanceOneMonth(
   if (schedule.runBooks) writeBooks(world, rng);
   runPhase(engine, 'Экспедиции, лагеря и основание поселений', onPhase, () => advanceSettlementLifecycle(world, rng, indexes, { allowFormation: schedule.runSettlementLifecycle, elapsedMonths: monthStep }));
   runPhase(engine, 'Политические общины, автономия и формирование государств', onPhase, () => advanceStateFormation(world, new RNG(`${world.config.seed}:политические-общины:${world.year}:${world.month}`), indexes, { allowTransitions: world.month === 1 || world.month === 7, elapsedMonths: monthStep }));
+  runPhase(engine, 'Местные носители технологий и производственные знания', onPhase, () => reconcileTechnologyKnowledge(world));
 
   // Смерти и архивирование могут оставить заведение без владельца уже после экономического хода.
   ensureEstablishmentOwners(world, indexes);
@@ -952,6 +958,7 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeRaceDemography(world);
   synchronizeEmploymentLinks(world);
   initializeCivilizationSystem(world);
+  initializeTechnologyKnowledge(world);
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);
   initializeCitySimulation(world);
@@ -1014,6 +1021,8 @@ export function advanceWorldSystems(
   synchronizeStateMachineReferences(engine.world, new RNG(`${engine.world.config.seed}:state-references:${engine.world.year}:${engine.world.month}`), engine.indexes);
   synchronizeEmploymentLinks(engine.world, engine.indexes);
   synchronizeSettlementPopulation(engine);
+  onPhase?.('Переселение мастеров и локальная доступность рецептов');
+  reconcileTechnologyKnowledge(engine.world);
 
   onPhase?.('Городской источник истины, распределение и проекты');
   advanceCitySimulation(engine.world);

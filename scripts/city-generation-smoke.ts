@@ -32,7 +32,7 @@ const repeat = generateHistoricalWorld({ ...config, seed: 'city-generation-stabl
 const second = generateHistoricalWorld({ ...config, seed: 'city-generation-stable-5' });
 const crowdWorld = generateHistoricalWorld({ ...config, seed: 'city-generation-v2-a' });
 
-assert.equal(first.version, 31, 'новый мир должен использовать схему 31');
+assert.equal(first.version, 32, 'новый мир должен использовать схему 32');
 assert.deepEqual(citySignature(first), citySignature(repeat), 'одинаковый ключ должен давать одинаковый физический город');
 assert.notDeepEqual(citySignature(first), citySignature(second), 'разные ключи должны менять планы и физическую застройку городов');
 

@@ -5,6 +5,7 @@ import {
 } from '../i18n';
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { TextureIcon } from './TextureIcon';
+import { availableRecipesForSettlement } from '../sim/technologyKnowledge';
 
 const labels: Record<EntityKind, string> = {
   kingdom: 'Государство', settlement: 'Поселение', character: 'Личность', army: 'Армия', battleRecord: 'Сражение', monster: 'Существо',
@@ -376,7 +377,8 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
   if (ref.kind === 'settlement') {
     const civilization = entity.civilizationId ? world.civilizations.find(item => item.id === entity.civilizationId) : undefined;
     const era = civilization ? CIVILIZATION_CONTENT.eraById.get(civilization.eraId) : undefined;
-    const availableRecipes = world.productionRecipes.filter(recipe => !recipe.requiredTechnologyId || civilization?.unlockedTechnologyIds.includes(recipe.requiredTechnologyId)).length;
+    const availableRecipes = availableRecipesForSettlement(world, entity.id).length;
+    const localTechnologies = (world.settlementTechnologyKnowledge ?? []).filter(item => item.settlementId === entity.id && item.level !== 'lost').sort((a, b) => b.mastery - a.mastery || a.technologyId.localeCompare(b.technologyId));
     const expeditions = (world.settlementExpeditions ?? []).filter(item => item.originSettlementId === entity.id || item.foundedSettlementId === entity.id).slice(-8).reverse();
     const politicalStatus = entity.politicalStatus === 'frontier' ? 'пограничная община' : entity.politicalStatus === 'independent' ? 'самоуправляемая община' : entity.politicalStatus === 'occupied' ? 'оккупировано' : 'встроено в государство';
     const community = entity.politicalCommunityId ? world.politicalCommunities.find(item => item.id === entity.politicalCommunityId) : undefined;
@@ -397,6 +399,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
       return <span key={expedition.id}>№{expedition.id} · {leader ? link(leader.name, { kind: 'character', id: leader.id }, onSelect) : 'лидер неизвестен'}<small>{status} · {expedition.memberIds.length} человек · клетка {expedition.currentX}:{expedition.currentY} · мораль {Math.round(expedition.morale)}%</small></span>;
     })}</span> : 'не было')}
     {row('Цивилизация', civilization?.name ?? 'не сформирована')}{row('Технологическая эпоха', era?.name ?? 'не определена')}{row('Доступные производственные рецепты', `${availableRecipes} из ${world.productionRecipes.length}`)}
+    {row('Местные технологии', localTechnologies.map(item => `${CIVILIZATION_CONTENT.technologyById.get(item.technologyId)?.name ?? item.technologyId} — ${item.level === 'institutional' ? 'закреплено учреждением' : item.level === 'practiced' ? 'живая практика' : item.level === 'theoretical' ? 'только теория' : 'утрачено'}, ${Math.round(item.mastery)}%, мастеров ${item.practitionerIds.length}${item.bookIds.length ? `, книг ${item.bookIds.length}` : ''}`).join('; ') || 'нет закреплённых практик')}
     {row('Тип', settlementTypeLabel(entity.type))}{row('Население', `${entity.population} жителей`)}{row('Жилая вместимость', `${entity.residentialCapacity} мест`)}
     {row('Домохозяйства', entity.households)}{row('Глобальные квадраты', `${entity.districts.length} · ${entity.districts.map((item: any) => item.name).join(', ')}`)}{row('Ресурс', entity.resource)}
     {row('Благосостояние', `${entity.prosperity}%`)}{row('Защита', `${entity.defense}%`)}{row('Запасы пищи', entity.food)}
@@ -418,7 +421,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
     return <>
       {row('Состояние', entity.alive ? `${entity.age} лет` : `умер в ${entity.deathYear} году`)}{row('Вид', speciesLabel(entity.species))}{row('Пол', entity.sex === 'female' ? 'женский' : entity.sex === 'male' ? 'мужской' : 'не указан')}
       {entity.cultureProfile && row('Культура', link(getTitle(world, { kind: 'culture', id: entity.cultureProfile.cultureId }), { kind: 'culture', id: entity.cultureProfile.cultureId }, onSelect))}{entity.cultureProfile && row('Вера', link(getTitle(world, { kind: 'religion', id: entity.cultureProfile.religionId }), { kind: 'religion', id: entity.cultureProfile.religionId }, onSelect))}{entity.cultureProfile && row('Языки', entity.cultureProfile.languages.map((value: any) => `${getTitle(world, { kind: 'language', id: value.languageId })} ${Math.round(value.fluency)}%`).join(', '))}{entity.cultureProfile && row('Образование', `${entity.cultureProfile.education} · грамотность ${Math.round(entity.cultureProfile.literacy)}% · религиозность ${Math.round(entity.cultureProfile.devotion)}%`)}
-      {row('Профессия', professionLabel(entity.profession))}{row('Рабочее место', entity.workplace)}{row('Домашний район', entity.homeDistrict ?? 'не закреплён')}{row('Место', expedition ? `экспедиция №${expedition.id} · ${expedition.status === 'camped' ? 'лагерь' : expedition.status === 'returning' ? 'обратный путь' : 'путь к новой земле'} · клетка ${expedition.currentX}:${expedition.currentY}` : link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
+      {row('Профессия', professionLabel(entity.profession))}{row('Освоенные технологии', (entity.technologyIds ?? []).map((id: string) => CIVILIZATION_CONTENT.technologyById.get(id)?.name ?? id).join(', ') || 'нет специальных практик')}{row('Обучение', Object.entries(entity.technologyLearning ?? {}).map(([id, progress]) => `${CIVILIZATION_CONTENT.technologyById.get(id)?.name ?? id}: ${Math.min(99, Math.round(Number(progress)))}%`).join(', ') || 'не учится ремеслу')}{row('Рабочее место', entity.workplace)}{row('Домашний район', entity.homeDistrict ?? 'не закреплён')}{row('Место', expedition ? `экспедиция №${expedition.id} · ${expedition.status === 'camped' ? 'лагерь' : expedition.status === 'returning' ? 'обратный путь' : 'путь к новой земле'} · клетка ${expedition.currentX}:${expedition.currentY}` : link(getTitle(world, { kind: 'settlement', id: entity.settlementId }), { kind: 'settlement', id: entity.settlementId }, onSelect))}
       {expedition && row('Экспедиция основателей', `${expedition.memberIds.length} человек · мораль ${Math.round(expedition.morale)}% · еды на ${Math.max(0, Math.floor(expedition.supplies.foodPersonDays / Math.max(1, expedition.memberIds.length)))} дней`)}
       {row('Домохозяйство', entity.householdId ? link(getTitle(world, { kind: 'household', id: entity.householdId }), { kind: 'household', id: entity.householdId }, onSelect) : 'не закреплено')}
       {row('Дом', entity.homeBuildingId ? link(getTitle(world, { kind: 'building', id: entity.homeBuildingId }), { kind: 'building', id: entity.homeBuildingId }, onSelect) : 'нет постоянного жилья')}
@@ -480,7 +483,7 @@ function renderStats(world: WorldState, ref: EntityRef, entity: any, onSelect: (
   if (ref.kind === 'book') return <>
     {row('Автор', link(getTitle(world, { kind: 'character', id: entity.authorId }), { kind: 'character', id: entity.authorId }, onSelect))}{row('Год', entity.yearWritten)}
     {row('Язык', entity.language)}{row('Тема', entity.subject)}{row('Достоверность', `${entity.reliability}%`)}{row('Предвзятость', entity.bias)}{row('Копии', entity.copies)}
-    {row('Связанные события', entity.referencedEventIds.length)}{row('Содержание', entity.summary)}
+    {row('Связанные события', entity.referencedEventIds.length)}{row('Технологические знания', (entity.technologyIds ?? []).map((id: string) => CIVILIZATION_CONTENT.technologyById.get(id)?.name ?? id).join(', ') || 'не содержит ремесленного руководства')}{row('Содержание', entity.summary)}
   </>;
   if (ref.kind === 'dungeon') return <>
     {row('Происхождение', entity.origin)}{row('Первоначальная цель', entity.purpose)}{row('Построено', `${entity.builtYear} год`)}{row('Известно миру', entity.discovered ? 'да' : 'нет')}
