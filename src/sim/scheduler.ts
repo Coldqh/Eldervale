@@ -31,6 +31,8 @@ export function createSimulationRuntime(world: Pick<WorldState, 'year' | 'month'
     sleepingRegionCount: 0,
     queuedActions: [],
     observerFocus: undefined,
+    economyLastTickBySettlement: {},
+    agricultureLastTickBySettlement: {},
   };
 }
 
@@ -42,6 +44,8 @@ export function ensureSimulationRuntime(world: WorldState): void {
   world.simulation.sleepingRegionCount ??= 0;
   world.simulation.queuedActions ??= [];
   world.simulation.observerFocus ??= undefined;
+  world.simulation.economyLastTickBySettlement ??= {};
+  world.simulation.agricultureLastTickBySettlement ??= {};
 }
 
 function actionInterval(world: WorldState, indexes: WorldIndexes, action: ScheduledAction): number {
@@ -148,7 +152,7 @@ export function prepareMonthSchedule(world: WorldState, indexes: WorldIndexes, o
 
   const { regions, settlements: activeSettlementIds } = collectActiveRegions(world, indexes);
   const seasonal = [1, 4, 7, 10].includes(world.month);
-  const bulkEconomy = fastForward ? world.month === 1 : [1, 7].includes(world.month);
+  const bulkEconomy = fastForward ? [1, 4, 7, 10].includes(world.month) : [1, 7].includes(world.month);
   const bulkEcology = fastForward ? [1, 7].includes(world.month) : seasonal || [8, 12].includes(world.month);
   const economySettlementIds = new Set<number>(activeSettlementIds);
   const ecologySettlementIds = new Set<number>(activeSettlementIds);

@@ -172,7 +172,7 @@ const buildingMapping: Record<string, BuildingType> = {
 };
 
 const residentialTypes = new Set<BuildingType>(['house', 'tenement', 'manor', 'barracks', 'monastery']);
-const foodTemplates = new Set(['bread', 'vegetables', 'fruit', 'meat', 'smoked_meat', 'fish', 'salted_fish', 'milk', 'eggs', 'stew', 'roast']);
+const foodTemplates = new Set(['bread', 'grain', 'wheat', 'barley', 'rye', 'flour', 'vegetables', 'fruit', 'meat', 'smoked_meat', 'fish', 'salted_fish', 'milk', 'eggs', 'stew', 'roast']);
 
 function needState(tick: number): NeedState {
   return { hunger: 10, thirst: 8, rest: 12, warmth: 10, safety: 12, social: 18, lastUpdatedTick: tick };
@@ -550,8 +550,8 @@ function employRemainingResidents(world: WorldState): void {
       const skill = character.skills[character.profession] ?? 10;
       const contract: EmploymentContract = {
         id: world.nextIds.employment++, characterId: character.id, establishmentId: chosen.establishment.id,
-        role: chosen.preferred ? character.profession : 'подсобный работник',
-        wage: Math.max(3, Math.round((2.6 + skill / 17) * settlement.economy.wageIndex)), hoursPerWeek: 42 + character.id % 17,
+        role: ['ферма', 'рыбный промысел'].includes(chosen.establishment.type) ? 'работник за долю продукции' : chosen.preferred ? character.profession : 'подсобный работник',
+        wage: ['ферма', 'рыбный промысел'].includes(chosen.establishment.type) ? 0 : Math.max(3, Math.round((2.6 + skill / 17) * settlement.economy.wageIndex)), hoursPerWeek: 42 + character.id % 17,
         sinceYear: world.year, active: true,
       };
       world.employments.push(contract);
@@ -605,8 +605,9 @@ function createEstablishments(world: WorldState, rng: RNG): void {
       for (const worker of workers) {
         const skill = worker.skills[worker.profession] ?? 10;
         const contract: EmploymentContract = {
-          id: world.nextIds.employment++, characterId: worker.id, establishmentId: establishment.id, role: worker.id === owner.id ? 'владелец и мастер' : preferred.includes(worker.profession) ? worker.profession : 'подсобный работник',
-          wage: worker.id === owner.id ? 0 : Math.max(3, Math.round((2.8 + skill / 16) * settlement.economy.wageIndex)), hoursPerWeek: rng.int(36, 62), sinceYear: Math.max(settlement.foundedYear, world.year - rng.int(0, 18)), active: true,
+          id: world.nextIds.employment++, characterId: worker.id, establishmentId: establishment.id,
+          role: worker.id === owner.id ? 'владелец и мастер' : ['ферма', 'рыбный промысел'].includes(establishment.type) ? 'работник за долю продукции' : preferred.includes(worker.profession) ? worker.profession : 'подсобный работник',
+          wage: worker.id === owner.id || ['ферма', 'рыбный промысел'].includes(establishment.type) ? 0 : Math.max(3, Math.round((2.8 + skill / 16) * settlement.economy.wageIndex)), hoursPerWeek: rng.int(36, 62), sinceYear: Math.max(settlement.foundedYear, world.year - rng.int(0, 18)), active: true, arrears: 0,
         };
         world.employments.push(contract);
         if (activeRuntime) { const list = activeRuntime.employmentByEstablishment.get(establishment.id) ?? []; list.push(contract); activeRuntime.employmentByEstablishment.set(establishment.id, list); }
@@ -1120,7 +1121,7 @@ function findSeller(world: WorldState, settlementId: number, templateIds: string
   return best;
 }
 
-function transferItemToHousehold(world: WorldState, seller: Establishment, item: WorldItem, household: Household, quantity: number): number {
+function transferItemToHousehold(world: WorldState, seller: Establishment, item: WorldItem, household: Household, quantity: number, source = `куплено у ${seller.name}`): number {
   const moved = Math.min(quantity, item.quantity);
   if (moved <= 0) return 0;
   item.quantity -= moved;
@@ -1129,7 +1130,7 @@ function transferItemToHousehold(world: WorldState, seller: Establishment, item:
     templateId: item.templateId, name: item.name, category: item.category, material: item.material, quantity: moved, unit: item.unit, weightPerUnit: item.weightPerUnit,
     quality: item.quality, condition: item.condition, freshness: item.freshness, perishabilityMonths: item.perishabilityMonths, baseValue: item.baseValue,
     settlementId: household.settlementId, householdId: household.id, buildingId: household.homeBuildingId, createdYear: world.year,
-    source: `куплено у ${seller.name}`, history: [`Куплено домохозяйством в ${world.year}.${String(world.month).padStart(2, '0')}.`], equipmentSlot: item.equipmentSlot, dye: item.dye, warmth: item.warmth, armor: item.armor, damage: item.damage, toolType: item.toolType, requiredProfession: item.requiredProfession, maxCondition: item.maxCondition,
+    source, history: [`${source} в ${world.year}.${String(world.month).padStart(2, '0')}.`], equipmentSlot: item.equipmentSlot, dye: item.dye, warmth: item.warmth, armor: item.armor, damage: item.damage, toolType: item.toolType, requiredProfession: item.requiredProfession, maxCondition: item.maxCondition,
   });
   return moved;
 }
@@ -1146,14 +1147,89 @@ function householdAverageHealth(world: WorldState, household: Household): number
   return members.length ? members.reduce((sum, member) => sum + member.health, 0) / members.length : 100;
 }
 
+function foodNutritionPerUnit(templateId: string): number {
+  if (templateId === 'stew' || templateId === 'roast') return 1;
+  if (templateId === 'bread') return .7;
+  if (['grain', 'wheat', 'barley', 'rye', 'flour'].includes(templateId)) return 2;
+  return 1.2;
+}
+
+function distributeSettlementStaples(
+  world: WorldState,
+  settlement: Settlement,
+  establishments: readonly Establishment[],
+  elapsedMonths: number,
+): void {
+  const staplePriority = ['bread', 'vegetables', 'fish', 'milk', 'eggs', 'meat', 'wheat', 'rye', 'barley', 'grain', 'flour', 'stew', 'roast'];
+  const households = settlement.householdIds
+    .map(id => activeRuntime?.householdById.get(id) ?? world.households.find(household => household.id === id))
+    .filter((household): household is Household => Boolean(household));
+  const characterById = activeRuntime?.characterById ?? new Map(world.characters.map(character => [character.id, character]));
+  const needs = households.map(household => {
+    const members = household.memberIds.filter(id => characterById.get(id)?.alive).length;
+    return { household, nutrition: Math.max(.12, members * .06) * elapsedMonths };
+  }).filter(entry => entry.nutrition > .0001);
+  if (!needs.length) return;
+
+  const priority = new Map(staplePriority.map((templateId, index) => [templateId, index]));
+  const offers = establishments
+    .filter(establishment => establishment.active)
+    .flatMap(establishment => establishment.inventoryItemIds.map(id => ({
+      establishment,
+      item: activeRuntime?.itemById.get(id) ?? world.items.find(candidate => candidate.id === id),
+    })))
+    .filter((entry): entry is { establishment: Establishment; item: WorldItem } => Boolean(
+      entry.item && entry.item.quantity > .0001 && entry.item.condition > 0 && foodTemplates.has(entry.item.templateId),
+    ))
+    .sort((a, b) => (priority.get(a.item.templateId) ?? 999) - (priority.get(b.item.templateId) ?? 999)
+      || a.item.freshness - b.item.freshness || a.item.id - b.item.id);
+  const totalNutrition = offers.reduce((sum, entry) => sum + entry.item.quantity * foodNutritionPerUnit(entry.item.templateId), 0);
+  const totalNeed = needs.reduce((sum, entry) => sum + entry.nutrition, 0);
+  const ration = Math.min(1, totalNutrition / Math.max(.0001, totalNeed));
+  if (ration <= .0001) return;
+
+  for (const entry of needs) {
+    let remainingNutrition = entry.nutrition * ration;
+    for (const offer of offers) {
+      if (remainingNutrition <= .0001) break;
+      if (offer.item.quantity <= .0001) continue;
+      const nutritionPerUnit = foodNutritionPerUnit(offer.item.templateId);
+      const requested = Math.min(offer.item.quantity, remainingNutrition / nutritionPerUnit);
+      if (requested <= .0001) continue;
+      const workerHousehold = offer.establishment.workerIds.some(id => characterById.get(id)?.householdId === entry.household.id);
+      const unitPrice = priceFor(settlement, offer.item.templateId, offer.item.quality);
+      const moved = transferItemToHousehold(
+        world,
+        offer.establishment,
+        offer.item,
+        entry.household,
+        requested,
+        workerHousehold ? `натуральная доля работников ${offer.establishment.name}` : `продовольственное распределение ${settlement.name}`,
+      );
+      if (moved <= .0001) continue;
+      if (!workerHousehold) {
+        const cost = moved * unitPrice;
+        const paid = Math.min(entry.household.wealth, cost);
+        entry.household.wealth -= paid;
+        entry.household.debt += Math.max(0, cost - paid);
+        entry.household.monthlyExpenses += paid;
+        offer.establishment.cash += paid;
+        offer.establishment.monthlyRevenue += paid;
+        settlement.economy.lastMonthlyTrade += paid;
+      }
+      remainingNutrition -= moved * nutritionPerUnit;
+    }
+  }
+}
+
 function feedHousehold(world: WorldState, household: Household, elapsedMonths: number): void {
   const members = household.memberIds.map(id => activeRuntime?.characterById.get(id) ?? world.characters.find(character => character.id === id)).filter((character): character is Character => Boolean(character?.alive));
-  const required = Math.max(.45, members.length * .25) * elapsedMonths;
+  const required = Math.max(.12, members.length * .06) * elapsedMonths;
   let consumed = 0;
-  const preferred = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'grain'];
+  const preferred = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'flour', 'wheat', 'rye', 'barley', 'grain'];
   for (const id of preferred) {
     if (consumed >= required) break;
-    const valuePerUnit = id === 'stew' || id === 'roast' ? 1 : id === 'bread' ? .7 : id === 'grain' ? 2 : 1.2;
+    const valuePerUnit = foodNutritionPerUnit(id);
     const needUnits = (required - consumed) / valuePerUnit;
     const used = consume(world, household.inventoryItemIds, id, needUnits);
     consumed += used * valuePerUnit;
@@ -1218,8 +1294,8 @@ function buyHouseholdNeeds(world: WorldState, settlement: Settlement, household:
   const home = household.homeBuildingId ? activeRuntime?.buildingById.get(household.homeBuildingId) ?? world.buildings.find(building => building.id === household.homeBuildingId) : undefined;
   const hasWaterAccess = Boolean(home?.hasWater) || settlementHasCommunityWater(world, settlement.id);
   const shopping: { ids: string[]; target: number }[] = [
-    { ids: ['bread', 'grain', 'vegetables'], target: members * .18 * elapsedMonths },
-    { ids: ['meat', 'fish', 'eggs', 'milk'], target: members * .045 * elapsedMonths },
+    { ids: ['bread', 'flour', 'wheat', 'rye', 'barley', 'grain', 'vegetables'], target: members * .05 * elapsedMonths },
+    { ids: ['meat', 'fish', 'eggs', 'milk'], target: members * .018 * elapsedMonths },
     { ids: ['firewood', 'charcoal'], target: members * .035 * elapsedMonths },
     ...(!hasWaterAccess ? [{ ids: ['water'], target: members * .24 * elapsedMonths }] : []),
   ];
@@ -1255,7 +1331,7 @@ function payWagesAndTaxes(world: WorldState, settlement: Settlement, establishme
     const character = activeRuntime?.characterById.get(contract.characterId) ?? world.characters.find(item => item.id === contract.characterId);
     const household = character?.householdId ? activeRuntime?.householdById.get(character.householdId) ?? world.households.find(item => item.id === character.householdId) : undefined;
     if (!character || !household) continue;
-    const dueWage = contract.wage * elapsedMonths;
+    const dueWage = contract.wage * elapsedMonths + Math.max(0, contract.arrears ?? 0);
     const paid = Math.min(establishment.cash, dueWage);
     establishment.cash -= paid;
     establishment.monthlyExpenses += paid;
@@ -1265,11 +1341,24 @@ function payWagesAndTaxes(world: WorldState, settlement: Settlement, establishme
     household.wealth += familyShare;
     household.monthlyIncome += paid;
     character.wealth = Math.round(household.wealth / Math.max(1, household.memberIds.length) + character.wallet);
-    if (paid < dueWage) {
-      const missing = dueWage - paid;
+    const missing = Math.max(0, dueWage - paid);
+    contract.arrears = missing;
+    if (missing > 0) {
       establishment.debt += missing;
-      household.debt += Math.min(.2, missing * .03);
+      household.debt += missing;
       household.needs.safety = Math.min(100, household.needs.safety + 3);
+      if (missing >= contract.wage * 3) {
+        contract.active = false;
+        establishment.workerIds = establishment.workerIds.filter(id => id !== character.id);
+        const building = activeRuntime?.buildingById.get(establishment.buildingId) ?? world.buildings.find(item => item.id === establishment.buildingId);
+        if (building) building.workerIds = building.workerIds.filter(id => id !== character.id);
+        character.employerEstablishmentId = undefined;
+        character.employmentContractId = undefined;
+        character.workplaceBuildingId = undefined;
+        character.workplace = 'ищет работу после многомесячной невыплаты';
+        character.biography.push(`В ${world.year} году покинул ${establishment.name}: задолженность по жалованию достигла ${Math.round(missing)} крон.`);
+        establishment.history.push(`${character.name} ушёл после многомесячной невыплаты жалования.`);
+      }
     }
   }
   const owner = activeRuntime?.characterById.get(establishment.ownerCharacterId) ?? world.characters.find(item => item.id === establishment.ownerCharacterId);
@@ -1433,51 +1522,92 @@ export function ensureEstablishmentOwners(world: WorldState, indexes: WorldIndex
   for (const establishment of world.establishments) {
     const current = indexes.characterById.get(establishment.ownerCharacterId);
     if (current?.alive) continue;
-    const successor = establishment.workerIds.map(id => indexes.characterById.get(id)).find(character => character?.alive)
-      ?? (indexes.residentsBySettlement.get(establishment.settlementId) ?? []).find(character => character.alive && character.age >= 18);
-    if (!successor) { establishment.active = false; continue; }
+    const former = world.burials.find(record => record.subjectKind === 'character' && record.subjectId === establishment.ownerCharacterId);
+    const familyIds = new Set<number>([...(former?.parentIds ?? []), ...(former?.childIds ?? []), ...(former?.spouseId ? [former.spouseId] : [])]);
+    const residents = indexes.residentsBySettlement.get(establishment.settlementId) ?? [];
+    const workers = establishment.workerIds.map(id => indexes.characterById.get(id)).filter((character): character is Character => Boolean(character?.alive));
+    const family = residents.filter(character => familyIds.has(character.id) && character.age >= 16)
+      .sort((a, b) => Number(establishment.workerIds.includes(b.id)) - Number(establishment.workerIds.includes(a.id)) || b.renown - a.renown || a.id - b.id)[0];
+    const successor = family ?? workers.sort((a, b) => b.renown - a.renown || b.age - a.age || a.id - b.id)[0];
+    if (!successor) {
+      establishment.active = false;
+      establishment.history.push('Дело закрылось: наследник или работник, готовый принять обязательства, не найден.');
+      continue;
+    }
     establishment.ownerCharacterId = successor.id;
     const building = indexes.buildingById.get(establishment.buildingId);
     if (building) building.ownerCharacterId = successor.id;
     if (!establishment.workerIds.includes(successor.id)) establishment.workerIds.unshift(successor.id);
-    establishment.history.push(`После смерти или ухода прежнего владельца дело перешло к ${successor.name}.`);
+    establishment.history.push(family
+      ? `После смерти или ухода прежнего владельца дело унаследовал ${successor.name}.`
+      : `После смерти или ухода прежнего владельца обязательства и долги принял работник ${successor.name}.`);
   }
 }
 
-export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>, detailedHouseholdIds: ReadonlySet<number> = new Set()): void {
+export function synchronizeSettlementMaterialLinks(world: WorldState): void {
+  const householdsBySettlement = new Map<number, number[]>();
+  const establishmentsBySettlement = new Map<number, number[]>();
+  const buildingsBySettlement = new Map<number, number[]>();
+  for (const household of world.households) {
+    const list = householdsBySettlement.get(household.settlementId) ?? [];
+    list.push(household.id);
+    householdsBySettlement.set(household.settlementId, list);
+  }
+  for (const establishment of world.establishments) {
+    const list = establishmentsBySettlement.get(establishment.settlementId) ?? [];
+    list.push(establishment.id);
+    establishmentsBySettlement.set(establishment.settlementId, list);
+  }
+  for (const building of world.buildings) {
+    const list = buildingsBySettlement.get(building.settlementId) ?? [];
+    list.push(building.id);
+    buildingsBySettlement.set(building.settlementId, list);
+  }
+  for (const settlement of world.settlements) {
+    settlement.householdIds = [...new Set(householdsBySettlement.get(settlement.id) ?? [])].sort((a, b) => a - b);
+    settlement.establishmentIds = [...new Set(establishmentsBySettlement.get(settlement.id) ?? [])].sort((a, b) => a - b);
+    settlement.buildingIds = [...new Set(buildingsBySettlement.get(settlement.id) ?? [])].sort((a, b) => a - b);
+    settlement.households = settlement.householdIds.length;
+  }
+}
+
+export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>, _detailedHouseholdIds: ReadonlySet<number> = new Set()): void {
   if (!world.buildings?.length || !world.households?.length || !world.establishments?.length) generatePhysicalEconomy(world, rng);
+  synchronizeSettlementMaterialLinks(world);
   activeRuntime = createMaterialRuntime(world, indexes);
   ensureEstablishmentOwners(world, indexes);
   try {
     const tick = worldTick(world);
     arriveShipments(world, tick);
-    const annualBulk = world.month === 1 && settlementIds.size >= world.settlements.length;
-    const economyElapsedMonths = annualBulk ? 12 : 1;
-    spoilItems(world, settlementIds, economyElapsedMonths);
+    world.simulation.economyLastTickBySettlement ??= {};
     for (const settlementId of settlementIds) {
       const settlement = indexes.settlementById.get(settlementId);
       if (!settlement) continue;
+      const key = String(settlementId);
+      const lastTick = world.simulation.economyLastTickBySettlement[key] ?? Math.max(0, tick - 1);
+      const elapsedMonths = Math.max(1, Math.min(12, tick - lastTick));
+      spoilItems(world, new Set([settlementId]), elapsedMonths);
       settlement.economy.lastMonthlyTrade = 0;
       for (const establishmentId of settlement.establishmentIds) {
         const establishment = indexes.establishmentById.get(establishmentId);
         if (establishment) { establishment.monthlyRevenue = 0; establishment.monthlyExpenses = 0; }
       }
-      const elapsedMonths = economyElapsedMonths;
       const productionPriority: Partial<Record<EstablishmentType, number>> = { 'ферма': 1, 'рыбный промысел': 1, 'рудник': 1, 'плотницкая мастерская': 2, 'каменоломня': 2, 'кирпичная мастерская': 3, 'склад': 2, 'мельница': 3, 'пекарня': 4, 'пивоварня': 4, 'винодельня': 4, 'ткацкая мастерская': 4, 'кузница': 4, 'рынок': 5, 'лавка': 5, 'таверна': 6, 'постоялый двор': 6 };
       const localEstablishments = settlement.establishmentIds
         .map(id => indexes.establishmentById.get(id))
         .filter((item): item is Establishment => Boolean(item))
         .sort((a, b) => (productionPriority[a.type] ?? 10) - (productionPriority[b.type] ?? 10) || a.id - b.id);
       for (const establishment of localEstablishments) runProduction(world, establishment, rng, elapsedMonths);
+      distributeSettlementStaples(world, settlement, localEstablishments, elapsedMonths);
       for (const householdId of settlement.householdIds) {
         const household = indexes.householdById.get(householdId);
         if (!household) continue;
         household.monthlyIncome = 0;
         produceHouseholdSubsistence(world, settlement, household, elapsedMonths);
-        if (!detailedHouseholdIds.has(household.id)) {
-          buyHouseholdNeeds(world, settlement, household, elapsedMonths);
-          feedHousehold(world, household, elapsedMonths);
-        }
+        // Детализация наблюдателя не меняет потребление семьи. Все домохозяйства
+        // проходят один и тот же материальный цикл; подробный режим только показывает его.
+        buyHouseholdNeeds(world, settlement, household, elapsedMonths);
+        feedHousehold(world, household, elapsedMonths);
       }
       for (const establishment of localEstablishments) payWagesAndTaxes(world, settlement, establishment, elapsedMonths);
       for (const householdId of settlement.householdIds) {
@@ -1490,6 +1620,7 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         if (kingdom) kingdom.treasury += householdTax;
       }
       recalculateMarket(world, settlement);
+      world.simulation.economyLastTickBySettlement[key] = tick;
     }
     createShipments(world, settlementIds);
   } finally {

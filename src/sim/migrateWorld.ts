@@ -31,17 +31,18 @@ import { normalizeSettlementLayouts } from './cityMorphology';
 import { initializeSettlementLifecycle } from './settlementLifecycle';
 import { initializeStateFormation } from './stateFormation';
 import { initializeRegionalEconomy } from './regionalEconomy';
+import { initializeWorldLaw } from './worldLaw';
 
 export function migrateWorld(input: unknown): WorldState {
   const raw = structuredClone(input) as any;
   if (!raw || !Array.isArray(raw.tiles) || !Array.isArray(raw.characters)) throw new Error('Неверный формат сохранения');
   const sourceVersion = Number(raw.version ?? 0);
   const localized = localizeLegacyWorld(raw as WorldState) as any;
-  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-33`);
+  const rng = new RNG(`${localized.config?.seed ?? 'Eldervale'}:переход-на-схему-34`);
   const previousLocalSize = localized.config?.localMapSize ?? 48;
 
   const hadTerritoryHistory = Array.isArray(localized.territoryHistory) && localized.territoryHistory.length > 0;
-  localized.version = 33;
+  localized.version = 34;
   localized.language = 'ru';
   localized.appVersion = APP_VERSION;
   localized.config ??= {};
@@ -131,6 +132,7 @@ export function migrateWorld(input: unknown): WorldState {
   if (sourceVersion < 27) localized.simulation.civilizationSystemVersion = undefined;
   if (sourceVersion < 32) { localized.simulation.technologyKnowledgeVersion = undefined; localized.simulation.lastTechnologyKnowledgeAdvanceYear = undefined; }
   if (sourceVersion < 33) localized.simulation.regionalEconomyVersion = undefined;
+  if (sourceVersion < 34) localized.simulation.worldLawVersion = undefined;
   if (sourceVersion < 29) localized.simulation.settlementLifecycleVersion = undefined;
   if (sourceVersion < 30) localized.simulation.stateFormationVersion = undefined;
   localized.history ??= {
@@ -343,6 +345,7 @@ export function migrateWorld(input: unknown): WorldState {
   initializeCultureSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-культура-вера-образование-v1`));
   initializeCivilizationSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-цивилизации-и-технологии-v1`));
   initializeTechnologyKnowledge(localized as WorldState, new RNG(`${localized.config.seed}:переход-локальные-знания-v1`));
+  initializeWorldLaw(localized as WorldState);
   initializeRegionalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-региональная-экономика-v1`));
   initializeSettlementLifecycle(localized as WorldState);
   initializeStateFormation(localized as WorldState);

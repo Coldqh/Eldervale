@@ -48,6 +48,21 @@ export function initializeHealthSystem(world: WorldState): void {
   world.nextIds.epidemic ??= Math.max(0, ...world.epidemics.map(item => item.id)) + 1;
   const tick = worldTick(world);
 
+  // Биологический пол назначается один раз при первом создании профиля. Для
+  // уже созданной супружеской пары генератор выбирает совместимую комбинацию,
+  // но никогда не переписывает сохранённое значение существующего человека.
+  for (const character of world.characters) {
+    if (!character.spouseId || character.id > character.spouseId) continue;
+    const spouse = world.characters.find(item => item.id === character.spouseId);
+    if (!spouse) continue;
+    if (!character.sex && !spouse.sex) {
+      const firstFemale = hashSeed(`${world.config.seed}:founding-couple-sex:${character.id}:${spouse.id}`) % 2 === 0;
+      character.sex = firstFemale ? 'female' : 'male';
+      spouse.sex = firstFemale ? 'male' : 'female';
+    } else if (!character.sex && spouse.sex) character.sex = spouse.sex === 'female' ? 'male' : 'female';
+    else if (!spouse.sex && character.sex) spouse.sex = character.sex === 'female' ? 'male' : 'female';
+  }
+
   for (const character of world.characters) {
     character.sex ??= seededSex(world, character.id);
     character.healthProfile ??= {
@@ -60,14 +75,8 @@ export function initializeHealthSystem(world: WorldState): void {
     normalizeHealthProfile(character, tick);
   }
 
-  // Старые супружеские пары получают совместимую биологическую пару. Это миграция,
-  // а не ежемесячное изменение личности.
-  for (const character of world.characters) {
-    if (!character.spouseId || character.id > character.spouseId) continue;
-    const spouse = world.characters.find(item => item.id === character.spouseId);
-    if (!spouse || character.sex !== spouse.sex) continue;
-    spouse.sex = character.sex === 'female' ? 'male' : 'female';
-  }
+  // Брак и биология независимы. Инициализация здоровья не переписывает
+  // существующему человеку пол ради удобства демографической модели.
 
   for (const pregnancy of world.pregnancies.filter(item => item.status === 'беременность' || item.status === 'роды')) {
     const parent = world.characters.find(item => item.id === pregnancy.gestatingParentId);
@@ -100,14 +109,14 @@ export function advanceHealthSystem(world: WorldState, rng: RNG, indexes: WorldI
 function processPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes, tick: number): void {
   const due = world.pregnancies.filter(item => item.status === 'беременность' && item.dueTick <= tick);
   for (const pregnancy of due) {
-    const parentA = indexes.characterById.get(pregnancy.parentAId);
-    const parentB = indexes.characterById.get(pregnancy.parentBId);
-    const gestating = indexes.characterById.get(pregnancy.gestatingParentId);
-    const settlement = gestating ? indexes.settlementById.get(gestating.settlementId) : undefined;
+    const parentA = indexes.characterById.get(pregnancy.parentAId) ?? world.characters.find(item => item.id === pregnancy.parentAId);
+    const parentB = indexes.characterById.get(pregnancy.parentBId) ?? world.characters.find(item => item.id === pregnancy.parentBId);
+    const gestating = indexes.characterById.get(pregnancy.gestatingParentId) ?? world.characters.find(item => item.id === pregnancy.gestatingParentId);
+    const settlement = gestating?.alive ? indexes.settlementById.get(gestating.settlementId) : undefined;
     if (settlement) pregnancy.settlementId = settlement.id;
-    if (!parentA?.alive || !parentB?.alive || !gestating?.alive || !settlement) {
+    if (!gestating?.alive || !settlement) {
       pregnancy.status = 'потеря';
-      pregnancy.history.push('Беременность завершилась после смерти или исчезновения одного из родителей.');
+      pregnancy.history.push('Беременность завершилась после смерти или исчезновения вынашивающего родителя.');
       if (gestating?.healthProfile) gestating.healthProfile.pregnancyId = undefined;
       continue;
     }
@@ -125,17 +134,19 @@ function processPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes, 
       gestating.health = Math.max(8, gestating.health - Math.round(severity * .18));
     }
 
-    const child = createChild(world, rng, indexes, pregnancy, parentA, parentB, settlement, care);
+    const child = createChild(world, rng, indexes, pregnancy, gestating, parentA, parentB, settlement, care);
     pregnancy.childId = child.id;
     pregnancy.status = 'завершено';
     pregnancy.history.push(`Роды завершились в ${world.year}.${String(world.month).padStart(2, '0')}; родился ${child.name}.`);
     gestating.healthProfile!.pregnancyId = undefined;
+    const parentAName = parentName(world, pregnancy.parentAId);
+    const parentBName = parentName(world, pregnancy.parentBId);
     appendCausalEvent(world, {
-      kind: 'birth', title: `Родился ${child.name}`, description: `У ${parentA.name} и ${parentB.name} родился ребёнок.`,
+      kind: 'birth', title: `Родился ${child.name}`, description: `У ${parentAName} и ${parentBName} родился ребёнок.`,
       cause: 'завершившаяся беременность', conditions: [`здоровье роженицы ${Math.round(gestating.health)}%`, `качество помощи ${Math.round(care)}%`],
       decision: 'семья и повитухи приняли роды', outcome: `${child.name} появился на свет`,
       consequences: child.dynastyId ? ['у династии появился новый член', 'семье требуется больше пищи и жилья'] : ['семья стала больше', 'возросла нагрузка на домохозяйство'],
-      entityRefs: [{ kind: 'character', id: child.id }, { kind: 'character', id: parentA.id }, { kind: 'character', id: parentB.id }, { kind: 'settlement', id: settlement.id }],
+      entityRefs: [{ kind: 'character', id: child.id }, ...(parentA?.alive ? [{ kind: 'character' as const, id: parentA.id }] : []), ...(parentB?.alive ? [{ kind: 'character' as const, id: parentB.id }] : []), { kind: 'settlement', id: settlement.id }],
       importance: child.dynastyId ? 2 : 1,
     });
   }
@@ -305,21 +316,27 @@ function startPregnancies(world: WorldState, rng: RNG, indexes: WorldIndexes, fe
   for (const settlement of world.settlements) {
     const residents = indexes.residentsBySettlement.get(settlement.id) ?? [];
     const spareHousing = Math.max(0, settlement.residentialCapacity - settlement.population);
-    if (spareHousing <= 0 || settlement.food < (fertilityBoost > 1 ? 8 : 28)) continue;
+    const housingPressure = Math.max(0, settlement.population - settlement.residentialCapacity) / Math.max(1, settlement.population);
     const candidates = residents
       .filter(character => character.alive && character.spouseId && character.id < character.spouseId! && !character.healthProfile!.pregnancyId)
       .map(character => [character, indexes.characterById.get(character.spouseId!)] as const)
       .filter((pair): pair is readonly [Character, Character] => Boolean(pair[1]?.alive && pair[1]?.settlementId === settlement.id && !pair[1]?.healthProfile?.pregnancyId))
       .filter(([a, b]) => a.sex !== b.sex && fertile(a, fertilityBoost > 1) && fertile(b, fertilityBoost > 1));
     if (!candidates.length) continue;
-    const target = Math.min(Math.ceil(6 * fertilityBoost), spareHousing, Math.max(1, Math.ceil(candidates.length * .06 * fertilityBoost)));
+    const housingAllowance = Math.max(1, spareHousing + Math.ceil(candidates.length * Math.max(.08, .35 - housingPressure)));
+    const target = Math.min(Math.ceil(6 * fertilityBoost), housingAllowance, Math.max(1, Math.ceil(candidates.length * .1 * fertilityBoost)));
     let created = 0;
     for (const [a, b] of candidates) {
       if (created >= target || world.pregnancies.filter(item => item.status === 'беременность').length >= MAX_ACTIVE_PREGNANCIES) break;
       const gestating = a.sex === 'female' ? a : b;
       const partner = gestating.id === a.id ? b : a;
       const fertility = (gestating.healthProfile!.fertility + partner.healthProfile!.fertility) / 2;
-      const chance = Math.min(.72, (.025 + fertility / 750 + settlement.prosperity / 1600 - (settlement.shortages.length ? .04 : 0)) * fertilityBoost);
+      const gestatingHousehold = gestating.householdId ? indexes.householdById.get(gestating.householdId) : undefined;
+      const partnerHousehold = partner.householdId ? indexes.householdById.get(partner.householdId) : undefined;
+      const familyHunger = Math.max(gestating.needs.hunger, partner.needs.hunger, gestatingHousehold?.needs.hunger ?? 0, partnerHousehold?.needs.hunger ?? 0);
+      const reserveSupport = Math.max(gestatingHousehold?.foodReserveDays ?? 0, partnerHousehold?.foodReserveDays ?? 0) >= 20 ? .035 : 0;
+      const scarcityPenalty = familyHunger / 1250 + (settlement.food < 4 ? .015 : 0);
+      const chance = Math.min(.72, Math.max(.05, (.055 + fertility / 550 + settlement.prosperity / 1450 + reserveSupport - (settlement.shortages.length ? .025 : 0) - housingPressure * .06 - scarcityPenalty) * fertilityBoost));
       if (!rng.chance(chance)) continue;
       const pregnancy: Pregnancy = {
         id: world.nextIds.pregnancy++, parentAId: a.id, parentBId: b.id, gestatingParentId: gestating.id,
@@ -387,20 +404,32 @@ function createCondition(
   return condition;
 }
 
-function createChild(world: WorldState, rng: RNG, indexes: WorldIndexes, pregnancy: Pregnancy, parentA: Character, parentB: Character, settlement: Settlement, care: number): Character {
+function createChild(
+  world: WorldState,
+  rng: RNG,
+  indexes: WorldIndexes,
+  pregnancy: Pregnancy,
+  gestatingParent: Character,
+  parentA: Character | undefined,
+  parentB: Character | undefined,
+  settlement: Settlement,
+  care: number,
+): Character {
   const tick = worldTick(world);
-  const gestatingParent = pregnancy.gestatingParentId === parentA.id ? parentA : parentB;
-  const otherParent = gestatingParent.id === parentA.id ? parentB : parentA;
-  const residentParent = [gestatingParent, otherParent].find(parent => parent.settlementId === settlement.id && parent.householdId)
-    ?? [gestatingParent, otherParent].find(parent => parent.settlementId === settlement.id)
+  const knownParents = [parentA, parentB].filter((parent): parent is Character => Boolean(parent));
+  const otherParent = knownParents.find(parent => parent.id !== gestatingParent.id);
+  const residentParent = [gestatingParent, otherParent].filter((parent): parent is Character => Boolean(parent))
+    .find(parent => parent.settlementId === settlement.id && parent.householdId)
+    ?? [gestatingParent, otherParent].filter((parent): parent is Character => Boolean(parent)).find(parent => parent.settlementId === settlement.id)
     ?? gestatingParent;
+  const species = gestatingParent.species;
   const child: Character = {
-    id: world.nextIds.character++, name: personName(rng, parentA.species), sex: rng.chance(.5) ? 'female' : 'male', species: parentA.species,
+    id: world.nextIds.character++, name: personName(rng, species), sex: rng.chance(.5) ? 'female' : 'male', species,
     age: 0, birthYear: world.year, alive: true, settlementId: settlement.id, kingdomId: settlement.kingdomId,
-    dynastyId: parentA.dynastyId ?? parentB.dynastyId, profession: 'child', workplace: 'дом семьи',
+    dynastyId: gestatingParent.dynastyId ?? otherParent?.dynastyId, profession: 'child', workplace: 'дом семьи',
     homeDistrict: residentParent.homeDistrict ?? settlement.districts[0]?.name, renown: 0,
     health: clamp(rng.int(68, 96) + care * .05 - pregnancy.risk * .08), wealth: 0, loyalty: rng.int(35, 85), ambition: 'вырасти и найти своё место в мире',
-    parentIds: [parentA.id, parentB.id], childIds: [], relationshipIds: [], titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0,
+    parentIds: [...new Set([pregnancy.parentAId, pregnancy.parentBId])], childIds: [], relationshipIds: [], titles: [], artifactIds: [], bookIds: [], injuries: [], kills: 0,
     biography: [`Родился в ${settlement.name} в ${world.year} году.`], householdId: residentParent.householdId,
     homeBuildingId: residentParent.homeBuildingId, inventoryItemIds: [], skills: { child: 1 },
     needs: { hunger: 8, thirst: 8, rest: 12, warmth: 12, safety: 8, social: 14, lastUpdatedTick: tick },
@@ -410,7 +439,9 @@ function createChild(world: WorldState, rng: RNG, indexes: WorldIndexes, pregnan
     healthProfile: { lifeStage: 'младенец', frailty: rng.int(18, 42), immunity: rng.int(28, 72), fertility: rng.int(35, 92), activeConditionIds: [], chronicConditions: [], lastHealthTick: tick },
   };
   ensureCharacterCultureProfile(world, child, rng);
-  parentA.childIds.push(child.id); parentB.childIds.push(child.id); world.characters.push(child); addResidentToIndexes(indexes, child);
+  for (const parent of knownParents) if (!parent.childIds.includes(child.id)) parent.childIds.push(child.id);
+  world.characters.push(child);
+  addResidentToIndexes(indexes, child);
   if (child.householdId) {
     const household = indexes.householdById.get(child.householdId);
     if (household) {
@@ -419,11 +450,16 @@ function createChild(world: WorldState, rng: RNG, indexes: WorldIndexes, pregnan
       child.homeBuildingId = home?.id; child.homeDistrict = home?.districtName ?? child.homeDistrict;
     }
   }
-  addFamilyRelationship(world, indexes, parentA, child, rng.int(72, 100));
-  addFamilyRelationship(world, indexes, parentB, child, rng.int(72, 100));
+  for (const parent of knownParents.filter(item => item.alive)) addFamilyRelationship(world, indexes, parent, child, rng.int(72, 100));
   if (child.dynastyId) world.dynasties.find(item => item.id === child.dynastyId)?.memberIds.push(child.id);
   settlement.population = (indexes.residentsBySettlement.get(settlement.id) ?? []).length;
   return child;
+}
+
+function parentName(world: WorldState, characterId: number): string {
+  return world.characters.find(character => character.id === characterId)?.name
+    ?? world.burials.find(record => record.subjectKind === 'character' && record.subjectId === characterId)?.name
+    ?? `родитель №${characterId}`;
 }
 
 function addFamilyRelationship(world: WorldState, indexes: WorldIndexes, a: Character, b: Character, strength: number): void {

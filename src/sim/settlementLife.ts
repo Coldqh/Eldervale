@@ -97,10 +97,10 @@ export function advanceSettlementLife(
       aggregateDistantDisorder(world, settlement, government, rng);
     }
 
-    const incidentTarget = populationCrimeIncidentCount(world, settlement, government, rng, elapsedMonths);
+    const opportunities = populationCrimeOpportunityCount(world, settlement, government, elapsedMonths);
     let created = 0;
-    for (let attempt = 0; attempt < incidentTarget; attempt += 1) {
-      if (maybeCommitCrime(world, settlement, government, rng, indexes, { forced: true })) created += 1;
+    for (let attempt = 0; attempt < opportunities; attempt += 1) {
+      if (maybeCommitCrime(world, settlement, government, rng, indexes)) created += 1;
     }
     const hasJusticeWork = created > 0 || unresolvedCrimeSettlements.has(settlement.id) || pendingCourtSettlements.has(settlement.id);
     if (hasJusticeWork) {
@@ -122,17 +122,34 @@ function ensureGovernment(world: WorldState, settlement: Settlement, rng: RNG, i
     .filter(character => character.id !== leader.id)
     .sort((a, b) => councilScore(b) - councilScore(a) || a.id - b.id)
     .slice(0, Math.max(2, Math.min(8, Math.ceil(settlement.population / 350))));
-  const treasurySeed = Math.max(25, Math.round(settlement.population * (.4 + settlement.prosperity / 90)));
+  const treasurySeed = collectFoundingTreasury(world, settlement.id);
   const government: SettlementGovernment = {
     id: world.nextIds.settlementGovernment++, settlementId: settlement.id, leaderCharacterId: leader.id,
     councilCharacterIds: council.map(item => item.id), treasury: treasurySeed, monthlyTaxIncome: 0, monthlyExpenses: 0,
     corruption: rng.int(2, Math.min(55, 8 + Math.round(settlement.unrest / 3))), guardIds: [], judgeIds: [], firefighterIds: [], teacherIds: [], gravediggerIds: [], prisonerIds: [],
     laws: ['запрет ночного грабежа', 'обязанность тушить соседний пожар', 'рыночные меры и весы', 'штраф за нападение в пределах поселения'],
-    activeDecision: 'поддержание порядка и запасов', history: [`Местное управление оформлено не позднее ${world.year} года.`],
+    activeDecision: treasurySeed > 0 ? 'поддержание порядка и запасов' : 'собрать средства на работу управления', history: [`Местное управление оформлено не позднее ${world.year} года на взносы жителей и заведений: ${treasurySeed.toFixed(1)} крон.`],
   };
   leader.visualRole = leader.titles.length ? leader.visualRole ?? 'official' : 'mayor';
   world.settlementGovernments.push(government);
   return government;
+}
+
+function collectFoundingTreasury(world: WorldState, settlementId: number): number {
+  let treasury = 0;
+  const households = world.households.filter(household => household.settlementId === settlementId).sort((a, b) => b.wealth - a.wealth || a.id - b.id);
+  for (const household of households) {
+    const contribution = Math.min(household.wealth, Math.max(0, household.wealth * .025));
+    household.wealth -= contribution;
+    treasury += contribution;
+  }
+  const establishments = world.establishments.filter(establishment => establishment.settlementId === settlementId && establishment.active).sort((a, b) => b.cash - a.cash || a.id - b.id);
+  for (const establishment of establishments) {
+    const contribution = Math.min(establishment.cash, Math.max(0, establishment.cash * .02));
+    establishment.cash -= contribution;
+    treasury += contribution;
+  }
+  return Math.round(treasury * 100) / 100;
 }
 
 function ensureDistrictStates(world: WorldState, settlement: Settlement): void {
@@ -289,11 +306,10 @@ function advancePatrols(world: WorldState, settlement: Settlement, government: S
   government.activeDecision = settlement.unrest > 55 ? 'усилить ночные патрули' : government.treasury < 10 ? 'сократить расходы служб' : 'поддерживать порядок';
 }
 
-function populationCrimeIncidentCount(
+function populationCrimeOpportunityCount(
   world: WorldState,
   settlement: Settlement,
   government: SettlementGovernment,
-  rng: RNG,
   elapsedMonths: number,
 ): number {
   if (settlement.population < 2) return 0;
@@ -303,16 +319,11 @@ function populationCrimeIncidentCount(
   const homeless = states.reduce((sum, item) => sum + item.homelessCount, 0);
   const poverty = homeless / Math.max(1, settlement.population);
   const guardCoverage = government.guardIds.length / Math.max(1, settlement.population) * 1_000;
-  const shortagePressure = Math.min(.8, settlement.shortages.length * .18);
-  const modifier = clamp(
-    .42 + averageCrime / 72 + settlement.unrest / 115 + poverty * 4.2 + shortagePressure + government.corruption / 190 - guardCoverage / 42,
-    .32,
-    2.8,
-  );
-  const expected = settlement.population * .0022 * modifier * elapsedMonths / 12;
-  const whole = Math.floor(expected);
-  const sampled = whole + (rng.chance(expected - whole) ? 1 : 0);
-  return Math.min(Math.max(1, Math.ceil(elapsedMonths * 2)), sampled);
+  const shortagePressure = Math.min(1, settlement.shortages.length * .22);
+  const pressure = clamp(.45 + averageCrime / 85 + settlement.unrest / 140 + poverty * 3.6 + shortagePressure + government.corruption / 220 - guardCoverage / 55, .25, 2.4);
+  // Это число ситуаций, в которых человек мог решиться на преступление, а не
+  // квота преступлений. Каждая ситуация ещё должна пройти личный выбор.
+  return Math.min(32, Math.max(1, Math.ceil(settlement.population / 95 * elapsedMonths * pressure)));
 }
 
 function maybeCommitCrime(
@@ -321,14 +332,13 @@ function maybeCommitCrime(
   government: SettlementGovernment,
   rng: RNG,
   indexes: WorldIndexes,
-  options: { forced?: boolean } = {},
 ): boolean {
   const states = world.districtCivicStates.filter(item => item.settlementId === settlement.id);
   if (!states.length) return false;
   const averageCrime = states.reduce((sum, item) => sum + item.crimeRate, 0) / states.length;
   const poverty = states.reduce((sum, item) => sum + item.homelessCount, 0) / Math.max(1, settlement.population);
   const opportunityChance = clamp(.008 + averageCrime / 1800 + settlement.unrest / 2300 + poverty * .22 - government.guardIds.length / Math.max(1, settlement.population) * 1.5, .002, .24);
-  if (!options.forced && !rng.chance(opportunityChance)) return false;
+  if (!rng.chance(opportunityChance)) return false;
   const district = rng.weighted(states.map(item => ({ value: item, weight: Math.max(1, item.crimeRate + item.homelessCount * 4) })));
   const residents = residentsOf(world, settlement.id, indexes).filter(character => character.alive && character.age >= 14 && character.legalStatus !== 'заключён');
   if (residents.length < 2) return false;
@@ -376,9 +386,7 @@ function maybeCommitCrime(
 
   const selected = evaluated[0];
   if (!selected) return false;
-  if (options.forced) {
-    if (selected.margin < -12) return false;
-  } else if (selected.margin < 4 || !rng.chance(Math.min(.82, .12 + selected.margin / 110))) return false;
+  if (selected.margin < 4 || !rng.chance(Math.min(.82, .12 + selected.margin / 110))) return false;
   const perpetrator = selected.character;
   const type = selected.chosen.id as CrimeType;
   const victims = reservoirSample(residents.filter(character => character.id !== perpetrator.id), 80, rng);

@@ -24,7 +24,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .15,
 });
 
-assert.equal(world.version, 33);
+assert.equal(world.version, 34);
 assert.equal(world.cityStates.length, world.settlements.length, 'каждое поселение должно иметь городской аудит');
 assert.ok(world.cityStates.every(state => state.land.freeBuildableCells >= 0), 'свободная земля не может быть отрицательной');
 assert.ok(world.buildings.every(building => building.cityCapacity?.version === 2), 'каждое здание должно иметь профиль функциональной вместимости');
@@ -67,12 +67,21 @@ for (const state of world.cityStates) {
   assert.ok(state.land.districtTiles >= 1, 'город должен занимать хотя бы одну локальную территорию');
 }
 
-const house = world.buildings.find(building => ['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle'].includes(building.type)
-  && (building.cityCapacity?.permanentBeds ?? 0) >= 1
-  && world.constructionProjects.filter(project => project.settlementId === building.settlementId && !['завершено', 'заброшено'].includes(project.stage)).length < 3);
-assert.ok(house, 'для проверки нужно жилое здание');
-const settlementHouseholds = world.households.filter(household => household.settlementId === house!.settlementId).slice(0, 5);
-assert.ok(settlementHouseholds.length >= 2, 'для проверки перенаселения нужны несколько домохозяйств');
+const crowdedCandidate = world.settlements
+  .map(settlement => ({
+    settlement,
+    households: world.households.filter(household => household.settlementId === settlement.id
+      && household.memberIds.some(id => world.characters.some(character => character.id === id && character.alive))),
+    houses: world.buildings.filter(building => building.settlementId === settlement.id
+      && ['house', 'tenement', 'manor', 'barracks', 'monastery', 'castle'].includes(building.type)
+      && (building.cityCapacity?.permanentBeds ?? 0) >= 1),
+  }))
+  .filter(entry => entry.households.length >= 2 && entry.houses.length > 0
+    && world.constructionProjects.filter(project => project.settlementId === entry.settlement.id && !['завершено', 'заброшено'].includes(project.stage)).length < 3)
+  .sort((a, b) => b.households.length - a.households.length || a.settlement.id - b.settlement.id)[0];
+assert.ok(crowdedCandidate, 'для проверки перенаселения нужны поселение, несколько живых домохозяйств и жилое здание');
+const house = crowdedCandidate!.houses.sort((a, b) => (a.cityCapacity?.permanentBeds ?? 0) - (b.cityCapacity?.permanentBeds ?? 0) || a.id - b.id)[0]!;
+const settlementHouseholds = crowdedCandidate!.households.slice(0, 5);
 for (const household of settlementHouseholds) {
   household.homeBuildingId = house!.id;
   for (const characterId of household.memberIds) {

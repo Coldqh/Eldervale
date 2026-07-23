@@ -125,32 +125,18 @@ function ensurePopulationState(world: WorldState): PopulationSystemState {
 }
 
 function seededSettlementProfile(world: WorldState, settlement: Settlement): SettlementRaceProfile {
-  const kingdom = world.kingdoms.find(item => item.id === settlement.kingdomId);
-  const primary = kingdom?.species ?? 'human';
-  const crossBorderRoute = world.tradeRoutes.some(route => {
-    if (route.fromSettlementId !== settlement.id && route.toSettlementId !== settlement.id) return false;
-    return route.controlledByKingdomIds.some(id => id !== settlement.kingdomId);
-  });
-  const capital = kingdom?.capitalId === settlement.id;
-  const baseChance = settlement.type === 'port' ? 70
-    : settlement.type === 'city' ? 48
-      : settlement.type === 'town' ? 28
-        : settlement.type === 'village' ? 14
-          : settlement.type === 'fortress' ? 12 : 8;
-  const expansion = Math.round(mixedSettlementScale() * (settlement.type === 'port' || capital ? 180 : 90));
-  const threshold = baseChance + expansion + (crossBorderRoute ? 26 : 0) + (capital ? 18 : 0);
-  const mixed = hashSeed(`${world.config.seed}:смешанное-поселение-v2:${settlement.id}`) % 1000 < threshold;
-  const reason = crossBorderRoute ? 'приграничная торговля'
-    : settlement.type === 'port' ? 'порт и постоянный поток приезжих'
-      : capital ? 'столица притягивает чужеземцев'
-        : 'редкое историческое переселение';
-  if (!mixed) return { primary, mixed: false, minorityShare: 0, reason: 'поселение народа государства' };
-
-  const neighbours = neighbouringSpecies(world, settlement, primary);
-  const alternatives = neighbours.length ? neighbours : ACTIVE_SPECIES.filter(species => species !== primary);
-  const minority = alternatives[hashSeed(`${world.config.seed}:меньшинство-v2:${settlement.id}`) % alternatives.length]!;
-  const minorityShare = .03 + (hashSeed(`${world.config.seed}:доля-меньшинства-v2:${settlement.id}`) % 5) / 100;
-  return { primary, mixed: true, minority, minorityShare, reason };
+  const shares = settlementPopulationBreakdown(world, settlement.id);
+  const kingdomSpecies = world.kingdoms.find(item => item.id === settlement.kingdomId)?.species ?? 'human';
+  const primary = shares[0]?.species ?? kingdomSpecies;
+  const minority = shares.find(item => item.species !== primary);
+  if (!minority) return { primary, mixed: false, minorityShare: 0, reason: shares.length ? 'фактическое население поселения' : 'поселение пока не имеет жителей' };
+  return {
+    primary,
+    mixed: true,
+    minority: minority.species,
+    minorityShare: shares.filter(item => item.species !== primary).reduce((sum, item) => sum + item.share, 0),
+    reason: 'рождения, браки и переселения жителей',
+  };
 }
 
 function neighbouringSpecies(world: WorldState, settlement: Settlement, primary: Species): Species[] {
@@ -167,58 +153,15 @@ function neighbouringSpecies(world: WorldState, settlement: Settlement, primary:
 }
 
 function normalizeExistingPopulation(world: WorldState): void {
-  for (const settlement of [...world.settlements].sort((a, b) => a.id - b.id)) {
-    const profile = seededSettlementProfile(world, settlement);
-    const residents = world.characters
-      .filter(character => character.settlementId === settlement.id)
-      .sort((a, b) => a.id - b.id);
-    if (!residents.length) continue;
-
-    const desired = new Map<number, Species>();
-    for (const resident of residents) desired.set(resident.id, profile.primary);
-    if (profile.mixed && profile.minority) {
-      const targetMinority = Math.max(1, Math.round(residents.length * profile.minorityShare));
-      const minorityResidents = [...residents]
-        .filter(character => !world.kingdoms.some(kingdom => kingdom.rulerId === character.id))
-        .sort((a, b) => demographicRank(world, settlement.id, b.id) - demographicRank(world, settlement.id, a.id) || a.id - b.id)
-        .slice(0, targetMinority);
-      for (const resident of minorityResidents) desired.set(resident.id, profile.minority);
-    }
-
-    const handledSpouses = new Set<number>();
-    for (const resident of residents) {
-      if (!resident.spouseId || handledSpouses.has(resident.id)) continue;
-      const spouse = world.characters.find(character => character.id === resident.spouseId && character.settlementId === settlement.id);
-      if (!spouse) continue;
-      handledSpouses.add(resident.id); handledSpouses.add(spouse.id);
-      const royalCouple = world.kingdoms.some(kingdom => kingdom.rulerId === resident.id || kingdom.rulerId === spouse.id);
-      if (royalCouple) {
-        desired.set(resident.id, profile.primary); desired.set(spouse.id, profile.primary);
-        continue;
-      }
-      const intermarriage = profile.mixed && profile.minority
-        && hashSeed(`${world.config.seed}:межрасовая-пара-v2:${Math.min(resident.id, spouse.id)}:${Math.max(resident.id, spouse.id)}`) % 10000
-          < Math.round(Math.min(raceDefinition(profile.primary).intermarriageChance, raceDefinition(profile.minority).intermarriageChance) * 10000);
-      if (intermarriage && profile.minority) {
-        const firstPrimary = hashSeed(`${world.config.seed}:вид-пары-v2:${resident.id}:${spouse.id}`) % 2 === 0;
-        desired.set(resident.id, firstPrimary ? profile.primary : profile.minority);
-        desired.set(spouse.id, firstPrimary ? profile.minority : profile.primary);
-      } else {
-        const familySpecies = desired.get(resident.id) === profile.minority || desired.get(spouse.id) === profile.minority
-          ? profile.minority ?? profile.primary : profile.primary;
-        desired.set(resident.id, familySpecies); desired.set(spouse.id, familySpecies);
-      }
-    }
-
-    for (const resident of residents) setCharacterSpecies(world, resident, desired.get(resident.id) ?? profile.primary, false);
-    for (const child of residents.filter(character => character.parentIds.length).sort((a, b) => a.age - b.age || a.id - b.id)) {
-      const inherited = inheritedSpecies(world, child);
-      if (inherited) setCharacterSpecies(world, child, inherited, child.age === 0);
-    }
-  }
-  for (const kingdom of world.kingdoms) {
-    const ruler = world.characters.find(character => character.id === kingdom.rulerId);
-    if (ruler) setCharacterSpecies(world, ruler, kingdom.species, false);
+  // Вид уже существующего человека является биографическим фактом. Инициализация
+  // демографии больше не переписывает взрослых под целевую долю государства.
+  // Исправляется только наследование у детей, когда в старом сохранении оно
+  // противоречит видам известных родителей.
+  for (const child of world.characters
+    .filter(character => character.parentIds.length > 0)
+    .sort((a, b) => a.age - b.age || a.id - b.id)) {
+    const inherited = inheritedSpecies(world, child);
+    if (inherited) setCharacterSpecies(world, child, inherited, child.age === 0);
   }
 }
 
@@ -230,21 +173,9 @@ function normalizeNewCharacters(world: WorldState, state: PopulationSystemState)
 
 function normalizeNewCharacter(world: WorldState, character: Character): void {
   const inherited = inheritedSpecies(world, character);
-  if (inherited) {
-    setCharacterSpecies(world, character, inherited, character.age === 0);
-    return;
-  }
-  const spouse = character.spouseId ? world.characters.find(item => item.id === character.spouseId) : undefined;
-  if (spouse) {
-    setCharacterSpecies(world, character, spouse.species, false);
-    return;
-  }
-  const settlement = world.settlements.find(item => item.id === character.settlementId);
-  if (!settlement) return;
-  const profile = settlementRaceProfile(world, settlement);
-  const minority = profile.mixed && profile.minority
-    && hashSeed(`${world.config.seed}:новый-житель-меньшинство-v2:${settlement.id}:${character.id}`) % 10000 < Math.round(profile.minorityShare * 10000);
-  setCharacterSpecies(world, character, minority ? profile.minority! : profile.primary, character.age === 0);
+  if (inherited) setCharacterSpecies(world, character, inherited, character.age === 0);
+  // Новые взрослые персонажи и переселенцы сохраняют уже заданный вид. Он должен
+  // происходить из их рождения или биографии, а не из статистического профиля города.
 }
 
 function setCharacterSpecies(world: WorldState, character: Character, species: Species, renameNewborn: boolean): void {
@@ -387,30 +318,18 @@ function migrationReason(world: WorldState, settlement: Settlement): MigrationRe
 }
 
 function canEnterSettlement(world: WorldState, destination: Settlement, species: Species[], reason: MigrationReason, seedId: number): boolean {
-  const primary = world.kingdoms.find(item => item.id === destination.kingdomId)?.species ?? 'human';
-  if (species.every(item => item === primary)) return true;
   const existing = settlementPopulationBreakdown(world, destination.id);
   if (species.every(item => existing.some(share => share.species === item))) return true;
-
-  // Обычная миграция может сформировать одно устойчивое меньшинство, но не должна
-  // постепенно превращать каждую торговую столицу в случайную смесь всех народов.
-  const existingSpecies = new Set(existing.filter(share => share.count > 0).map(share => share.species));
-  const combinedSpecies = new Set<Species>([...existingSpecies, ...species]);
-  const nonPrimarySpecies = [...combinedSpecies].filter(item => item !== primary);
-  if (combinedSpecies.size > 2 || nonPrimarySpecies.length > 1) return false;
-
-  const introducesMinority = [...species].some(item => !existingSpecies.has(item));
-  if (introducesMinority && existingSpecies.size <= 1) {
-    const mixedSettlementCount = world.settlements.filter(settlement => settlementPopulationBreakdown(world, settlement.id).filter(share => share.count > 0).length > 1).length;
-    const mixedSettlementLimit = Math.max(1, Math.ceil(world.settlements.length * .2));
-    if (mixedSettlementCount >= mixedSettlementLimit) return false;
-  }
 
   const refugeeReason = reason === 'война' || reason === 'эпидемия' || reason === 'климат' || reason === 'голод';
   const openPlace = destination.type === 'port' || destination.type === 'city' || destination.tradeRouteIds.length >= 2;
   if (!refugeeReason && !openPlace) return false;
-  const chance = refugeeReason ? .34 : destination.type === 'port' ? .18 : .09;
-  return (hashSeed(`${world.config.seed}:открытие-меньшинства:${destination.id}:${seedId}:${reason}`) % 10000) / 10000 < chance;
+
+  // Новая община может получить несколько меньшинств. Ограничение создают
+  // границы, вместимость, опасность пути и отношение принимающего города, а не
+  // скрытая глобальная квота на число народов.
+  const chance = refugeeReason ? .72 : destination.type === 'port' ? .46 : destination.type === 'city' ? .34 : .22;
+  return (hashSeed(`${world.config.seed}:допуск-переселенцев:${destination.id}:${seedId}:${reason}:${species.join('-')}`) % 10000) / 10000 < chance;
 }
 
 function moveGroup(
@@ -531,20 +450,21 @@ function refreshPopulationState(world: WorldState, state: PopulationSystemState)
   const recentStart = worldTick(world) - 12;
   state.settlements = world.settlements.map(settlement => {
     const shares = settlementPopulationBreakdown(world, settlement.id);
-    const kingdomSpecies = world.kingdoms.find(item => item.id === settlement.kingdomId)?.species ?? shares[0]?.species ?? 'human';
+    const kingdomSpecies = world.kingdoms.find(item => item.id === settlement.kingdomId)?.species ?? 'human';
+    const primarySpecies = shares[0]?.species ?? kingdomSpecies;
     const outgoing = state.migrations.filter(item => item.tick >= recentStart && item.fromSettlementId === settlement.id).reduce((sum, item) => sum + item.characterIds.length, 0);
     const incoming = state.migrations.filter(item => item.tick >= recentStart && item.toSettlementId === settlement.id).reduce((sum, item) => sum + item.characterIds.length, 0);
     const seeded = seededSettlementProfile(world, settlement);
     const mixed = shares.filter(item => item.count > 0).length > 1;
-    const minority = shares.find(item => item.species !== kingdomSpecies)?.species;
+    const minority = shares.find(item => item.species !== primarySpecies)?.species;
     const reason = mixed
-      ? state.migrations.some(item => item.toSettlementId === settlement.id && item.species.some(species => species !== kingdomSpecies))
+      ? state.migrations.some(item => item.toSettlementId === settlement.id && item.species.some(species => species !== primarySpecies))
         ? 'миграция и переселение'
         : seeded.reason
       : 'поселение народа государства';
     return {
       settlementId: settlement.id,
-      primarySpecies: kingdomSpecies,
+      primarySpecies,
       mixed,
       minoritySpecies: minority,
       reason,

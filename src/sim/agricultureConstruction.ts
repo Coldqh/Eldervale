@@ -131,9 +131,42 @@ function seedFarmForField(world: WorldState, field: FieldPlot): void {
 
 export function advanceAgriculture(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>): void {
   if (!world.fields?.length) initializeAgricultureAndConstruction(world, rng);
-  const tick = worldTick(world);
+  world.simulation.agricultureLastTickBySettlement ??= {};
+  const finalTick = worldTick(world);
+  const finalYear = world.year;
+  const finalMonth = world.month;
+
+  for (const settlementId of settlementIds) {
+    const key = String(settlementId);
+    const lastTick = world.simulation.agricultureLastTickBySettlement[key] ?? Math.max(0, finalTick - 1);
+    const firstTick = Math.max(lastTick + 1, finalTick - 11);
+    for (let tick = firstTick; tick <= finalTick; tick += 1) {
+      world.year = Math.floor(tick / 12);
+      world.month = tick % 12 + 1;
+      advanceAgricultureSettlementMonth(
+        world,
+        new RNG(`${world.config.seed}:agriculture:${settlementId}:${tick}`),
+        indexes,
+        settlementId,
+        tick,
+      );
+    }
+    world.simulation.agricultureLastTickBySettlement[key] = finalTick;
+  }
+
+  world.year = finalYear;
+  world.month = finalMonth;
+}
+
+function advanceAgricultureSettlementMonth(
+  world: WorldState,
+  rng: RNG,
+  indexes: WorldIndexes,
+  settlementId: number,
+  tick: number,
+): void {
   for (const field of world.fields) {
-    if (!settlementIds.has(field.settlementId)) continue;
+    if (field.settlementId !== settlementId) continue;
     const crop = CROPS[field.crop];
     const tile = indexes.tileByCoordinate.get(`${field.globalX}:${field.globalY}`);
     const establishment = field.establishmentId ? indexes.establishmentById.get(field.establishmentId) : undefined;
@@ -195,7 +228,7 @@ function harvestField(world: WorldState, field: FieldPlot, crop: CropDefinition,
   const careFactor = Math.max(.15, 1 - field.weeds / 150 - field.pests / 130);
   const fertilityFactor = .45 + field.fertility / 125;
   const randomFactor = rng.int(82, 118) / 100;
-  const yieldAmount = Math.max(1, Math.round(field.cells.length * crop.baseYieldPerCell * moistureFactor * careFactor * fertilityFactor * randomFactor));
+  const yieldAmount = Math.max(1, Math.round(field.cells.length * crop.baseYieldPerCell * moistureFactor * careFactor * fertilityFactor * randomFactor * 2.4));
   const owner = establishment ? { establishmentId: establishment.id, buildingId: field.farmBuildingId } : { buildingId: field.farmBuildingId };
   addMaterialItem(world, crop.outputTemplateId, yieldAmount, field.settlementId, owner, `урожай поля №${field.id}`, Math.round(40 + field.fertility * .45));
   if (crop.byproductTemplateId) addMaterialItem(world, crop.byproductTemplateId, Math.max(1, Math.round(yieldAmount * .7)), field.settlementId, owner, `побочный продукт жатвы поля №${field.id}`, 45);
@@ -335,6 +368,14 @@ function startCityProjectRequest(
   }
   approveCityProjectRequest(world, request.id);
   const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
+  const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
+  const planningCost = Math.max(1, Math.round(dimensions.width * dimensions.height / 90));
+  if (!government || government.treasury + .0001 < planningCost) {
+    blockCityProjectRequest(world, request.id, `местная власть не собрала ${planningCost} крон на межевание, надзор и организацию работ`);
+    return undefined;
+  }
+  government.treasury -= planningCost;
+  request.history.push(`Местная казна оплатила ${planningCost} крон на подготовку стройки.`);
   let project = placeConstructionProject(world, settlement, request, type, dimensions, rng);
   if (!project) {
     const expansionRole = districtRole(request.targetDistrictRole) ?? preferredDistrictRoles(type)[0]!;
@@ -526,20 +567,54 @@ function createEstablishmentForBuilding(world: WorldState, building: Building, s
   if (!type) return undefined;
   const preferred = PROFESSION_FOR_ESTABLISHMENT[type];
   const residents = indexes.residentsBySettlement.get(settlement.id) ?? [];
-  const owner = residents.filter(character => character.alive && character.age >= 18).sort((a, b) => Number(preferred.includes(b.profession)) - Number(preferred.includes(a.profession)) || b.wealth - a.wealth || a.id - b.id)[0];
+  const publicService = ['городская управа', 'суд', 'тюрьма', 'пожарная команда', 'школа', 'приют', 'казарма', 'арсенал', 'замковое хозяйство'].includes(type);
+  const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
+  const owner = residents
+    .filter(character => character.alive && character.age >= 18 && (publicService || !character.employerEstablishmentId))
+    .sort((a, b) => Number(preferred.includes(b.profession)) - Number(preferred.includes(a.profession)) || b.wealth - a.wealth || b.renown - a.renown || a.id - b.id)[0];
   if (!owner) return undefined;
-  const workers = [owner, ...residents.filter(character => character.id !== owner.id && character.alive && character.age >= 16 && !character.employerEstablishmentId && preferred.includes(character.profession)).slice(0, Math.max(1, Math.ceil(building.capacity / 10)))];
+
+  const startupRequired = Math.max(6, Math.min(80, Math.round(building.capacity * (publicService ? .12 : .22))));
+  let startupCapital = 0;
+  if (publicService) {
+    if (!government || government.treasury + .0001 < startupRequired) {
+      building.history.push(`Здание готово, но служба «${type}» не открылась: в местной казне нет ${startupRequired} крон на запуск.`);
+      return undefined;
+    }
+    government.treasury -= startupRequired;
+    startupCapital = startupRequired;
+  } else {
+    const household = owner.householdId ? indexes.householdById.get(owner.householdId) : undefined;
+    const available = Math.max(0, owner.wallet ?? 0) + Math.max(0, household?.wealth ?? 0);
+    if (available + .0001 < startupRequired) {
+      building.history.push(`Здание готово, но частное дело «${type}» не открылось: ни один подходящий житель не смог вложить ${startupRequired} крон.`);
+      return undefined;
+    }
+    const walletContribution = Math.min(owner.wallet ?? 0, startupRequired);
+    owner.wallet = Math.max(0, (owner.wallet ?? 0) - walletContribution);
+    const householdContribution = startupRequired - walletContribution;
+    if (household && householdContribution > 0) household.wealth = Math.max(0, household.wealth - householdContribution);
+    startupCapital = startupRequired;
+  }
+
+  const workerBudget = Math.max(0, startupCapital - 4);
+  const maxPaidWorkers = Math.max(0, Math.floor(workerBudget / 6));
+  const availableWorkers = residents.filter(character => character.id !== owner.id && character.alive && character.age >= 16 && !character.employerEstablishmentId && preferred.includes(character.profession));
+  const workers = [owner, ...availableWorkers.slice(0, Math.min(maxPaidWorkers, Math.max(1, Math.ceil(building.capacity / 10))))];
   const establishment: Establishment = {
     id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: building.name, type, ownerCharacterId: owner.id,
     workerIds: workers.map(worker => worker.id), supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
     recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id), openHour: 7, closeHour: 19,
-    reputation: rng.int(35, 65), cash: Math.max(20, owner.wealth * .35), debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {}, history: [`Открыто после завершения строительства в ${world.year} году.`],
+    reputation: rng.int(35, 65), cash: startupCapital, debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {},
+    history: [publicService ? `Открыто на средства местной казны после завершения строительства в ${world.year} году.` : `${owner.name} вложил ${startupCapital} крон и открыл дело после завершения строительства в ${world.year} году.`],
   };
   world.establishments.push(establishment); settlement.establishmentIds.push(establishment.id); building.establishmentId = establishment.id; building.ownerCharacterId = owner.id; building.workerIds = [...establishment.workerIds];
   indexes.establishmentById.set(establishment.id, establishment); const list = indexes.establishmentsBySettlement.get(settlement.id) ?? []; list.push(establishment); indexes.establishmentsBySettlement.set(settlement.id, list);
   for (const worker of workers) {
+    if (worker.id !== owner.id && worker.employmentContractId) continue;
     worker.employerEstablishmentId = establishment.id; worker.workplaceBuildingId = building.id; worker.workplace = establishment.name;
-    const contract = { id: world.nextIds.employment++, characterId: worker.id, establishmentId: establishment.id, role: worker.id === owner.id ? 'владелец и мастер' : worker.profession, wage: worker.id === owner.id ? 0 : rng.int(4, 10), hoursPerWeek: rng.int(38, 58), sinceYear: world.year, active: true };
+    const subsistenceProducer = type === 'ферма' || type === 'рыбный промысел';
+    const contract = { id: world.nextIds.employment++, characterId: worker.id, establishmentId: establishment.id, role: worker.id === owner.id ? (publicService ? 'руководитель службы' : 'владелец и мастер') : subsistenceProducer ? 'работник за долю продукции' : worker.profession, wage: worker.id === owner.id || subsistenceProducer ? 0 : rng.int(4, 10), hoursPerWeek: rng.int(38, 58), sinceYear: world.year, active: true, arrears: 0 };
     world.employments.push(contract); indexes.employmentById.set(contract.id, contract); worker.employmentContractId = contract.id;
   }
   return establishment;

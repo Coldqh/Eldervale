@@ -96,30 +96,8 @@ function nearestSettlement(world: WorldState, deposit: ResourceDeposit): Settlem
     })[0]?.settlement;
 }
 
-function fallbackResourceForSettlement(world: WorldState, settlement: Settlement): string {
-  const terrain = world.tiles.find(item => item.x === settlement.x && item.y === settlement.y)?.terrain;
-  if (terrain === 'mountains' || terrain === 'hills') return 'iron_ore';
-  if (terrain === 'forest' || terrain === 'tundra') return 'timber';
-  if (terrain === 'coast') return 'fish';
-  if (terrain === 'marsh') return 'clay';
-  if (terrain === 'desert') return 'salt';
-  return 'grain';
-}
-
 function assignDeposits(world: WorldState): void {
   for (const deposit of world.resourceDeposits) deposit.assignedSettlementId = nearestSettlement(world, deposit)?.id;
-  let id = nextDepositId(world);
-  for (const settlement of world.settlements) {
-    const local = world.resourceDeposits.filter(item => item.assignedSettlementId === settlement.id && item.remaining > 0);
-    if (local.length) continue;
-    const templateId = fallbackResourceForSettlement(world, settlement);
-    const definition = depositDefinition(templateId)!;
-    const rng = new RNG(`${world.config.seed}:ресурс-поселения:${settlement.id}:${settlement.foundedYear}`);
-    const deposit = makeDeposit(world, definition, settlement.x, settlement.y, rng, id++);
-    deposit.assignedSettlementId = settlement.id;
-    deposit.history.push(`Источник закреплён за поселением ${settlement.name}, чтобы его хозяйство имело физическую ресурсную базу.`);
-    world.resourceDeposits.push(deposit);
-  }
 }
 
 function quantityInSettlement(world: WorldState, settlementId: number, templateId: string): number {

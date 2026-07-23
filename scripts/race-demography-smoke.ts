@@ -21,17 +21,23 @@ initializeRaceDemography(world);
 
 let mixedSettlements = 0;
 for (const settlement of world.settlements) {
+  const residents = world.characters.filter(character => character.alive && character.settlementId === settlement.id);
+  const counts = new Map<string, number>();
+  for (const character of residents) counts.set(character.species, (counts.get(character.species) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const profile = settlementRaceProfile(world, settlement);
-  const species = new Set(world.characters.filter(character => character.alive && character.settlementId === settlement.id).map(character => character.species));
-  assert.ok(species.has(profile.primary), `${settlement.name}: основная раса государства должна присутствовать`);
-  if (!profile.mixed) assert.deepEqual([...species], [profile.primary], `${settlement.name}: обычное поселение должно быть однорасовым`);
+  const species = new Set(ranked.map(([item]) => item));
+  if (!residents.length) continue;
+  assert.equal(profile.primary, ranked[0]![0], `${settlement.name}: основной народ должен определяться фактическим большинством жителей`);
+  assert.equal(profile.mixed, species.size > 1, `${settlement.name}: смешанный статус должен следовать из реальных жителей`);
+  if (!profile.mixed) assert.deepEqual([...species], [profile.primary], `${settlement.name}: однонародное поселение должно содержать только фактическое большинство`);
   else {
     mixedSettlements += 1;
-    assert.ok(species.size <= 2, `${settlement.name}: редкое смешанное поселение не должно собирать все расы сразу`);
-    assert.ok([...species].every(item => item === profile.primary || item === profile.minority), `${settlement.name}: допускается только основная раса и одно меньшинство`);
+    assert.ok(profile.minority && species.has(profile.minority), `${settlement.name}: профиль должен показывать реальное крупнейшее меньшинство`);
+    const expectedMinorityShare = 1 - ranked[0]![1] / residents.length;
+    assert.ok(Math.abs(profile.minorityShare - expectedMinorityShare) < .0001, `${settlement.name}: доля меньшинств должна считаться из населения, а не из скрытой квоты`);
   }
 }
-assert.ok(mixedSettlements <= Math.max(1, Math.ceil(world.settlements.length * .2)), 'смешанных поселений пока должно быть мало');
 
 for (const child of world.characters.filter(character => character.parentIds.length >= 2)) {
   const parents = child.parentIds.map(id => world.characters.find(character => character.id === id)).filter(Boolean);

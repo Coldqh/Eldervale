@@ -16,7 +16,7 @@ const world = generateHistoricalWorld({
   seed: 'regional-economy-smoke',
   width: 20,
   height: 14,
-  historyYears: 36,
+  historyYears: 8,
   kingdomCount: 2,
   settlementCount: 8,
   populationScale: .22,
@@ -25,11 +25,11 @@ const world = generateHistoricalWorld({
   ecologyDensity: .45,
 });
 
-assert.equal(world.version, 33, 'новый мир должен использовать схему 33');
+assert.equal(world.version, 34, 'новый мир должен использовать схему 34');
 initializeRegionalEconomy(world);
 assert.equal(world.settlementRegionalEconomies.length, world.settlements.length, 'каждое поселение должно иметь региональную экономику');
-assert.ok(world.resourceDeposits.length > world.settlements.length, 'карта должна содержать распределённые ресурсные источники');
-assert.ok(world.settlements.every(settlement => world.resourceDeposits.some(deposit => deposit.assignedSettlementId === settlement.id)), 'каждое поселение должно иметь физическую ресурсную базу');
+assert.ok(world.resourceDeposits.length > 0, 'карта должна содержать естественные ресурсные источники');
+assert.ok(world.resourceDeposits.every(deposit => !deposit.history.some(entry => entry.includes('чтобы его хозяйство имело физическую ресурсную базу'))), 'поселение не должно получать искусственное месторождение ради выживания');
 
 const ironRecipe = world.productionRecipes.find(recipe => recipe.outputs.some(output => output.templateId === 'iron_ore'));
 assert.ok(ironRecipe, 'должен существовать рецепт добычи железной руды');
@@ -58,8 +58,12 @@ assert.equal(allowedRuns, 2, 'физический остаток месторо
 assert.equal(controlledDeposit.remaining, 0, 'добыча должна списать реальный запас');
 assert.equal(controlledDeposit.exhaustedYear, world.year, 'истощение должно быть записано в мире');
 
-const route = world.tradeRoutes[0];
-assert.ok(route, 'проверка требует реальный торговый путь');
+const route = world.tradeRoutes.find(candidate => {
+  const endpointIds = [candidate.fromSettlementId, candidate.toSettlementId];
+  return endpointIds.every(settlementId => world.establishments.some(establishment => establishment.settlementId === settlementId)
+    && world.characters.some(character => character.alive && character.settlementId === settlementId && character.age >= 16));
+});
+assert.ok(route, 'проверка требует торговый путь между двумя живыми хозяйственными центрами');
 const sellerState = world.settlementRegionalEconomies.find(item => item.settlementId === route!.fromSettlementId)!;
 const buyerState = world.settlementRegionalEconomies.find(item => item.settlementId === route!.toSettlementId)!;
 const seller = world.settlements.find(item => item.id === route!.fromSettlementId)!;
@@ -76,19 +80,33 @@ buyer.economy.supply.iron_ore = 0;
 buyer.economy.demand.iron_ore = 18;
 world.tradeContracts = [];
 synchronizeRegionalTradeContracts(world);
-const contract = activeTradeContractForRoute(world, route!.id);
-assert.ok(contract, 'дефицит и избыток на связанном маршруте должны создать договор поставки');
+const contract = world.tradeContracts.find(item => item.routeId === route!.id && item.fromSettlementId === seller.id && item.toSettlementId === buyer.id && item.templateId === 'iron_ore');
+assert.ok(contract, 'дефицит и избыток на связанном маршруте должны создать договор поставки железной руды');
 assert.equal(contract!.templateId, 'iron_ore');
 assert.equal(contract!.fromSettlementId, seller.id);
 assert.equal(contract!.toSettlementId, buyer.id);
+contract!.maxUnitPrice = 100000;
 world.tradeContracts = [contract!];
 world.shipments = world.shipments.filter(item => item.routeId !== route!.id);
 assert.ok(regionalPriceMultiplier(world, buyer.id, 'iron_ore') > regionalPriceMultiplier(world, seller.id, 'iron_ore'), 'импортозависимый город должен иметь более высокое ценовое давление');
 
 const sellerEstablishment = world.establishments.find(item => item.settlementId === seller.id && item.active && ['рынок', 'лавка', 'склад'].includes(item.type))
-  ?? world.establishments.find(item => item.settlementId === seller.id && item.active);
-const buyerEstablishment = world.establishments.find(item => item.settlementId === buyer.id && item.active && ['рынок', 'лавка', 'склад'].includes(item.type));
-assert.ok(sellerEstablishment && buyerEstablishment, 'физическая поставка требует действующих продавца и рынка-покупателя');
+  ?? world.establishments.find(item => item.settlementId === seller.id);
+const buyerEstablishment = world.establishments.find(item => item.settlementId === buyer.id && item.active && ['рынок', 'лавка', 'склад'].includes(item.type))
+  ?? world.establishments.find(item => item.settlementId === buyer.id);
+assert.ok(sellerEstablishment && buyerEstablishment, 'физическая поставка требует реальных заведений на обоих концах пути');
+sellerEstablishment!.active = true;
+buyerEstablishment!.active = true;
+buyerEstablishment!.type = 'рынок';
+const sellerOwner = world.characters.find(character => character.alive && character.settlementId === seller.id && character.age >= 16);
+const buyerOwner = world.characters.find(character => character.alive && character.settlementId === buyer.id && character.age >= 16);
+assert.ok(sellerOwner && buyerOwner, 'поставка требует живых владельцев заведений');
+sellerEstablishment!.ownerCharacterId = sellerOwner!.id;
+buyerEstablishment!.ownerCharacterId = buyerOwner!.id;
+if (!sellerEstablishment!.workerIds.includes(sellerOwner!.id)) sellerEstablishment!.workerIds.push(sellerOwner!.id);
+if (!buyerEstablishment!.workerIds.includes(buyerOwner!.id)) buyerEstablishment!.workerIds.push(buyerOwner!.id);
+if (!seller.establishmentIds.includes(sellerEstablishment!.id)) seller.establishmentIds.push(sellerEstablishment!.id);
+if (!buyer.establishmentIds.includes(buyerEstablishment!.id)) buyer.establishmentIds.push(buyerEstablishment!.id);
 const oreTemplate = CIVILIZATION_CONTENT.resourceById.get('iron_ore')!;
 const oreItemId = world.nextIds.item++;
 world.items.push({

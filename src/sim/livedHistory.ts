@@ -24,8 +24,10 @@ import { advanceHealthSystem, initializeHealthSystem } from './healthSystem';
 import { initializeBattleSystem } from './battleSystem';
 import { initializeCultureSystem } from './cultureSystem';
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
+import { initializeRegionalEconomy } from './regionalEconomy';
+import { initializeWorldLaw } from './worldLaw';
 import {
-  advanceSettlementLifecycle, formSettlementExpedition, initializeSettlementLifecycle,
+  advanceSettlementLifecycle, initializeSettlementLifecycle,
 } from './settlementLifecycle';
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
@@ -42,7 +44,7 @@ import { advanceDynastyLegacy } from './dynastyLegacy';
 import { APP_VERSION } from '../version';
 
 const GENESIS_VERSION = 1 as const;
-const SCHEMA_VERSION = 33;
+const SCHEMA_VERSION = 34;
 
 interface GenesisPreparation {
   initialSettlementIds: number[];
@@ -77,23 +79,9 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
   }
 
   const initialSettlements = originalSettlements.filter(settlement => seedIds.has(settlement.id));
-  const futureSettlements = originalSettlements.filter(settlement => !seedIds.has(settlement.id));
-  const historyEnd = Math.max(1, config.historyYears);
-  const sites: GenesisSitePlan[] = futureSettlements
-    .sort((a, b) => a.foundedYear - b.foundedYear || a.id - b.id)
-    .map((settlement, index) => ({
-      id: index + 1,
-      originalSettlementId: settlement.id,
-      originalName: settlement.name,
-      x: settlement.x,
-      y: settlement.y,
-      terrain: world.tiles[settlement.y * world.config.width + settlement.x]?.terrain ?? 'plains',
-      resource: settlement.resource,
-      sponsorKingdomId: settlement.kingdomId,
-      targetYear: Math.max(3, Math.min(historyEnd - 1, Math.round(3 + (index + 1) / Math.max(1, futureSettlements.length + 1) * Math.max(1, historyEnd - 6)))),
-      status: 'planned',
-      attempts: 0,
-    }));
+  // Будущая карта не извлекается из готового сгенерированного мира.
+  // Новые поселения появятся только из автономных экспедиций живых общин.
+  const sites: GenesisSitePlan[] = [];
 
   const keptSettlementIds = new Set(initialSettlements.map(settlement => settlement.id));
   const keptCharacterIds = new Set(world.characters.filter(character => keptSettlementIds.has(character.settlementId)).map(character => character.id));
@@ -159,13 +147,13 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
       ?? world.settlements.filter(settlement => settlement.kingdomId === kingdom.id).sort((a, b) => b.population - a.population || a.id - b.id)[0];
     if (capital) kingdom.capitalId = capital.id;
     kingdom.foundedYear = 1;
-    kingdom.treasury = Math.max(80, Math.round(kingdom.treasury * .18));
-    kingdom.armyStrength = Math.max(16, Math.round(kingdom.armyStrength * .2));
+    kingdom.treasury = Math.max(0, Math.round(kingdom.treasury * .06));
+    kingdom.armyStrength = Math.max(0, Math.round(kingdom.armyStrength * .08));
     kingdom.stability = Math.max(32, Math.min(72, kingdom.stability));
     kingdom.claims = capital ? [capital.id] : [];
     kingdom.enemies = [];
     kingdom.predecessorKingdomIds = [];
-    kingdom.politicalOrigin = 'generated';
+    kingdom.politicalOrigin = 'genesis';
     if (kingdom.dynastyId && !dynastyIds.has(kingdom.dynastyId)) kingdom.dynastyId = undefined;
     kingdom.diplomacy = world.kingdoms.filter(other => other.id !== kingdom.id).map(other => ({
       kingdomId: other.id,
@@ -434,6 +422,8 @@ function initializeGenesisSystems(world: WorldState, config: WorldConfig, onProg
   initializeBattleSystem(world);
   initializeCultureSystem(world, new RNG(`${config.seed}:генезис-культура-вера-образование-v1`));
   initializeCivilizationSystem(world, new RNG(`${config.seed}:генезис-цивилизации-и-технологии-v1`));
+  initializeWorldLaw(world);
+  initializeRegionalEconomy(world, new RNG(`${config.seed}:генезис-региональная-экономика-v1`));
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);
   initializeCitySimulation(world);
@@ -476,7 +466,7 @@ function seedGenesisEvents(world: WorldState, settlementIds: readonly number[]):
       cause: 'доступ к воде, земле и общим запасам',
       conditions: ['существовали реальные семьи', 'место было свободно', 'община могла построить жильё и склад'],
       decision: 'остаться и признать лагерь постоянным поселением',
-      outcome: `${settlement.name} стало первым постоянным центром державы ${kingdom.name}`,
+      outcome: `${settlement.name} стало постоянным центром родового союза ${kingdom.name}`,
       consequences: ['появились постоянные дома и поля', 'земля получила политического владельца', 'началась родовая хроника'],
       entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'kingdom', id: kingdom.id }, { kind: 'character', id: kingdom.rulerId }],
       importance: 4,
@@ -508,8 +498,7 @@ function runLivedHistory(
     world.year = Math.max(0, nextYear - 1);
     world.month = 10;
     ensureSimulationRuntime(world);
-    advanceWorldSystems(engine, { fastForward: true, monthStep: 3, historicalPopulation: true });
-    launchPlannedSites(world, engine.indexes, preparation.sites, cadence);
+    advanceWorldSystems(engine, { fastForward: true, monthStep: 3 });
     const lifecycle = advanceSettlementLifecycle(
       world,
       new RNG(`${config.seed}:исторические-экспедиции:${world.year}`),
@@ -536,9 +525,8 @@ function runLivedHistory(
 
   let detailedMonths = 0;
   while (world.year < targetYear || world.month !== 1) {
-    advanceWorldSystems(engine, { fastForward: true, monthStep: 3, historicalPopulation: true });
+    advanceWorldSystems(engine, { fastForward: true, monthStep: 3 });
     detailedMonths += 3;
-    if (world.month === 3 || world.month === 9) launchPlannedSites(world, engine.indexes, preparation.sites, 1);
     synchronizeGenesisSites(world, preparation.sites);
     const total = detailedYears * 12;
     onProgress?.('Прожитая история: последние поколения', 80 + Math.round(detailedMonths / Math.max(1, total) * 16), 100,
@@ -563,16 +551,14 @@ function bridgeSkippedGenerations(world: WorldState, indexes: WorldIndexes, from
       world.month = month;
       ensureSimulationRuntime(world);
       const rng = new RNG(`${world.config.seed}:исторический-квартал:${year}:${month}`);
-      if (month === 1) {
-        advanceMaterialEconomy(world, rng, indexes, settlementIds, new Set());
-        advanceCitySimulation(world);
-      }
       advanceAgriculture(world, rng, indexes, settlementIds);
+      advanceMaterialEconomy(world, rng, indexes, settlementIds, new Set());
+      if (month === 1) advanceCitySimulation(world);
       if (month === 4 || month === 10) advanceConstruction(world, rng, indexes, settlementIds);
-      advanceHealthSystem(world, rng, indexes, { fastForward: true, elapsedMonths: 3, demographyOnly: true });
+      advanceHealthSystem(world, rng, indexes, { fastForward: true, elapsedMonths: 3 });
     }
 
-    advancePopulation(world, new RNG(`${world.config.seed}:поколения-между-срезами:${year}`), indexes, { mortalityScale: .12, hungerRiskScale: .02, familyFormationScale: 6 });
+    advancePopulation(world, new RNG(`${world.config.seed}:поколения-между-срезами:${year}`), indexes);
     advanceSocialSystem(world, new RNG(`${world.config.seed}:связи-между-срезами:${year}`), indexes, true);
     advanceDynastyLegacy(world, { elapsedMonths: 12 });
     const livingBySettlement = new Map<number, number>();
@@ -581,45 +567,6 @@ function bridgeSkippedGenerations(world: WorldState, indexes: WorldIndexes, from
     }
     for (const settlement of world.settlements) settlement.population = livingBySettlement.get(settlement.id) ?? 0;
   }
-}
-
-function launchPlannedSites(world: WorldState, indexes: WorldIndexes, sites: GenesisSitePlan[], cadence: number): void {
-  const due = sites
-    .filter(site => site.status === 'planned' && site.targetYear <= world.year && site.attempts < 3)
-    .sort((a, b) => a.targetYear - b.targetYear || a.id - b.id)
-    .slice(0, Math.max(1, Math.min(2, Math.ceil(cadence / 3))));
-  for (const site of due) {
-    const origin = chooseOriginForSite(world, site);
-    if (!origin) continue;
-    const expedition = formSettlementExpedition(
-      world,
-      origin,
-      new RNG(`${world.config.seed}:запланированное-основание:${site.id}:${site.attempts}`),
-      { cause: 'resource-search', destination: { x: site.x, y: site.y }, force: true },
-    );
-    site.attempts += 1;
-    site.lastAttemptYear = world.year;
-    if (!expedition) continue;
-    site.expeditionId = expedition.id;
-    site.status = 'traveling';
-  }
-  refreshDynamicWorldIndexes(indexes, world);
-}
-
-function chooseOriginForSite(world: WorldState, site: GenesisSitePlan): Settlement | undefined {
-  const activeOrigins = new Set(world.settlementExpeditions
-    .filter(expedition => ['forming', 'traveling', 'camped', 'returning'].includes(expedition.status))
-    .map(expedition => expedition.originSettlementId));
-  return [...world.settlements]
-    .filter(settlement => settlement.population >= 24 && settlement.householdIds.length >= 3 && !activeOrigins.has(settlement.id))
-    .sort((a, b) => {
-      const sponsorA = Number(a.kingdomId === site.sponsorKingdomId);
-      const sponsorB = Number(b.kingdomId === site.sponsorKingdomId);
-      return sponsorB - sponsorA
-        || Math.hypot(a.x - site.x, a.y - site.y) - Math.hypot(b.x - site.x, b.y - site.y)
-        || b.population - a.population
-        || a.id - b.id;
-    })[0];
 }
 
 function synchronizeGenesisSites(world: WorldState, sites: GenesisSitePlan[]): void {

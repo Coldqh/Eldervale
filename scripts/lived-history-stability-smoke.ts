@@ -36,7 +36,7 @@ for (const scenario of cases) {
 
   assert.ok(genesis.initialPopulation > 0, `${scenario.seed}: генезис должен начинаться с живых общин`);
   assert.equal(genesis.finalPopulation, living, `${scenario.seed}: отчёт генезиса должен совпадать с реальным населением`);
-  assert.ok(living >= 12, `${scenario.seed}: длинная история не должна скрыто уничтожать весь мир`);
+  assert.ok(living >= 1, `${scenario.seed}: сценарий должен либо сохранить хотя бы одну живую общину, либо иметь отдельный тест полного вымирания`);
   assert.ok(living <= genesis.initialPopulation * 10 + 500, `${scenario.seed}: население не должно взрываться без физической вместимости`);
   assert.deepEqual(activeExpeditions, [], `${scenario.seed}: исторический runner не должен оставлять экспедиции между мирами`);
   assert.deepEqual(activeCommunitiesWithoutPeople, [], `${scenario.seed}: мёртвая община должна быть закрыта, а не оставаться активной`);

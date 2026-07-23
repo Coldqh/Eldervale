@@ -667,6 +667,22 @@ function detachExpeditionFromOrigin(world: WorldState, origin: Settlement, exped
     const establishment = world.establishments.find(item => item.id === contract.establishmentId);
     if (establishment) establishment.workerIds = establishment.workerIds.filter(id => id !== contract.characterId);
   }
+  for (const establishment of world.establishments) {
+    establishment.workerIds = establishment.workerIds.filter(id => !memberIds.has(id));
+    if (!memberIds.has(establishment.ownerCharacterId)) continue;
+    const successor = establishment.workerIds
+      .map(id => world.characters.find(character => character.id === id && character.alive && character.settlementId === origin.id))
+      .find((character): character is Character => Boolean(character));
+    if (successor) {
+      establishment.ownerCharacterId = successor.id;
+      establishment.history.push(`${successor.name} принял дело после ухода прежнего владельца с экспедицией.`);
+    } else {
+      establishment.active = false;
+      establishment.history.push('Предприятие закрылось после ухода владельца и всех работников с экспедицией.');
+    }
+    const building = world.buildings.find(item => item.id === establishment.buildingId);
+    if (building) building.ownerCharacterId = successor?.id;
+  }
   for (const building of world.buildings) {
     building.residentIds = building.residentIds.filter(id => !memberIds.has(id));
     building.workerIds = building.workerIds.filter(id => !memberIds.has(id));

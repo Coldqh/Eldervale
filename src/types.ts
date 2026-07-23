@@ -948,6 +948,7 @@ export interface EmploymentContract {
   sinceYear: number;
   apprenticeOfCharacterId?: number;
   active: boolean;
+  arrears?: number;
 }
 
 export interface TradeShipment {
@@ -1162,6 +1163,9 @@ export interface SimulationRuntimeState {
   settlementLifecycleVersion?: 1;
   stateFormationVersion?: 1;
   regionalEconomyVersion?: 1;
+  worldLawVersion?: 1;
+  economyLastTickBySettlement?: Record<string, number>;
+  agricultureLastTickBySettlement?: Record<string, number>;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1222,7 +1226,7 @@ export interface Kingdom {
   civilizationId?: number;
   foundingCommunityId?: number;
   predecessorKingdomIds?: number[];
-  politicalOrigin?: 'generated' | 'secession' | 'league' | 'union' | 'conquest';
+  politicalOrigin?: 'generated' | 'genesis' | 'secession' | 'league' | 'union' | 'conquest';
   foundingGovernmentForm?: GovernmentForm;
 }
 
@@ -1888,7 +1892,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 33;
+  version: 34;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;

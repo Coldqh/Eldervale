@@ -3,7 +3,7 @@ import { RNG } from './rng';
 import { personName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
-import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems } from './materialEconomy';
+import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems, synchronizeSettlementMaterialLinks } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
 import { advanceLivingEconomy, detailedPopulationContext, synchronizeEmploymentLinks } from './livingEconomy';
 import { advanceMilitaryInfrastructure, applyArmyCasualties, synchronizeArmyStrength } from './militaryInfrastructure';
@@ -38,6 +38,7 @@ import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 import { advanceRegionalEconomy, initializeRegionalEconomy } from './regionalEconomy';
+import { initializeWorldLaw, reconcileWorldLawStates } from './worldLaw';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -185,30 +186,228 @@ function addRelationship(world: WorldState, indexes: WorldIndexes, a: Character,
 }
 
 export interface PopulationAdvanceOptions {
+  /** @deprecated 6.0 использует одни биологические законы при любой скорости времени. */
   mortalityScale?: number;
+  /** @deprecated Голод берётся из физического состояния человека и домохозяйства. */
   hungerRiskScale?: number;
+  /** @deprecated Семьи образуются из социальных связей, а не из режима истории. */
   familyFormationScale?: number;
 }
 
-export function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes, options: PopulationAdvanceOptions = {}): void {
+const PROFESSION_ESTABLISHMENTS: Record<string, string[]> = {
+  farmer: ['ферма', 'мельница'], miller: ['мельница', 'пекарня'], hunter: ['рынок', 'лавка'], guard: ['рынок', 'городская управа', 'суд'],
+  blacksmith: ['кузница', 'бронная мастерская', 'инструментальная мастерская'], carpenter: ['плотницкая мастерская', 'инструментальная мастерская'],
+  herbalist: ['лечебница'], merchant: ['рынок', 'лавка', 'склад', 'постоялый двор'], scribe: ['школа', 'храм', 'городская управа', 'суд'],
+  priest: ['храм', 'школа'], soldier: ['казарма', 'арсенал'], fisher: ['рыбный промысел'], miner: ['рудник', 'каменоломня'],
+  weaver: ['ткацкая мастерская', 'красильня'], brewer: ['пивоварня', 'винодельня', 'таверна'], healer: ['лечебница', 'баня'],
+};
+
+function chooseYoungAdultProfession(world: WorldState, character: Character, indexes: WorldIndexes): string {
+  const settlement = indexes.settlementById.get(character.settlementId);
+  const establishments = indexes.establishmentsBySettlement.get(character.settlementId) ?? [];
+  const parents = character.parentIds.map(id => indexes.characterById.get(id)).filter((item): item is Character => Boolean(item));
+  const localWorkers = residents(indexes, character.settlementId).filter(item => item.id !== character.id && item.profession !== 'child');
+  const candidates = new Set<string>(['farmer']);
+  for (const parent of parents) if (parent.profession !== 'child') candidates.add(parent.profession);
+  for (const establishment of establishments.filter(item => item.active)) {
+    for (const [profession, types] of Object.entries(PROFESSION_ESTABLISHMENTS)) if (types.includes(establishment.type)) candidates.add(profession);
+  }
+  if (settlement?.resource === 'рыба') candidates.add('fisher');
+  if (settlement?.resource === 'железо' || settlement?.resource === 'серебро' || settlement?.resource === 'камень') candidates.add('miner');
+  if (settlement?.tradeRouteIds.length) candidates.add('merchant');
+
+  const scored = [...candidates].map(profession => {
+    const parentScore = parents.some(parent => parent.profession === profession) ? 42 : 0;
+    const skillScore = Math.min(30, (character.skills[profession] ?? 0) * .65);
+    const matching = establishments.filter(establishment => establishment.active && (PROFESSION_ESTABLISHMENTS[profession] ?? []).includes(establishment.type));
+    const employedHere = matching.reduce((sum, establishment) => sum + establishment.workerIds.length, 0);
+    const vacancyScore = matching.length ? Math.max(0, matching.length * 6 - employedHere) * 5 + 16 : 0;
+    const mentors = localWorkers.filter(worker => worker.profession === profession).length;
+    const mentorScore = Math.min(22, mentors * 4);
+    const subsistence = profession === 'farmer' && (!matching.length || settlement?.type === 'hamlet' || settlement?.type === 'village') ? 18 : 0;
+    return { profession, score: parentScore + skillScore + vacancyScore + mentorScore + subsistence };
+  }).sort((a, b) => b.score - a.score || a.profession.localeCompare(b.profession));
+  return scored[0]?.profession ?? 'farmer';
+}
+
+function isCloseRelative(world: WorldState, a: Character, b: Character): boolean {
+  if (a.parentIds.includes(b.id) || b.parentIds.includes(a.id) || a.childIds.includes(b.id) || b.childIds.includes(a.id)) return true;
+  if (a.parentIds.some(id => b.parentIds.includes(id))) return true;
+  const byId = new Map(world.characters.map(character => [character.id, character]));
+  const ancestors = (character: Character): Set<number> => {
+    const result = new Set<number>(character.parentIds);
+    for (const parentId of character.parentIds) for (const grandparentId of byId.get(parentId)?.parentIds ?? []) result.add(grandparentId);
+    return result;
+  };
+  const aAncestors = ancestors(a);
+  return [...ancestors(b)].some(id => aAncestors.has(id));
+}
+
+function marriageScore(world: WorldState, a: Character, b: Character, indexes: WorldIndexes): number {
+  const relation = world.relationships.find(item => (item.characterAId === a.id && item.characterBId === b.id) || (item.characterAId === b.id && item.characterBId === a.id));
+  const culture = a.cultureProfile && b.cultureProfile
+    ? (a.cultureProfile.cultureId === b.cultureProfile.cultureId ? 16 : (a.cultureProfile.culturalOpenness + b.cultureProfile.culturalOpenness) / 18)
+    : 0;
+  const faith = a.cultureProfile && b.cultureProfile && a.cultureProfile.religionId === b.cultureProfile.religionId ? 8 : 0;
+  const age = Math.max(-18, 16 - Math.abs(a.age - b.age) * 1.2);
+  const existingTie = relation ? relation.strength * .55 + (relation.kind === 'любовь' || relation.kind === 'дружба' ? 18 : 0) : 0;
+  const householdPenalty = a.householdId && a.householdId === b.householdId ? -14 : 0;
+  const localPopulation = indexes.settlementById.get(a.settlementId)?.population ?? 0;
+  const reproductiveCompatibility = a.sex && b.sex && a.sex !== b.sex ? (localPopulation < 30 ? 34 : localPopulation < 80 ? 24 : 18) : 0;
+  const socialRoots = Math.min(18, settlementConnectionScore(world, a, b.settlementId, indexes) * .25 + settlementConnectionScore(world, b, a.settlementId, indexes) * .25);
+  return 18 + culture + faith + age + existingTie + socialRoots + householdPenalty + reproductiveCompatibility;
+}
+
+function hasDependentChildren(world: WorldState, character: Character): boolean {
+  return character.childIds.some(id => {
+    const child = world.characters.find(item => item.id === id && item.alive);
+    return Boolean(child && child.age < 16);
+  });
+}
+
+function settlementsSociallyConnected(world: WorldState, firstId: number, secondId: number): boolean {
+  if (firstId === secondId) return true;
+  const first = world.settlements.find(item => item.id === firstId);
+  const second = world.settlements.find(item => item.id === secondId);
+  if (!first || !second) return false;
+  if (Math.hypot(first.x - second.x, first.y - second.y) <= 20) return true;
+  return world.tradeRoutes.some(route => route.active
+    && ((route.fromSettlementId === firstId && route.toSettlementId === secondId)
+      || (route.fromSettlementId === secondId && route.toSettlementId === firstId)));
+}
+
+function relocateMarriagePartner(
+  world: WorldState,
+  mover: Character,
+  partner: Character,
+  indexes: WorldIndexes,
+): boolean {
+  if (mover.settlementId === partner.settlementId) return true;
+  const destination = indexes.settlementById.get(partner.settlementId);
+  const destinationHousehold = partner.householdId ? indexes.householdById.get(partner.householdId) : undefined;
+  const originHousehold = mover.householdId ? indexes.householdById.get(mover.householdId) : undefined;
+  if (!destination || !destinationHousehold) return false;
+
+  const originMemberCount = Math.max(1, originHousehold?.memberIds.length ?? 1);
+  const wealthShare = originHousehold ? originHousehold.wealth / originMemberCount : 0;
+  if (originHousehold) {
+    originHousehold.wealth = Math.max(0, originHousehold.wealth - wealthShare);
+    originHousehold.memberIds = originHousehold.memberIds.filter(id => id !== mover.id);
+    if (originHousehold.headCharacterId === mover.id) originHousehold.headCharacterId = originHousehold.memberIds[0] ?? 0;
+    originHousehold.history.push(`${world.year}: ${mover.name} покинул дом после брака и переехал в ${destination.name}.`);
+  }
+  destinationHousehold.wealth += wealthShare;
+  if (!destinationHousehold.memberIds.includes(mover.id)) destinationHousehold.memberIds.push(mover.id);
+  destinationHousehold.history.push(`${world.year}: ${mover.name} вошёл в дом после брака.`);
+
+  for (const building of world.buildings) building.residentIds = building.residentIds.filter(id => id !== mover.id);
+  const home = destinationHousehold.homeBuildingId ? indexes.buildingById.get(destinationHousehold.homeBuildingId) : undefined;
+  if (home && !home.residentIds.includes(mover.id)) home.residentIds.push(mover.id);
+
+  const contract = mover.employmentContractId ? indexes.employmentById.get(mover.employmentContractId) : undefined;
+  if (contract) contract.active = false;
+  if (mover.employerEstablishmentId) {
+    const establishment = indexes.establishmentById.get(mover.employerEstablishmentId);
+    if (establishment) establishment.workerIds = establishment.workerIds.filter(id => id !== mover.id);
+    const workplace = establishment ? indexes.buildingById.get(establishment.buildingId) : undefined;
+    if (workplace) workplace.workerIds = workplace.workerIds.filter(id => id !== mover.id);
+  }
+
+  moveResidentInIndexes(indexes, mover, destination.id);
+  mover.kingdomId = destination.kingdomId;
+  mover.householdId = destinationHousehold.id;
+  mover.homeBuildingId = destinationHousehold.homeBuildingId;
+  mover.homeDistrict = home?.districtName ?? destination.districts[0]?.name ?? 'Сердце поселения';
+  mover.employmentContractId = undefined;
+  mover.employerEstablishmentId = undefined;
+  mover.workplaceBuildingId = undefined;
+  mover.workplace = 'ищет работу после брачного переезда';
+  mover.homeless = !home;
+
+  if (originHousehold && !originHousehold.memberIds.length) {
+    world.households = world.households.filter(item => item.id !== originHousehold.id);
+    indexes.householdById.delete(originHousehold.id);
+    const list = indexes.householdsBySettlement.get(originHousehold.settlementId) ?? [];
+    indexes.householdsBySettlement.set(originHousehold.settlementId, list.filter(item => item.id !== originHousehold.id));
+  }
+  return true;
+}
+
+function formRegionalMarriages(world: WorldState, rng: RNG, indexes: WorldIndexes): void {
+  const candidates = world.characters.filter(character => character.alive && !character.spouseId
+    && character.age >= 18 && character.age <= 55 && character.householdId
+    && !hasDependentChildren(world, character)
+    && !character.expeditionId && !character.prisonerOfBattleId
+    && !['поход', 'гарнизон', 'пленник'].includes(character.serviceStatus ?? '')
+    && character.legalStatus !== 'заключён' && character.legalStatus !== 'под стражей');
+  const available = new Set(candidates.map(character => character.id));
+  const pairLimit = Math.min(24, Math.max(1, Math.ceil(candidates.length / 8)));
+  let formed = 0;
+
+  while (formed < pairLimit && available.size >= 2) {
+    let best: { first: Character; second: Character; score: number } | undefined;
+    const pool = candidates.filter(character => available.has(character.id));
+    for (const first of pool) {
+      for (const second of pool) {
+        if (first.id >= second.id || first.settlementId === second.settlementId) continue;
+        if (first.sex === second.sex || !settlementsSociallyConnected(world, first.settlementId, second.settlementId)) continue;
+        if (Math.abs(first.age - second.age) >= 24 || isCloseRelative(world, first, second)) continue;
+        const score = marriageScore(world, first, second, indexes)
+          + Math.min(18, (indexes.settlementById.get(first.settlementId)?.population ?? 0) < 8 ? 10 : 0)
+          + Math.min(18, (indexes.settlementById.get(second.settlementId)?.population ?? 0) < 8 ? 10 : 0);
+        if (!best || score > best.score || (score === best.score && first.id < best.first.id)) best = { first, second, score };
+      }
+    }
+    if (!best || best.score < 28) break;
+
+    const firstSettlement = indexes.settlementById.get(best.first.settlementId)!;
+    const secondSettlement = indexes.settlementById.get(best.second.settlementId)!;
+    const firstAttraction = firstSettlement.food + firstSettlement.prosperity + Math.max(0, firstSettlement.residentialCapacity - firstSettlement.population) * 2;
+    const secondAttraction = secondSettlement.food + secondSettlement.prosperity + Math.max(0, secondSettlement.residentialCapacity - secondSettlement.population) * 2;
+    const mover = firstAttraction <= secondAttraction ? best.first : best.second;
+    const partner = mover.id === best.first.id ? best.second : best.first;
+    if (!relocateMarriagePartner(world, mover, partner, indexes)) {
+      available.delete(mover.id);
+      continue;
+    }
+    best.first.spouseId = best.second.id;
+    best.second.spouseId = best.first.id;
+    addRelationship(world, indexes, best.first, best.second, 'любовь', Math.max(44, Math.min(94, Math.round(best.score))), 'брак между соседними общинами');
+    best.first.biography.push(`В ${world.year} году вступил в брак с ${best.second.name}.`);
+    best.second.biography.push(`В ${world.year} году вступил в брак с ${best.first.name}.`);
+    available.delete(best.first.id);
+    available.delete(best.second.id);
+    formed += 1;
+    addEvent(world, {
+      kind: 'migration', title: `Брак связал ${firstSettlement.name} и ${secondSettlement.name}`,
+      description: `${mover.name} переехал в ${indexes.settlementById.get(partner.settlementId)?.name ?? secondSettlement.name} после брака с ${partner.name}.`,
+      cause: 'родственные и торговые связи между соседними общинами',
+      decision: 'семьи согласовали брак и совместное хозяйство', outcome: 'супруги поселились в одном доме',
+      consequences: ['между поселениями возникла новая родственная связь', 'один житель сменил дом и работу'],
+      entityRefs: [{ kind: 'character', id: best.first.id }, { kind: 'character', id: best.second.id }, { kind: 'settlement', id: firstSettlement.id }, { kind: 'settlement', id: secondSettlement.id }], importance: 1,
+    });
+  }
+  if (formed) synchronizeSettlementMaterialLinks(world);
+}
+
+export function advancePopulation(world: WorldState, rng: RNG, indexes: WorldIndexes, _options: PopulationAdvanceOptions = {}): void {
   const deaths: { character: Character; cause: string; settlement?: Settlement }[] = [];
   for (const character of world.characters) {
     character.age = Math.max(0, world.year - character.birthYear);
     if (character.profession === 'child' && character.age >= 14) {
-      const profession = rng.pick(['farmer', 'guard', 'hunter', 'blacksmith', 'merchant', 'scribe', 'soldier']);
+      const profession = chooseYoungAdultProfession(world, character, indexes);
       changeProfessionInIndexes(indexes, character, profession);
       character.workplace = workplaceFor(character.profession);
+      character.biography.push(`В ${world.year} году начал осваивать профессию «${profession}» в своей общине.`);
     }
     const settlement = indexes.settlementById.get(character.settlementId);
-    const hungerRisk = settlement?.shortages.includes('пища') ? .028 * Math.max(0, options.hungerRiskScale ?? 1) : 0;
+    const household = character.householdId ? indexes.householdById.get(character.householdId) : undefined;
+    const starvation = Math.max(character.needs.hunger, character.needs.thirst, household?.needs.hunger ?? 0, household?.needs.thirst ?? 0);
+    const hungerRisk = starvation >= 96 ? .025 : starvation >= 86 ? .006 : starvation >= 72 ? .0015 : 0;
     const speciesAge = character.species === 'elf' ? character.age / 2.8 : character.species === 'dwarf' ? character.age / 1.45 : character.species === 'orc' ? character.age / .82 : character.age;
-    const mortality = speciesAge < 2 ? .006 : speciesAge < 45 ? .0015 : speciesAge < 65 ? .007 : speciesAge < 82 ? .034 : speciesAge < 96 ? .11 : .28;
-    const frailtyRisk = (character.healthProfile?.frailty ?? 20) / 5000;
-    const healthRisk = Math.max(0, 55 - character.health) / 2200;
-    const chronicRisk = (mortality + frailtyRisk + healthRisk) * Math.max(0, options.mortalityScale ?? 1);
-    if (rng.chance(chronicRisk + hungerRisk)) {
-      const activeCondition = character.healthProfile?.activeConditionIds.map(id => world.healthConditions.find(item => item.id === id)).find(item => item && (item.status === 'активно' || item.status === 'выздоровление'));
-      deaths.push({ character, cause: hungerRisk ? 'голод и истощение' : activeCondition?.name ?? (speciesAge >= 65 ? 'старость и ослабление организма' : 'внезапное ухудшение здоровья'), settlement });
+    const ageMortality = speciesAge < 2 ? .006 : speciesAge < 45 ? .0015 : speciesAge < 65 ? .007 : speciesAge < 82 ? .034 : speciesAge < 96 ? .11 : .28;
+    if (rng.chance(ageMortality + hungerRisk)) {
+      deaths.push({ character, cause: hungerRisk ? 'голод, жажда и истощение' : (speciesAge >= 65 ? 'старость и ослабление организма' : 'внезапное ухудшение здоровья'), settlement });
     }
   }
   if (deaths.length) {
@@ -226,25 +425,28 @@ export function advancePopulation(world: WorldState, rng: RNG, indexes: WorldInd
   for (const settlement of world.settlements) {
     const localResidents = residents(indexes, settlement.id);
     settlement.population = localResidents.length;
-    const adults = localResidents.filter(character => character.age >= 18 && character.age <= 48);
-    const familyFormationScale = Math.max(0, options.familyFormationScale ?? 1);
-    const attempts = Math.max(1, Math.min(8, Math.ceil(familyFormationScale)));
+    const adults = localResidents.filter(character => character.age >= 18 && character.age <= 60 && !character.spouseId);
+    const attempts = Math.min(8, Math.max(1, Math.ceil(adults.length / 18)));
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const unmarried = adults.filter(character => !character.spouseId && character.age <= 60);
-      if (unmarried.length < 2 || !rng.chance(Math.min(.85, .2 * familyFormationScale))) break;
+      const unmarried = adults.filter(character => !character.spouseId);
+      if (unmarried.length < 2 || !rng.chance(.45)) break;
       const a = rng.pick(unmarried);
-      const compatible = unmarried.filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24);
-      const reproductive = compatible.filter(character => character.sex !== a.sex);
-      const candidates = reproductive.length ? reproductive : compatible;
-      if (!candidates.length) break;
-      const b = rng.pick(candidates);
+      const candidates = unmarried
+        .filter(character => character.id !== a.id && Math.abs(character.age - a.age) < 24 && !isCloseRelative(world, a, character))
+        .map(character => ({ character, score: marriageScore(world, a, character, indexes) }))
+        .filter(entry => entry.score >= 20)
+        .sort((left, right) => right.score - left.score || left.character.id - right.character.id);
+      const selected = candidates[0];
+      if (!selected || !rng.chance(Math.min(.88, .24 + selected.score / 140))) continue;
+      const b = selected.character;
       a.spouseId = b.id;
       b.spouseId = a.id;
-      addRelationship(world, indexes, a, b, 'любовь', rng.int(45, 92), `брак в ${settlement.name}`);
+      addRelationship(world, indexes, a, b, 'любовь', Math.max(40, Math.min(96, Math.round(selected.score))), `брак в ${settlement.name}`);
       a.biography.push(`В ${world.year} году вступил в брак с ${b.name}.`);
       b.biography.push(`В ${world.year} году вступил в брак с ${a.name}.`);
     }
   }
+  formRegionalMarriages(world, rng, indexes);
 }
 
 function startWars(world: WorldState, rng: RNG): void {
@@ -871,13 +1073,13 @@ export function advanceOneMonth(
   if (schedule.economySettlementIds.size) runPhase(engine, 'Поселения и торговые пути', onPhase, () => advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds));
 
   if (schedule.runPopulation) {
-    runPhase(engine, 'Жители, семьи и наследование', onPhase, () => advancePopulation(world, rng, indexes, options.historicalPopulation ? { mortalityScale: .25, hungerRiskScale: .05, familyFormationScale: 4 } : undefined));
+    runPhase(engine, 'Жители, семьи и наследование', onPhase, () => advancePopulation(world, rng, indexes));
     rebuildRelationshipIndexes(indexes, world.relationships);
   }
   if (schedule.runHousing) {
     runPhase(engine, 'Строительство и переселения', onPhase, () => advanceHousing(world, rng, indexes));
   }
-  runPhase(engine, 'Здоровье, болезни, беременность и лечение', onPhase, () => advanceHealthSystem(world, rng, indexes, { fastForward, elapsedMonths: monthStep, demographyOnly: options.historicalPopulation }));
+  runPhase(engine, 'Здоровье, болезни, беременность и лечение', onPhase, () => advanceHealthSystem(world, rng, indexes, { fastForward, elapsedMonths: monthStep }));
 
   if (schedule.ecologySettlementIds.size || schedule.runSeasonalEcology) runPhase(engine, schedule.runSeasonalEcology ? 'Сезонная экология' : 'Активные регионы и промыслы', onPhase, () => advanceEcology(world, rng, indexes, {
     settlementIds: schedule.ecologySettlementIds, activeSettlementIds: schedule.activeSettlementIds, updateAnimals: schedule.runSeasonalEcology,
@@ -961,6 +1163,7 @@ export function initializeWorldSystems(world: WorldState): void {
   synchronizeEmploymentLinks(world);
   initializeCivilizationSystem(world);
   initializeTechnologyKnowledge(world);
+  initializeWorldLaw(world);
   initializeRegionalEconomy(world);
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);
@@ -993,7 +1196,7 @@ export function advanceWorldSystems(
   const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
   const onPhase = options.onPhase;
 
-  advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true, historicalPopulation: options.historicalPopulation });
+  advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true });
 
   onPhase?.('Климат, сезоны и природное давление');
   advanceClimateSystem(engine.world, { elapsedMonths: monthStep });
@@ -1020,6 +1223,7 @@ export function advanceWorldSystems(
   // из живых персонажей, не запуская новый цикл переселений.
   advanceRaceDemography(engine.world, { elapsedMonths: 0, indexes: engine.indexes, recordHistory: false });
 
+  reconcileWorldLawStates(engine.world);
   synchronizeSettlementGovernmentLeaders(engine.world, engine.indexes);
   synchronizeStateMachineReferences(engine.world, new RNG(`${engine.world.config.seed}:state-references:${engine.world.year}:${engine.world.month}`), engine.indexes);
   synchronizeEmploymentLinks(engine.world, engine.indexes);
@@ -1032,6 +1236,10 @@ export function advanceWorldSystems(
 
   onPhase?.('Физические интерьеры, сон и износ мебели');
   applyInteriorMonthlyEffects(engine.world, monthStep);
+  // Последняя граница хода: никакая поздняя система не должна оставить человека
+  // одновременно заключённым, путешествующим или служащим и гражданским работником.
+  reconcileWorldLawStates(engine.world);
+  synchronizeEmploymentLinks(engine.world, engine.indexes);
   return monthStep;
 }
 

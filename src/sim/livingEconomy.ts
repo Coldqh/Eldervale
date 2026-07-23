@@ -12,7 +12,7 @@ import { workplaceConnectionScore } from './socialSystem';
 import { availableRecipesForSettlement } from './civilizationSystem';
 
 const CLOTHING_SLOTS: EquipmentSlot[] = ['head', 'body', 'legs', 'feet', 'hands', 'cloak'];
-const FOOD_IDS = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'grain'] as const;
+const FOOD_IDS = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'flour', 'wheat', 'rye', 'barley', 'grain'] as const;
 const WATER_IDS = ['water'] as const;
 const MAX_TRANSACTION_HISTORY = 1800;
 const MAX_DETAILED_CHARACTERS = 420;
@@ -134,6 +134,65 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
       && (character.profession === 'merchant' || character.wealth >= 35));
     const character = candidates.sort((a, b) => b.wealth - a.wealth || a.id - b.id)[0];
     if (!character) continue;
+    const settlement = world.settlements.find(item => item.id === character.settlementId);
+    const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
+    if (!settlement) continue;
+    const offers = world.establishments
+      .filter(establishment => establishment.active && establishment.settlementId === settlement.id)
+      .flatMap(establishment => establishment.inventoryItemIds.map(id => ({ establishment, item: world.items.find(candidate => candidate.id === id) })))
+      .filter((entry): entry is { establishment: Establishment; item: WorldItem } => Boolean(entry.item && entry.item.quantity > .5 && entry.item.condition > 0))
+      .sort((a, b) => b.item.quantity - a.item.quantity || a.item.baseValue - b.item.baseValue || a.item.id - b.item.id);
+    if (!offers.length) continue;
+
+    const walletCapital = Math.max(0, character.wallet ?? 0);
+    const householdCapital = household ? Math.min(household.wealth, Math.max(0, household.wealth * .12)) : 0;
+    const capital = walletCapital + householdCapital;
+    if (capital < 2) continue;
+    character.wallet = 0;
+    if (household) household.wealth -= householdCapital;
+
+    const merchantId = world.nextIds.travelingMerchant++;
+    const merchant: TravelingMerchant = {
+      id: merchantId, characterId: character.id, routeSettlementIds: [route.fromSettlementId, route.toSettlementId],
+      currentSettlementId: character.settlementId, nextSettlementId: character.settlementId === route.fromSettlementId ? route.toSettlementId : route.fromSettlementId,
+      arrivalTick: worldTick(world) + Math.max(1, Math.ceil(Math.hypot(
+        world.settlements.find(item => item.id === route.fromSettlementId)!.x - world.settlements.find(item => item.id === route.toSettlementId)!.x,
+        world.settlements.find(item => item.id === route.fromSettlementId)!.y - world.settlements.find(item => item.id === route.toSettlementId)!.y,
+      ) / 3)), wagonInventoryItemIds: [], cash: capital, status: 'в пути', history: ['Вложил собственные деньги в товар и начал странствовать между поселениями.'],
+    };
+
+    let purchased = 0;
+    const spendingLimit = capital * .78;
+    for (const { establishment, item } of offers.slice(0, 12)) {
+      if (purchased >= spendingLimit || merchant.wagonInventoryItemIds.length >= 6) break;
+      const unitPrice = Math.max(.05, retailPrice(settlement, item) * .68);
+      const budget = Math.max(0, spendingLimit - purchased);
+      const quantity = Math.min(item.quantity * .3, budget / unitPrice, 8);
+      if (quantity <= .05) continue;
+      const paid = quantity * unitPrice;
+      item.quantity -= quantity;
+      establishment.cash += paid;
+      establishment.monthlyRevenue += paid;
+      merchant.cash -= paid;
+      purchased += paid;
+      const stock = addMaterialItem(world, item.templateId, quantity, settlement.id, { ownerCharacterId: character.id }, `куплено у ${establishment.name} для странствующей торговли`, item.quality);
+      if (!stock) continue;
+      stock.dye = item.dye;
+      stock.condition = item.condition;
+      stock.freshness = item.freshness;
+      if (!merchant.wagonInventoryItemIds.includes(stock.id)) merchant.wagonInventoryItemIds.push(stock.id);
+      addTransaction(world, {
+        settlementId: settlement.id, buyerCharacterId: character.id, sellerCharacterId: establishment.ownerCharacterId,
+        establishmentId: establishment.id, travelingMerchantId: merchant.id, templateId: item.templateId,
+        quantity, totalPrice: paid, purpose: 'закупка товара для странствующей торговли',
+      });
+    }
+    if (!merchant.wagonInventoryItemIds.length) {
+      character.wallet += merchant.cash;
+      world.nextIds.travelingMerchant = Math.max(1, world.nextIds.travelingMerchant - 1);
+      continue;
+    }
+
     usedCharacters.add(character.id);
     const activeContract = world.employments.find(contract => contract.characterId === character.id && contract.active);
     if (activeContract) {
@@ -148,23 +207,7 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
     character.workplaceBuildingId = undefined;
     character.profession = 'merchant';
     character.workplace = 'странствующая торговля';
-    const merchant: TravelingMerchant = {
-      id: world.nextIds.travelingMerchant++, characterId: character.id, routeSettlementIds: [route.fromSettlementId, route.toSettlementId],
-      currentSettlementId: character.settlementId, nextSettlementId: character.settlementId === route.fromSettlementId ? route.toSettlementId : route.fromSettlementId,
-      arrivalTick: worldTick(world) + Math.max(1, Math.ceil(Math.hypot(
-        world.settlements.find(item => item.id === route.fromSettlementId)!.x - world.settlements.find(item => item.id === route.toSettlementId)!.x,
-        world.settlements.find(item => item.id === route.fromSettlementId)!.y - world.settlements.find(item => item.id === route.toSettlementId)!.y,
-      ) / 3)), wagonInventoryItemIds: [], cash: Math.max(25, character.wallet + character.wealth * .35), status: 'в пути', history: ['Начал странствовать между поселениями.'],
-    };
     world.travelingMerchants.push(merchant);
-    for (const templateId of rng.pick([
-      ['linen_cloth', 'linen_shirt', 'leather_shoes', 'salt'],
-      ['bread', 'salted_fish', 'ale', 'wool_cloth'],
-      ['tools', 'sickle', 'dye_blue', 'dye_red'],
-    ])) {
-      const item = addMaterialItem(world, templateId, rng.int(2, 8), character.settlementId, { ownerCharacterId: character.id }, 'товар странствующего продавца', rng.int(42, 72));
-      if (item && !merchant.wagonInventoryItemIds.includes(item.id)) merchant.wagonInventoryItemIds.push(item.id);
-    }
   }
 }
 
@@ -218,10 +261,7 @@ export function initializeLivingEconomy(world: WorldState, rng: RNG): void {
   if (world.simulation.livingEconomyVersion === 1) return;
   synchronizeLivingEstablishments(world);
   const householdById = new Map(world.households.map(item => [item.id, item]));
-  const itemById = new Map(world.items.map(item => [item.id, item]));
   for (const character of world.characters) ensureCharacterProfile(world, character, character.householdId ? householdById.get(character.householdId) : undefined);
-  const important = world.characters.filter(character => character.alive && (character.titles.length || character.renown >= 70)).slice(0, 240);
-  for (const character of important) materializeCharacterEquipment(world, character, itemById);
   createTravelingMerchants(world, rng);
   world.simulation.livingEconomyVersion = 1;
 }
@@ -334,45 +374,41 @@ function wearEquipment(world: WorldState, character: Character, rng: RNG, detail
 }
 
 function simulateDetailedNeeds(world: WorldState, settlement: Settlement, character: Character, household: Household | undefined, rng: RNG, itemById: Map<number, WorldItem>, establishments: readonly Establishment[]): void {
-  const waterAccess = settlementWaterAccess(world, settlement.id, character);
-  for (let day = 0; day < 30; day += 1) {
-    character.needs.hunger = Math.min(100, character.needs.hunger + 3.4);
-    character.needs.thirst = Math.min(100, character.needs.thirst + 4.8);
-    character.needs.rest = Math.min(100, Math.max(0, character.needs.rest + (day % 7 === character.schedule.restDay ? -5 : 1.2)));
-    if (character.needs.hunger >= 42) {
-      const homeFood = consumeHouseholdFood(world, household, .045, itemById);
-      const bought = homeFood > 0 ? 0 : buyAndConsume(world, character, household, settlement, FOOD_IDS, .045, 'личная еда', itemById, establishments);
-      if (homeFood + bought > 0) character.needs.hunger = Math.max(0, character.needs.hunger - 52);
-    }
-    if (character.needs.thirst >= 38) {
-      if (waterAccess) character.needs.thirst = Math.max(0, character.needs.thirst - 62);
-      else {
-        const homeWater = household ? consumeOwnedMaterial(world, household.inventoryItemIds, WATER_IDS, .06, itemById) : 0;
-        const bought = homeWater > 0 ? 0 : buyAndConsume(world, character, household, settlement, WATER_IDS, .06, 'питьевая вода', itemById, establishments);
-        if (homeWater + bought > 0) character.needs.thirst = Math.max(0, character.needs.thirst - 58);
+  if (household) {
+    // Домохозяйство уже прошло единый физический цикл покупки и потребления в
+    // materialEconomy. Подробный режим отражает результат, но не ест второй раз.
+    character.needs.hunger = household.needs.hunger;
+    character.needs.thirst = household.needs.thirst;
+    character.needs.warmth = household.needs.warmth;
+    character.needs.safety = Math.max(character.needs.safety, household.needs.safety);
+    character.needs.rest = Math.max(0, character.needs.rest - 8);
+  } else {
+    const waterAccess = settlementWaterAccess(world, settlement.id, character);
+    for (let day = 0; day < 30; day += 1) {
+      character.needs.hunger = Math.min(100, character.needs.hunger + 3.4);
+      character.needs.thirst = Math.min(100, character.needs.thirst + 4.8);
+      character.needs.rest = Math.min(100, Math.max(0, character.needs.rest + (day % 7 === character.schedule.restDay ? -5 : 1.2)));
+      if (character.needs.hunger >= 42) {
+        const bought = buyAndConsume(world, character, undefined, settlement, FOOD_IDS, .045, 'личная еда', itemById, establishments);
+        if (bought > 0) character.needs.hunger = Math.max(0, character.needs.hunger - 52);
       }
+      if (character.needs.thirst >= 38) {
+        if (waterAccess) character.needs.thirst = Math.max(0, character.needs.thirst - 62);
+        else {
+          const bought = buyAndConsume(world, character, undefined, settlement, WATER_IDS, .06, 'питьевая вода', itemById, establishments);
+          if (bought > 0) character.needs.thirst = Math.max(0, character.needs.thirst - 58);
+        }
+      }
+      if (character.needs.hunger > 82 || character.needs.thirst > 82) character.health = Math.max(1, character.health - .25);
     }
-    if (character.needs.hunger > 82 || character.needs.thirst > 82) character.health = Math.max(1, character.health - .25);
   }
   character.needs.lastUpdatedTick = worldTick(world);
-  wearEquipment(world, character, rng, true, itemById);
-  for (const slot of CLOTHING_SLOTS) {
-    const itemId = character.equipment.equippedItemIds[slot];
-    const item = itemId ? itemById.get(itemId) : undefined;
-    if ((!item || item.condition < 24) && character.age >= 5) buyEquipment(world, character, household, settlement, slot, itemById, establishments);
-  }
-  const toolTemplate = professionTools[character.profession];
-  if (toolTemplate) {
-    const itemId = character.equipment.equippedItemIds.workTool;
-    const tool = itemId ? itemById.get(itemId) : undefined;
-    if (!tool || tool.condition < 22) buyEquipment(world, character, household, settlement, 'workTool', itemById, establishments);
-  }
 }
 
-function compactWear(world: WorldState, rng: RNG, detailedCharacterIds: ReadonlySet<number>, itemById: Map<number, WorldItem>): void {
+function compactWear(world: WorldState, rng: RNG, _detailedCharacterIds: ReadonlySet<number>, itemById: Map<number, WorldItem>): void {
   if (world.month !== 1) return;
   for (const character of world.characters) {
-    if (!character.alive || detailedCharacterIds.has(character.id)) continue;
+    if (!character.alive) continue;
     wearEquipment(world, character, rng, false, itemById);
     const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
     if (character.equipment.condition < 24 && household && household.wealth > 4) {
@@ -437,8 +473,9 @@ function rebalanceLabor(world: WorldState, indexes: WorldIndexes): void {
       const skill = character.skills[character.profession] ?? 8;
       const contract: EmploymentContract = {
         id: world.nextIds.employment++, characterId: character.id, establishmentId: target.id,
-        role: preferredRole ? character.profession : 'подсобный работник', wage: Math.max(3, Math.round((2.5 + skill / 18) * settlement.economy.wageIndex)),
-        hoursPerWeek: 40 + character.id % 15, sinceYear: world.year, active: true,
+        role: ['ферма', 'рыбный промысел'].includes(target.type) ? 'работник за долю продукции' : preferredRole ? character.profession : 'подсобный работник',
+        wage: ['ферма', 'рыбный промысел'].includes(target.type) ? 0 : Math.max(3, Math.round((2.5 + skill / 18) * settlement.economy.wageIndex)),
+        hoursPerWeek: 40 + character.id % 15, sinceYear: world.year, active: true, arrears: 0,
       };
       world.employments.push(contract);
       indexes.employmentById.set(contract.id, contract);
@@ -630,7 +667,6 @@ export function advanceLivingEconomy(world: WorldState, rng: RNG, indexes: World
     for (const character of residents) {
       const household = character.householdId ? householdById.get(character.householdId) : undefined;
       ensureCharacterProfile(world, character, household);
-      materializeCharacterEquipment(world, character, itemById);
       simulateDetailedNeeds(world, settlement, character, household, rng, itemById, establishments);
     }
     for (const householdId of detailed.householdIds) {
