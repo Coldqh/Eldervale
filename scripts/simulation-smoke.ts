@@ -57,7 +57,7 @@ function localMarkerSignature(map: ReturnType<typeof generateLocalMap>) {
 const first = generateHistoricalWorld(config);
 const second = generateHistoricalWorld(config);
 assert.deepEqual(signature(first), signature(second), 'один seed должен давать одинаковую прожитую историю');
-assert.equal(first.version, 34);
+assert.equal(first.version, 35);
 assert.ok(first.cultures.length > 0, 'мир должен содержать культуры');
 assert.ok(first.languages.length > 0, 'мир должен содержать языки');
 assert.ok(first.religions.length > 0, 'мир должен содержать религии');
@@ -149,7 +149,7 @@ delete legacy.armyCampStructures;
 delete legacy.armyLocalPositions;
 legacy.simulation.physicalArmyVersion = undefined;
 const migrated = migrateWorld(legacy);
-assert.equal(migrated.version, 34);
+assert.equal(migrated.version, 35);
 assert.ok(Array.isArray(migrated.settlementExpeditions), 'миграция должна создать постоянный журнал экспедиций основателей');
 assert.ok(migrated.settlements.every(settlement => settlement.politicalStatus), 'миграция должна назначить политический статус существующим поселениям');
 assert.equal(migrated.simulation.settlementLifecycleVersion, 1, 'миграция должна включить жизненный цикл поселений');

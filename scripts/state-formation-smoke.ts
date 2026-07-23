@@ -21,7 +21,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .18,
 });
 
-assert.equal(world.version, 34, 'новый мир должен использовать схему 34');
+assert.equal(world.version, 35, 'новый мир должен использовать схему 35');
 assert.equal(new Set(world.settlements.map(settlement => settlement.politicalCommunityId)).size, world.settlements.length, 'каждое действующее поселение должно иметь собственную текущую политическую общину');
 assert.ok(world.settlements.every(settlement => world.politicalCommunities.some(community => community.id === settlement.politicalCommunityId && community.settlementIds.includes(settlement.id))), 'поселения должны ссылаться на реальную общину');
 assert.deepEqual(stateFormationIntegrityIssues(world), [], 'исходные политические общины должны быть целостными');
@@ -89,6 +89,10 @@ assert.ok(world.armies.length > oldArmyCount && world.armies.some(army => army.k
 assert.ok(newKingdom!.predecessorKingdomIds?.includes(predecessor.id), 'новое государство должно хранить политического предшественника');
 assert.equal(newKingdom!.foundingCommunityId, community.id, 'государство должно хранить общину-основателя');
 assert.equal(community.foundedKingdomId, newKingdom!.id, 'община должна хранить основанное государство');
+const foundingDecision = world.institutionDecisions.find(item => item.kind === 'state-foundation' && item.communityId === community.id && item.status === 'executed');
+assert.ok(foundingDecision, 'государство должно возникнуть после решения лидера и делегатов');
+assert.equal(newKingdom!.treasury, 500, 'новое государство должно получить собранную общиной казну без бесплатного минимума');
+assert.equal(community.treasury, 0, 'деньги общины должны быть физически переданы новому государству');
 assert.ok(world.politicalTransitions.some(item => item.kind === 'state-foundation' && item.communityId === community.id && item.toKingdomId === newKingdom!.id), 'основание должно попасть в постоянную политическую историю');
 assert.ok(predecessor.claims.includes(candidateSettlement!.id), 'прежняя держава должна сохранить спорное притязание на отделившуюся землю');
 assert.ok(newKingdom!.diplomacy.some(item => item.kingdomId === predecessor.id && item.score < 0), 'отделение должно создать реальные напряжённые отношения');

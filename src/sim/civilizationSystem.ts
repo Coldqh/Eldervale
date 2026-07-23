@@ -1,9 +1,10 @@
 import type { Civilization, CivilizationEraDefinition, TechnologyDefinition } from '../civilizationTypes';
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { stableRecipeKey } from '../content/coreRecipes';
-import type { EstablishmentType, Kingdom, ProductionRecipe, Settlement, WorldState } from '../types';
+import type { Character, EstablishmentType, Kingdom, ProductionRecipe, Settlement, WorldState } from '../types';
 import { appendCausalEvent } from './causality';
 import { initializeCultureSystem } from './cultureSystem';
+import { linkDecisionToEvent } from './decisionCore';
 import { registerWorldEventKnowledge } from './knowledgeSystem';
 import { RNG } from './rng';
 import {
@@ -11,6 +12,7 @@ import {
   establishLocalTechnology, initializeTechnologyKnowledge, recipeAvailableToSettlement as localRecipeAvailableToSettlement,
   selectDiscoverySettlement, synchronizeTechnologyRecipes, technologyKnowledgeIntegrityIssues,
 } from './technologyKnowledge';
+import { authorizeTechnologyResearch, markInstitutionDecisionExecuted, markInstitutionDecisionFailed } from './institutionSystem';
 
 const BASELINE_TECHNOLOGIES = ['controlled-fire', 'oral-tradition'] as const;
 
@@ -288,57 +290,118 @@ function candidateTechnologies(world: WorldState, civilization: Civilization): T
     });
 }
 
-function recordTechnologyDiscovery(world: WorldState, civilization: Civilization, technology: TechnologyDefinition): void {
+function recordTechnologyDiscovery(
+  world: WorldState,
+  civilization: Civilization,
+  technology: TechnologyDefinition,
+  discoverySettlement: Settlement,
+  discoverer: Character,
+  institutionDecisionId: number,
+): void {
   const unlockedRecipes = CIVILIZATION_CONTENT.recipes.filter(recipe => recipe.requiredTechnologyId === technology.id).map(recipe => recipe.name);
   const unlockedResources = CIVILIZATION_CONTENT.resources.filter(resource => resource.requiredTechnologyId === technology.id).map(resource => resource.name);
-  const discoverySettlement = selectDiscoverySettlement(world, civilization.id, technology);
-  if (discoverySettlement) establishLocalTechnology(world, discoverySettlement.id, technology.id, 'discovery', {
+  establishLocalTechnology(world, discoverySettlement.id, technology.id, 'discovery', {
+    carrierCharacterId: discoverer.id,
     mastery: 74,
-    reason: `В ${world.year} году местные мастера закрепили открытие «${technology.name}».`,
+    reason: `В ${world.year} году ${discoverer.name} повторил и закрепил практику «${technology.name}».`,
   });
-  const capital = discoverySettlement ?? world.settlements.find(item => item.id === civilization.capitalSettlementId);
-  const kingdom = capital ? world.kingdoms.find(item => item.id === capital.kingdomId) : civilizationKingdoms(world, civilization.id)[0];
-  civilization.history.push(`В ${world.year} году освоена технология «${technology.name}».`);
+  const kingdom = world.kingdoms.find(item => item.id === discoverySettlement.kingdomId) ?? civilizationKingdoms(world, civilization.id)[0];
+  civilization.history.push(`В ${world.year} году ${discoverer.name} в ${discoverySettlement.name} освоил технологию «${technology.name}».`);
+  const institutionDecision = world.institutionDecisions.find(item => item.id === institutionDecisionId);
   const event = appendCausalEvent(world, {
     kind: 'knowledge',
-    title: `${civilization.name} освоила технологию «${technology.name}»`,
+    title: `${discoverer.name} закрепил технологию «${technology.name}»`,
     description: technology.description,
-    cause: 'накопленные знания, ремесленная практика, доступные ресурсы и работа местных институтов',
+    cause: 'серия оплаченных опытов, местная ремесленная практика и доступные материалы',
     conditions: [
-      `население: ${civilization.metrics.population}`,
-      `урбанизация: ${Math.round(civilization.metrics.urbanization)}%`,
-      `грамотность: ${Math.round(civilization.metrics.literacy)}%`,
+      `поселение: ${discoverySettlement.name}`,
+      `помощников: ${institutionDecision?.supporterCharacterIds.length ?? 0}`,
+      `местная грамотность: ${Math.round(settlementLiteracy(world, discoverySettlement))}%`,
     ],
-    decision: 'мастера, учёные и власти закрепили новый воспроизводимый способ работы',
+    decision: `${discoverer.name} и местные мастера решили повторить удачный результат и обучить других`,
     outcome: `открыты новые возможности: ${[...(technology.unlocks.capabilities ?? []), ...unlockedResources, ...unlockedRecipes].join(', ') || 'новая ступень знаний'}`,
-    consequences: ['цивилизация получила постоянную технологию', 'доступные рецепты и учреждения были пересчитаны'],
+    consequences: ['практика появилась у конкретных носителей', 'цивилизационная запись обновилась после местного открытия'],
     entityRefs: [
-      ...(capital ? [{ kind: 'settlement' as const, id: capital.id }] : []),
+      { kind: 'character', id: discoverer.id },
+      { kind: 'settlement', id: discoverySettlement.id },
       ...(kingdom ? [{ kind: 'kingdom' as const, id: kingdom.id }] : []),
       ...(civilization.originCultureId ? [{ kind: 'culture' as const, id: civilization.originCultureId }] : []),
     ],
     importance: 3,
+    decisionId: institutionDecision?.decisionRecordId,
   });
   registerWorldEventKnowledge(world, event);
+  linkDecisionToEvent(world, institutionDecision?.decisionRecordId, event);
+  markInstitutionDecisionExecuted(world, institutionDecisionId, `${discoverer.name} получил воспроизводимый результат и передал практику местным мастерам.`);
+}
+
+function researchActor(world: WorldState, settlement: Settlement, technology: TechnologyDefinition): Character | undefined {
+  const professions = technology.category === 'знания' || technology.category === 'управление'
+    ? ['scribe', 'priest', 'healer', 'merchant']
+    : technology.category === 'земледелие'
+      ? ['farmer', 'miller', 'herbalist']
+      : technology.category === 'строительство'
+        ? ['carpenter', 'miner', 'toolmaker']
+        : technology.category === 'военное дело'
+          ? ['blacksmith', 'armorer', 'soldier', 'guard']
+          : technology.category === 'магия'
+            ? ['healer', 'herbalist', 'priest', 'scribe']
+            : ['blacksmith', 'carpenter', 'toolmaker', 'weaver', 'brewer', 'merchant'];
+  return world.characters
+    .filter(character => character.alive && character.settlementId === settlement.id && character.age >= 16 && !character.expeditionId)
+    .sort((a, b) => Number(professions.includes(b.profession)) - Number(professions.includes(a.profession))
+      || Math.max(...Object.values(b.skills ?? {}), 0) - Math.max(...Object.values(a.skills ?? {}), 0)
+      || (b.cultureProfile?.literacy ?? 0) - (a.cultureProfile?.literacy ?? 0)
+      || b.renown - a.renown || a.id - b.id)[0];
+}
+
+function consumeExperimentMaterials(world: WorldState, settlementId: number, technology: TechnologyDefinition): number[] | undefined {
+  const required = technology.requirements?.requiredResourceIds ?? [];
+  if (!required.length) return [];
+  const selected = required.map(templateId => world.items
+    .filter(candidate => candidate.settlementId === settlementId && candidate.templateId === templateId && candidate.quantity >= .2 && candidate.condition > 0)
+    .sort((a, b) => b.quality - a.quality || b.quantity - a.quantity || a.id - b.id)[0]);
+  if (selected.some(item => !item)) return undefined;
+  const consumedIds: number[] = [];
+  for (const item of selected) {
+    item!.quantity -= Math.min(.5, item!.quantity);
+    consumedIds.push(item!.id);
+  }
+  return consumedIds;
 }
 
 function advanceCivilization(world: WorldState, civilization: Civilization, elapsedYears: number): void {
   civilization.metrics = calculateMetrics(world, civilization);
   civilization.knownResourceIds = discoverResources(world, civilization);
-  let innovation = civilization.metrics.innovation * Math.max(1, elapsedYears);
-  let safety = 0;
-  while (innovation > .01 && safety++ < 8) {
-    const candidate = candidateTechnologies(world, civilization)[0];
-    if (!candidate) break;
-    const current = civilization.technologyProgress[candidate.id] ?? 0;
-    const invested = Math.min(innovation, Math.max(0, candidate.cost - current));
-    civilization.technologyProgress[candidate.id] = current + invested;
-    innovation -= invested;
-    if (civilization.technologyProgress[candidate.id] + .0001 < candidate.cost) break;
-    civilization.unlockedTechnologyIds.push(candidate.id);
-    civilization.unlockedTechnologyIds = [...new Set(civilization.unlockedTechnologyIds)];
-    delete civilization.technologyProgress[candidate.id];
-    recordTechnologyDiscovery(world, civilization, candidate);
+  const candidate = candidateTechnologies(world, civilization)[0];
+  if (candidate) {
+    const discoverySettlement = selectDiscoverySettlement(world, civilization.id, candidate);
+    const actor = discoverySettlement ? researchActor(world, discoverySettlement, candidate) : undefined;
+    if (discoverySettlement && actor) {
+      const innovation = civilization.metrics.innovation * Math.max(1, Math.min(3, elapsedYears));
+      const institution = authorizeTechnologyResearch(world, civilization.id, discoverySettlement, candidate, actor, innovation);
+      if (institution.status === 'approved' && institution.chosenOptionId === 'attempt') {
+        const consumed = consumeExperimentMaterials(world, discoverySettlement.id, candidate);
+        if (consumed === undefined) {
+          markInstitutionDecisionFailed(world, institution.id, 'опыт сорвался: после обсуждения мастера не получили физические образцы требуемого сырья');
+        } else {
+          institution.reservedItemIds = consumed;
+          const current = civilization.technologyProgress[candidate.id] ?? 0;
+          const localSkill = Math.max(...Object.values(actor.skills ?? {}), 0);
+          const invested = Math.min(candidate.cost - current, Math.max(1, innovation * (.45 + localSkill / 220)));
+          civilization.technologyProgress[candidate.id] = current + invested;
+          institution.history.push(`Опыт дал ${invested.toFixed(1)} пунктов подтверждённого прогресса.`);
+          if (civilization.technologyProgress[candidate.id] + .0001 >= candidate.cost) {
+            civilization.unlockedTechnologyIds.push(candidate.id);
+            civilization.unlockedTechnologyIds = [...new Set(civilization.unlockedTechnologyIds)];
+            delete civilization.technologyProgress[candidate.id];
+            recordTechnologyDiscovery(world, civilization, candidate, discoverySettlement, actor, institution.id);
+          } else {
+            markInstitutionDecisionExecuted(world, institution.id, `Опыт завершён без окончательного открытия; подтверждено ${civilization.technologyProgress[candidate.id]!.toFixed(1)} из ${candidate.cost}.`);
+          }
+        }
+      }
+    }
   }
   civilization.knownRecipeKeys = knownRecipeKeys(civilization);
   const previousEra = civilization.eraId;

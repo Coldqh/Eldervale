@@ -25,7 +25,7 @@ const world = generateHistoricalWorld({
   localMapSize: 96,
 });
 
-assert.equal(world.version, 34, '6.0 должен использовать схему 34');
+assert.equal(world.version, 35, '6.0 должен использовать схему 35');
 assert.equal(world.simulation.worldLawVersion, 1, 'единый закон мира должен быть инициализирован');
 assert.equal(world.history.genesis?.plannedSiteCount, 0, 'будущие города не должны быть предрешены старым каркасом карты');
 assert.ok(world.resourceDeposits.every(deposit => !deposit.history.some(entry => entry.includes('чтобы его хозяйство имело физическую ресурсную базу'))), 'у поселений не должно быть искусственных ресурсных страховок');

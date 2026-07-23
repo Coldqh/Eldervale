@@ -5,6 +5,7 @@ import type { SettlementTechnologyKnowledge, TechnologyTransmission } from './te
 import type { SettlementExpedition } from './settlementLifecycleTypes';
 import type { PoliticalCommunity, PoliticalTransition } from './stateFormationTypes';
 import type { ResourceDeposit, SettlementRegionalEconomy, TradeContract } from './regionalEconomyTypes';
+import type { InstitutionDecision } from './institutionTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -1164,6 +1165,7 @@ export interface SimulationRuntimeState {
   stateFormationVersion?: 1;
   regionalEconomyVersion?: 1;
   worldLawVersion?: 1;
+  institutionSystemVersion?: 1;
   economyLastTickBySettlement?: Record<string, number>;
   agricultureLastTickBySettlement?: Record<string, number>;
   cemeteryPlacementVersion?: 1;
@@ -1892,7 +1894,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 34;
+  version: 35;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1974,6 +1976,7 @@ export interface WorldState {
   epidemics: Epidemic[];
   decisions: DecisionRecord[];
   stateDeltas: StateDelta[];
+  institutionDecisions: InstitutionDecision[];
   territoryHistory: TerritoryChange[];
   events: WorldEvent[];
   localMapChanges: LocalMapEffect[];

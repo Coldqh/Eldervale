@@ -155,6 +155,9 @@ export interface CityProjectRequest {
   constructionProjectId?: number;
   completedDistrictName?: string;
   blockedReason?: string;
+  institutionDecisionId?: number;
+  nextReviewTick?: number;
+  reservedMoney?: number;
   history: string[];
 }
 

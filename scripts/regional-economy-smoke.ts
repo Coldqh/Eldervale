@@ -10,6 +10,7 @@ import {
   activeTradeContractForRoute, initializeRegionalEconomy, regionalEconomyIntegrityIssues,
   regionalPriceMultiplier, reserveRegionalExtraction, synchronizeRegionalTradeContracts,
 } from '../src/sim/regionalEconomy';
+import { advanceInstitutionSystem } from '../src/sim/institutionSystem';
 
 const world = generateHistoricalWorld({
   ...defaultConfig,
@@ -25,7 +26,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .45,
 });
 
-assert.equal(world.version, 34, 'новый мир должен использовать схему 34');
+assert.equal(world.version, 35, 'новый мир должен использовать схему 35');
 initializeRegionalEconomy(world);
 assert.equal(world.settlementRegionalEconomies.length, world.settlements.length, 'каждое поселение должно иметь региональную экономику');
 assert.ok(world.resourceDeposits.length > 0, 'карта должна содержать естественные ресурсные источники');
@@ -85,6 +86,7 @@ assert.ok(contract, 'дефицит и избыток на связанном м
 assert.equal(contract!.templateId, 'iron_ore');
 assert.equal(contract!.fromSettlementId, seller.id);
 assert.equal(contract!.toSettlementId, buyer.id);
+assert.equal(contract!.status, 'proposed', 'система должна создать предложение, а не готовый договор без участников');
 contract!.maxUnitPrice = 100000;
 world.tradeContracts = [contract!];
 world.shipments = world.shipments.filter(item => item.routeId !== route!.id);
@@ -118,6 +120,9 @@ world.items.push({
 });
 sellerEstablishment!.inventoryItemIds.push(oreItemId);
 buyerEstablishment!.cash = 100000;
+advanceInstitutionSystem(world, new RNG('regional-contract-negotiation'));
+assert.equal(contract!.status, 'active', 'договор должен стать активным только после решения живых участников');
+assert.ok(contract!.institutionDecisionId, 'активный договор должен хранить институциональное решение');
 world.month = 1;
 advanceMaterialEconomy(world, new RNG('regional-shipment-departure'), buildWorldIndexes(world), new Set([seller.id, buyer.id]), new Set([seller.id, buyer.id]));
 const physicalShipment = world.shipments.find(item => item.routeId === route!.id && item.fromSettlementId === seller.id && item.toSettlementId === buyer.id && item.status === 'в пути' && item.goods.some(goods => goods.templateId === 'iron_ore'));

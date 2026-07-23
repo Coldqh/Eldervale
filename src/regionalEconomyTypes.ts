@@ -52,7 +52,7 @@ export interface SettlementRegionalEconomy {
   history: string[];
 }
 
-export type TradeContractStatus = 'active' | 'suspended' | 'fulfilled' | 'cancelled';
+export type TradeContractStatus = 'proposed' | 'active' | 'suspended' | 'rejected' | 'fulfilled' | 'cancelled';
 
 export interface TradeContract {
   id: number;
@@ -64,6 +64,10 @@ export interface TradeContract {
   minimumDestinationStock: number;
   maxUnitPrice: number;
   priority: number;
+  brokerCharacterId?: number;
+  buyerRepresentativeId?: number;
+  sellerRepresentativeId?: number;
+  institutionDecisionId?: number;
   status: TradeContractStatus;
   createdTick: number;
   lastShipmentTick?: number;

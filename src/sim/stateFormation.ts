@@ -17,6 +17,7 @@ import { controlledCapital, normalizeKingdomCapitals } from './kingdomState';
 import { RNG } from './rng';
 import { worldTick } from './scheduler';
 import { recordKingdomFoundation, transferPoliticalTerritory } from './territory';
+import { authorizeStateFoundation, markInstitutionDecisionExecuted } from './institutionSystem';
 
 const ACTIVE_COMMUNITY_STATUSES = new Set<PoliticalCommunityStatus>(['integrated', 'frontier', 'autonomous', 'independent', 'organizing-state']);
 const STATE_COLORS = ['#774b4b', '#4b6477', '#6d5d3e', '#45654f', '#67517a', '#7a643f', '#536b70', '#6f4f62', '#4f6a47', '#735744'];
@@ -183,6 +184,12 @@ export function foundKingdomFromCommunity(
   if (residents.length < 5) return undefined;
   const leader = chooseCommunityLeader(world, community, settlements);
   if (!leader) return undefined;
+  const foundingDecision = authorizeStateFoundation(world, community, leader, settlements);
+  if (foundingDecision.status !== 'approved' || foundingDecision.chosenOptionId !== 'establish') {
+    community.status = foundingDecision.chosenOptionId === 'submit' ? 'autonomous' : 'organizing-state';
+    community.history.push(`В ${world.year}.${String(world.month).padStart(2, '0')} государство не было создано: ${foundingDecision.result ?? 'советы не пришли к согласию'}.`);
+    return undefined;
+  }
   const capital = [...settlements].sort((a, b) => b.population - a.population || b.prosperity - a.prosperity || b.defense - a.defense || a.id - b.id)[0]!;
   const predecessorIds = [...new Set(settlements.map(settlement => settlement.kingdomId))];
   const primaryPredecessor = world.kingdoms.find(item => item.id === community.originKingdomId) ?? world.kingdoms.find(item => predecessorIds.includes(item.id));
@@ -198,8 +205,8 @@ export function foundKingdomFromCommunity(
     species,
     rulerId: leader.id,
     capitalId: capital.id,
-    treasury: Math.max(80, Math.round(community.treasury + settlements.reduce((sum, settlement) => sum + settlement.economy.coinSupply * .08, 0))),
-    armyStrength: Math.max(12, Math.round(community.militarySupport * 1.4 + settlements.reduce((sum, settlement) => sum + settlement.defense, 0) * .35)),
+    treasury: Math.max(0, Math.round(community.treasury)),
+    armyStrength: 0,
     stability: clamp(Math.round(community.cohesion * .45 + community.legitimacy * .35 + community.authority * .2), 18, 88),
     aggression: clamp(Math.round(25 + community.independencePressure * .28 + rng.int(-10, 12)), 5, 90),
     culture: world.cultures.find(item => item.id === cultureState?.dominantCultureId)?.name ?? primaryPredecessor?.culture ?? 'местная культура',
@@ -218,6 +225,7 @@ export function foundKingdomFromCommunity(
     politicalOrigin: community.kind === 'city-league' || community.kind === 'tribal-confederation' ? 'league' : 'secession',
     foundingGovernmentForm: form,
   };
+  community.treasury = 0;
   world.kingdoms.push(kingdom);
   for (const predecessorId of predecessorIds) {
     const predecessor = world.kingdoms.find(item => item.id === predecessorId);
@@ -246,9 +254,10 @@ export function foundKingdomFromCommunity(
   leader.visualRole = 'king';
   leader.biography.push(`В ${world.year} году возглавил новое государство ${kingdom.name}.`);
 
-  const army = createFoundingArmy(world, kingdom, capital, leader, residents, rng);
+  const army = createFoundingArmy(world, kingdom, capital, leader, residents, community.militarySupport, rng);
   detachFoundingSoldiers(world, army.soldierIds);
   world.armies.push(army);
+  kingdom.armyStrength = army.strength;
   community.status = 'state-founded';
   community.foundedKingdomId = kingdom.id;
   community.currentKingdomId = kingdom.id;
@@ -262,6 +271,7 @@ export function foundKingdomFromCommunity(
   synchronizeEmploymentLinks(world, indexes);
   advanceCitySimulation(world, memberIds);
   maybeCreateTribute(world, kingdom, primaryPredecessor, community, rng);
+  markInstitutionDecisionExecuted(world, foundingDecision.id, `Создано государство ${kingdom.name}; в казну передано ${kingdom.treasury} крон, в ополчение вошли ${army.soldierIds.length} жителей.`);
   appendCausalEvent(world, {
     kind: 'state',
     title: `Возникло государство ${kingdom.name}`,
@@ -273,6 +283,7 @@ export function foundKingdomFromCommunity(
     consequences: ['поселения сменили государственную принадлежность', 'границы были перераспределены вокруг общин', 'созданы правительство и местное войско'],
     entityRefs: [{ kind: 'kingdom', id: kingdom.id }, { kind: 'character', id: leader.id }, ...settlements.slice(0, 4).map(item => ({ kind: 'settlement' as const, id: item.id }))],
     importance: 5,
+    decisionId: foundingDecision.decisionRecordId,
   });
   return kingdom;
 }
@@ -589,14 +600,15 @@ function maybeCreateTribute(world: WorldState, kingdom: Kingdom, predecessor: Ki
   return agreement;
 }
 
-function createFoundingArmy(world: WorldState, kingdom: Kingdom, capital: Settlement, leader: Character, residents: Character[], rng: RNG): Army {
+function createFoundingArmy(world: WorldState, kingdom: Kingdom, capital: Settlement, leader: Character, residents: Character[], militarySupport: number, rng: RNG): Army {
   const preferred = residents
     .filter(character => character.age >= 16 && (character.militaryRole || ['guard', 'soldier', 'hunter'].includes(character.profession)))
     .sort((a, b) => (b.militaryExperience ?? 0) - (a.militaryExperience ?? 0) || b.renown - a.renown || a.id - b.id);
   const reserve = residents
     .filter(character => character.age >= 16 && !preferred.includes(character) && character.profession !== 'child')
     .sort((a, b) => b.loyalty - a.loyalty || b.health - a.health || a.id - b.id);
-  const target = Math.max(1, Math.min(36, Math.max(Math.min(6, residents.length), Math.ceil(residents.length * .18))));
+  const supportRatio = Math.max(.03, Math.min(.28, militarySupport / 400));
+  const target = Math.max(1, Math.min(36, Math.ceil(residents.length * supportRatio)));
   const soldiers = [...preferred, ...reserve].slice(0, target);
   const commander = soldiers[0] ?? leader;
   commander.kingdomId = kingdom.id;

@@ -9,7 +9,7 @@ import { addMaterialItem, consumeSettlementMaterial } from './materialEconomy';
 import { RNG, hashSeed } from './rng';
 import { assignConstructionFootprint, assignFieldCells, buildingDimensions } from './spatial';
 import { worldTick } from './scheduler';
-import { approveCityProjectRequest, blockCityProjectRequest, completeCityActionRequest, completeCityProjectRequest, failCityProjectRequest, linkCityProjectToConstruction, requestCityProject } from './cityProjects';
+import { blockCityProjectRequest, completeCityActionRequest, completeCityProjectRequest, failCityProjectRequest, linkCityProjectToConstruction, requestCityProject } from './cityProjects';
 import { ensureBuildingCapacityProfile } from './cityCapacity';
 import { markCityDirty } from './cityState';
 import { pendingCityDevelopmentRequests } from './cityDevelopment';
@@ -322,7 +322,6 @@ function evaluateConstructionNeeds(
     if (cityRequest) {
       if (cityRequest.requestedBuildingType === 'district-expansion') {
         const role = districtRole(cityRequest.targetDistrictRole) ?? preferredDistrictRoles('house')[0]!;
-        approveCityProjectRequest(world, cityRequest.id);
         const result = expandSettlementDistrict(world, settlement, role, cityRequest.reason);
         if (result.ok && result.district) {
           completeCityActionRequest(world, cityRequest.id, `Создан район «${result.district.name}» за ${result.cost} монет.`, result.district.name);
@@ -366,16 +365,18 @@ function startCityProjectRequest(
     linkCityProjectToConstruction(world, request.id, existing);
     return undefined;
   }
-  approveCityProjectRequest(world, request.id);
+  if (request.status !== 'approved') return undefined;
   const dimensions = buildingDimensions(type, type === 'tenement' || type === 'manor' ? 2 : 1);
   const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
-  const planningCost = Math.max(1, Math.round(dimensions.width * dimensions.height / 90));
-  if (!government || government.treasury + .0001 < planningCost) {
-    blockCityProjectRequest(world, request.id, `местная власть не собрала ${planningCost} крон на межевание, надзор и организацию работ`);
+  if (!government) {
+    blockCityProjectRequest(world, request.id, 'в поселении нет действующей власти, способной отвечать за общественную стройку');
     return undefined;
   }
-  government.treasury -= planningCost;
-  request.history.push(`Местная казна оплатила ${planningCost} крон на подготовку стройки.`);
+  if (!request.institutionDecisionId) {
+    blockCityProjectRequest(world, request.id, 'проект не прошёл решение местной власти');
+    return undefined;
+  }
+  request.history.push(`Политическое решение №${request.institutionDecisionId} передало строителям резерв ${Math.round(request.reservedMoney ?? 0)} крон.`);
   let project = placeConstructionProject(world, settlement, request, type, dimensions, rng);
   if (!project) {
     const expansionRole = districtRole(request.targetDistrictRole) ?? preferredDistrictRoles(type)[0]!;

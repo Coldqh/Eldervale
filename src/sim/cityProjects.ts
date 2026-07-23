@@ -21,16 +21,21 @@ export function requestCityProject(
   const state = ensureUrbanState(world, settlementId);
   const tick = worldTick(world);
   const active = state.projectQueue.find(item => item.requestedBuildingType === buildingType
-    && ['requested', 'blocked', 'approved', 'started'].includes(item.status));
+    && (['requested', 'blocked', 'approved', 'started'].includes(item.status)
+      || (item.status === 'rejected' && Boolean(item.nextReviewTick && item.nextReviewTick > tick))));
   if (active) {
+    if (active.status === 'rejected') return active;
     active.priority = Math.max(active.priority, clamp(options.priority ?? 50, 1, 100));
     active.updatedTick = tick;
     active.triggerProblemIds = [...new Set([...(active.triggerProblemIds ?? []), ...(options.triggerProblemIds ?? [])])];
     active.expectedRelief = [...new Set([...(active.expectedRelief ?? []), ...(options.expectedRelief ?? [])])];
     active.targetDistrictRole ??= options.targetDistrictRole;
     if (reason && !active.history.includes(reason)) active.history.push(reason);
-    if (active.status === 'blocked') active.status = 'requested';
-    active.blockedReason = undefined;
+    if (active.status === 'blocked' && (!active.nextReviewTick || active.nextReviewTick <= tick)) {
+      active.status = 'requested';
+      active.blockedReason = undefined;
+      active.nextReviewTick = undefined;
+    }
     markCityDirty(world, settlementId, 'construction');
     return active;
   }
@@ -55,15 +60,49 @@ export function requestCityProject(
   return request;
 }
 
-export function approveCityProjectRequest(world: WorldState, requestId: string): CityProjectRequest | undefined {
+export function approveCityProjectRequest(
+  world: WorldState,
+  requestId: string,
+  note = 'Проект одобрен местной властью.',
+  institutionDecisionId?: number,
+  reservedMoney = 0,
+): CityProjectRequest | undefined {
   const request = findCityProjectRequest(world, requestId);
-  if (!request || !['requested', 'blocked'].includes(request.status)) return request;
+  if (!request || !['requested', 'blocked', 'approved'].includes(request.status)) return request;
   request.status = 'approved';
   request.blockedReason = undefined;
+  request.nextReviewTick = undefined;
   request.updatedTick = worldTick(world);
-  request.history.push('Проект одобрен городской системой.');
+  request.institutionDecisionId = institutionDecisionId ?? request.institutionDecisionId;
+  request.reservedMoney = Math.max(request.reservedMoney ?? 0, reservedMoney);
+  request.history.push(note);
   markCityDirty(world, request.settlementId, 'construction');
   return request;
+}
+
+
+export function deferCityProjectRequest(world: WorldState, requestId: string, reason: string, nextReviewTick: number, institutionDecisionId?: number): void {
+  const request = findCityProjectRequest(world, requestId);
+  if (!request) return;
+  request.status = 'blocked';
+  request.blockedReason = reason;
+  request.nextReviewTick = nextReviewTick;
+  request.institutionDecisionId = institutionDecisionId ?? request.institutionDecisionId;
+  request.updatedTick = worldTick(world);
+  request.history.push(`Рассмотрение отложено: ${reason}`);
+  markCityDirty(world, request.settlementId, 'construction');
+}
+
+export function rejectCityProjectRequest(world: WorldState, requestId: string, reason: string, institutionDecisionId?: number): void {
+  const request = findCityProjectRequest(world, requestId);
+  if (!request) return;
+  request.status = 'rejected';
+  request.blockedReason = reason;
+  request.institutionDecisionId = institutionDecisionId ?? request.institutionDecisionId;
+  request.updatedTick = worldTick(world);
+  request.nextReviewTick = request.updatedTick + 12;
+  request.history.push(`Проект отклонён: ${reason}. Повторное рассмотрение возможно не раньше чем через 12 месяцев.`);
+  markCityDirty(world, request.settlementId, 'construction');
 }
 
 export function blockCityProjectRequest(world: WorldState, requestId: string, reason: string): void {

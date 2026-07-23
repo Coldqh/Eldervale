@@ -231,7 +231,7 @@ function desiredContracts(world: WorldState): Omit<TradeContract, 'id' | 'create
           targetQuantity: Math.max(1, Math.min(route.volume / 8, demand * 1.5, Math.max(2, supply * .25))),
           minimumDestinationStock: Math.max(1, demand * .65), maxUnitPrice: Math.max(baseValue * 2.5, expectedDeliveredPrice * 1.2),
           priority: Math.round(40 + buyer.importReliance * .5 + (FOOD_TEMPLATES.has(templateId) ? 25 : 0)),
-          status: route.active && route.safety >= 18 ? 'active' : 'suspended',
+          status: route.active && route.safety >= 18 ? 'proposed' : 'suspended',
           disruptedSinceTick: route.active && route.safety >= 18 ? undefined : worldTick(world),
           cause: route.active ? (route.safety < 18 ? 'дорога слишком опасна' : undefined) : 'торговый путь закрыт',
         });
@@ -255,8 +255,24 @@ function synchronizeContracts(world: WorldState): void {
       continue;
     }
     const oldStatus = contract.status;
-    Object.assign(contract, candidate);
-    if (oldStatus !== contract.status) contract.history.push(contract.status === 'active' ? 'Поставки возобновлены.' : `Поставки приостановлены: ${contract.cause ?? 'нет безопасного пути'}.`);
+    const candidateStatus = candidate.status;
+    const rejectionCoolingDown = oldStatus === 'rejected' && tick - (contract.disruptedSinceTick ?? contract.createdTick) < 12;
+    const preservedStatus = candidateStatus === 'suspended'
+      ? 'suspended'
+      : oldStatus === 'active' ? 'active'
+        : oldStatus === 'suspended' && contract.institutionDecisionId ? 'active'
+          : rejectionCoolingDown ? 'rejected'
+            : 'proposed';
+    Object.assign(contract, candidate, { status: preservedStatus });
+    if (oldStatus === 'rejected' && preservedStatus === 'proposed') {
+      contract.institutionDecisionId = undefined;
+      contract.brokerCharacterId = undefined;
+      contract.sellerRepresentativeId = undefined;
+      contract.buyerRepresentativeId = undefined;
+      contract.disruptedSinceTick = undefined;
+      contract.cause = 'после годовой паузы стороны могут начать новые переговоры';
+    }
+    if (oldStatus !== contract.status) contract.history.push(contract.status === 'active' ? 'Поставки возобновлены после решения участников.' : contract.status === 'proposed' ? 'Условия снова вынесены на переговоры.' : `Поставки приостановлены: ${contract.cause ?? 'нет безопасного пути'}.`);
     if (contract.history.length > 18) contract.history.splice(0, contract.history.length - 18);
   }
   for (const contract of world.tradeContracts) {
@@ -266,7 +282,7 @@ function synchronizeContracts(world: WorldState): void {
       contract.history.push('Потребность исчезла или поставщик утратил избыток товара.');
     }
   }
-  if (world.tradeContracts.length > 900) world.tradeContracts = world.tradeContracts.filter(item => item.status === 'active' || item.status === 'suspended').concat(world.tradeContracts.filter(item => item.status === 'fulfilled' || item.status === 'cancelled').slice(-200));
+  if (world.tradeContracts.length > 900) world.tradeContracts = world.tradeContracts.filter(item => ['proposed', 'active', 'suspended'].includes(item.status)).concat(world.tradeContracts.filter(item => ['rejected', 'fulfilled', 'cancelled'].includes(item.status)).slice(-200));
 }
 
 function emitPersistentCrisis(world: WorldState, settlement: Settlement, state: SettlementRegionalEconomy): void {
@@ -427,7 +443,7 @@ export function regionalEconomyIntegrityIssues(world: WorldState): string[] {
   const contractKeys = new Set<string>();
   for (const contract of world.tradeContracts ?? []) {
     const key = contractKey(contract.routeId, contract.fromSettlementId, contract.toSettlementId, contract.templateId);
-    if (contractKeys.has(key) && ['active', 'suspended'].includes(contract.status)) issues.push(`Торговый договор ${contract.id}: дублирует действующий договор`);
+    if (contractKeys.has(key) && ['proposed', 'active', 'suspended'].includes(contract.status)) issues.push(`Торговый договор ${contract.id}: дублирует действующий договор`);
     contractKeys.add(key);
     if (!routeIds.has(contract.routeId)) issues.push(`Торговый договор ${contract.id}: нет маршрута`);
     if (!settlementIds.has(contract.fromSettlementId) || !settlementIds.has(contract.toSettlementId)) issues.push(`Торговый договор ${contract.id}: нет поселения`);

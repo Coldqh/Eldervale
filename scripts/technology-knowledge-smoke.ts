@@ -20,7 +20,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .1,
 });
 
-assert.equal(world.version, 34, 'новый мир должен использовать схему 34');
+assert.equal(world.version, 35, 'новый мир должен использовать схему 35');
 initializeTechnologyKnowledge(world);
 assert.ok(world.settlementTechnologyKnowledge.length > world.settlements.length, 'поселения должны иметь отдельные технологические состояния');
 assert.deepEqual(technologyKnowledgeIntegrityIssues(world), [], 'исходный мир должен иметь целостные локальные знания');

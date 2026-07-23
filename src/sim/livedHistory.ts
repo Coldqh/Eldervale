@@ -26,6 +26,7 @@ import { initializeCultureSystem } from './cultureSystem';
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
 import { initializeRegionalEconomy } from './regionalEconomy';
 import { initializeWorldLaw } from './worldLaw';
+import { initializeInstitutionSystem } from './institutionSystem';
 import {
   advanceSettlementLifecycle, initializeSettlementLifecycle,
 } from './settlementLifecycle';
@@ -44,7 +45,7 @@ import { advanceDynastyLegacy } from './dynastyLegacy';
 import { APP_VERSION } from '../version';
 
 const GENESIS_VERSION = 1 as const;
-const SCHEMA_VERSION = 34;
+const SCHEMA_VERSION = 35;
 
 interface GenesisPreparation {
   initialSettlementIds: number[];
@@ -174,6 +175,7 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
   world.events = [];
   world.decisions = [];
   world.stateDeltas = [];
+  world.institutionDecisions = [];
   world.territoryHistory = [];
   world.localMapChanges = [];
   world.cemeteries = [];
@@ -283,6 +285,7 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
   world.nextIds.war = 1;
   world.nextIds.decision = 1;
   world.nextIds.stateDelta = 1;
+  world.nextIds.institutionDecision = 1;
   world.nextIds.settlementExpedition = 1;
   world.nextIds.politicalCommunity = 1;
   world.nextIds.politicalTransition = 1;
@@ -423,6 +426,7 @@ function initializeGenesisSystems(world: WorldState, config: WorldConfig, onProg
   initializeCultureSystem(world, new RNG(`${config.seed}:генезис-культура-вера-образование-v1`));
   initializeCivilizationSystem(world, new RNG(`${config.seed}:генезис-цивилизации-и-технологии-v1`));
   initializeWorldLaw(world);
+  initializeInstitutionSystem(world);
   initializeRegionalEconomy(world, new RNG(`${config.seed}:генезис-региональная-экономика-v1`));
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);

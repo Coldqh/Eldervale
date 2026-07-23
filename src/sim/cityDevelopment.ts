@@ -56,7 +56,7 @@ export function synchronizeCityDevelopmentPlan(
 
 export function pendingCityDevelopmentRequests(world: WorldState, settlementId: number): CityProjectRequest[] {
   return (world.urbanStates.find(item => item.settlementId === settlementId)?.projectQueue ?? [])
-    .filter(request => request.triggerProblemIds.length > 0 && ['requested', 'blocked', 'approved'].includes(request.status))
+    .filter(request => request.status === 'approved')
     .sort((a, b) => b.priority - a.priority || a.requestedTick - b.requestedTick || a.id.localeCompare(b.id));
 }
 

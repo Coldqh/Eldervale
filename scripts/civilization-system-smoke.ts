@@ -63,7 +63,7 @@ const world = generateHistoricalWorld({
   ecologyDensity: .12,
 });
 
-assert.equal(world.version, 34, 'новый мир должен использовать схему 34');
+assert.equal(world.version, 35, 'новый мир должен использовать схему 35');
 assert.ok(world.civilizations.length > 0, 'историческая генерация должна сформировать цивилизации');
 assert.ok(world.civilizations.length <= world.kingdoms.length, 'одна цивилизация может объединять несколько государств общей культуры');
 assert.ok(world.kingdoms.every(kingdom => world.civilizations.some(civilization => civilization.id === kingdom.civilizationId)), 'каждое государство должно быть связано с цивилизацией');
