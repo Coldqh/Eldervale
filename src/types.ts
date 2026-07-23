@@ -4,6 +4,7 @@ import type { Civilization } from './civilizationTypes';
 import type { SettlementTechnologyKnowledge, TechnologyTransmission } from './technologyKnowledgeTypes';
 import type { SettlementExpedition } from './settlementLifecycleTypes';
 import type { PoliticalCommunity, PoliticalTransition } from './stateFormationTypes';
+import type { ResourceDeposit, SettlementRegionalEconomy, TradeContract } from './regionalEconomyTypes';
 export type Terrain = 'ocean' | 'coast' | 'plains' | 'forest' | 'hills' | 'mountains' | 'marsh' | 'desert' | 'tundra';
 export type Species = 'human' | 'elf' | 'orc' | 'dwarf';
 export type EventKind = 'health' | 'disease' | 'birth' | 'death' | 'war' | 'battle' | 'dragon' | 'monster' | 'hero' | 'artifact' | 'book' | 'settlement' | 'politics' | 'trade' | 'dynasty' | 'disaster' | 'ecology' | 'hunt' | 'foraging' | 'alchemy' | 'migration' | 'construction' | 'agriculture' | 'household' | 'food' | 'craft' | 'work' | 'establishment' | 'market' | 'equipment' | 'employment' | 'retail' | 'military' | 'knowledge' | 'rumor' | 'message' | 'crime' | 'justice' | 'fire' | 'civic' | 'poverty' | 'state' | 'court' | 'rebellion' | 'diplomacy' | 'culture' | 'religion' | 'education';
@@ -1160,6 +1161,7 @@ export interface SimulationRuntimeState {
   lastTechnologyKnowledgeAdvanceYear?: number;
   settlementLifecycleVersion?: 1;
   stateFormationVersion?: 1;
+  regionalEconomyVersion?: 1;
   cemeteryPlacementVersion?: 1;
   lastKnowledgeTrimTick?: number;
   lastSocialBurialId?: number;
@@ -1886,7 +1888,7 @@ export interface LocalMapData {
 }
 
 export interface WorldState {
-  version: 32;
+  version: 33;
   language?: 'ru';
   appVersion?: string;
   config: WorldConfig;
@@ -1938,6 +1940,9 @@ export interface WorldState {
   settlementKnowledge: SettlementKnowledge[];
   settlementTechnologyKnowledge: SettlementTechnologyKnowledge[];
   technologyTransmissions: TechnologyTransmission[];
+  resourceDeposits: ResourceDeposit[];
+  settlementRegionalEconomies: SettlementRegionalEconomy[];
+  tradeContracts: TradeContract[];
   cultures: CultureDefinition[];
   civilizations: Civilization[];
   languages: LanguageDefinition[];

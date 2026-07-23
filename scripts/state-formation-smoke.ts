@@ -21,8 +21,8 @@ const world = generateHistoricalWorld({
   ecologyDensity: .18,
 });
 
-assert.equal(world.version, 32, 'новый мир должен использовать схему 32');
-assert.equal(world.politicalCommunities.length, world.settlements.length, 'каждое исходное поселение должно получить политическую общину');
+assert.equal(world.version, 33, 'новый мир должен использовать схему 33');
+assert.equal(new Set(world.settlements.map(settlement => settlement.politicalCommunityId)).size, world.settlements.length, 'каждое действующее поселение должно иметь собственную текущую политическую общину');
 assert.ok(world.settlements.every(settlement => world.politicalCommunities.some(community => community.id === settlement.politicalCommunityId && community.settlementIds.includes(settlement.id))), 'поселения должны ссылаться на реальную общину');
 assert.deepEqual(stateFormationIntegrityIssues(world), [], 'исходные политические общины должны быть целостными');
 

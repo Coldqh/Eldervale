@@ -13,6 +13,10 @@ import type { ResourceDefinition } from '../civilizationTypes';
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { stableRecipeKey } from '../content/coreRecipes';
 import { availableRecipesForSettlement, recipeAvailableToSettlement } from './civilizationSystem';
+import {
+  activeTradeContractForRoute, recordRegionalShipmentOutcome, regionalDeliveredUnitPrice,
+  regionalPriceMultiplier, reserveRegionalExtraction,
+} from './regionalEconomy';
 
 type ItemTemplate = ResourceDefinition;
 
@@ -1056,6 +1060,7 @@ function runProduction(world: WorldState, establishment: Establishment, rng: RNG
       const seasonFactor = crop ? (elapsedMonths >= 6 ? (world.month === 7 ? .5 : 0) : elapsedMonths > 1 ? (world.month === 7 ? 1 : 0) : ([7, 8, 9].includes(world.month) ? 1 : 0)) : 1;
       runs = Math.floor(runs * seasonFactor);
     }
+    runs = reserveRegionalExtraction(world, establishment.settlementId, recipe, runs);
     if (runs <= 0) continue;
     for (const input of recipe.inputs) consume(world, establishment.inventoryItemIds, input.templateId, input.quantity * runs);
     if (tool) {
@@ -1318,7 +1323,7 @@ function recalculateMarket(world: WorldState, settlement: Settlement): void {
   for (const template of ITEM_TEMPLATES) {
     demand[template.id] = template.category === 'еда' ? people * .09 : template.category === 'топливо' ? people * .025 : template.category === 'одежда' ? people * .004 : people * .002;
     const pressure = (demand[template.id]! + 1) / ((supply[template.id] ?? 0) + 1);
-    settlement.economy.prices[template.id] = Math.max(template.value * .35, Math.min(template.value * 4.5, template.value * settlement.economy.priceIndex * (.65 + Math.sqrt(pressure))));
+    settlement.economy.prices[template.id] = Math.max(template.value * .35, Math.min(template.value * 4.5, template.value * settlement.economy.priceIndex * (.65 + Math.sqrt(pressure)) * regionalPriceMultiplier(world, settlement.id, template.id)));
   }
   settlement.economy.supply = supply;
   settlement.economy.demand = demand;
@@ -1356,6 +1361,7 @@ function arriveShipments(world: WorldState, tick: number): void {
     if (lost) {
       shipment.status = 'потерян';
       shipment.cause = route?.active ? 'караван исчез на опасной дороге' : 'путь был перекрыт';
+      recordRegionalShipmentOutcome(world, shipment, false, shipment.cause);
       appendCausalEvent(world, {
         kind: 'trade', title: 'Караван не дошёл до места назначения', description: `Партия товаров стоимостью ${Math.round(shipment.value)} крон потеряна.`,
         cause: shipment.cause, consequences: ['поставщик понёс убыток', 'дефицит в пункте назначения усилился'],
@@ -1364,9 +1370,10 @@ function arriveShipments(world: WorldState, tick: number): void {
       continue;
     }
     const buyer = shipment.buyerEstablishmentId ? activeRuntime?.establishmentById.get(shipment.buyerEstablishmentId) ?? world.establishments.find(item => item.id === shipment.buyerEstablishmentId) : undefined;
-    if (!buyer) { shipment.status = 'потерян'; shipment.cause = 'покупатель прекратил работу'; continue; }
+    if (!buyer) { shipment.status = 'потерян'; shipment.cause = 'покупатель прекратил работу'; recordRegionalShipmentOutcome(world, shipment, false, shipment.cause); continue; }
     for (const goods of shipment.goods) seedItem(world, goods.templateId, goods.quantity, shipment.toSettlementId, { establishmentId: buyer.id, buildingId: buyer.buildingId }, new RNG(`${world.config.seed}:доставка:${shipment.id}:${goods.templateId}`), `доставлено по пути ${route?.name ?? shipment.routeId}`);
     shipment.status = 'доставлен';
+    recordRegionalShipmentOutcome(world, shipment, true);
     const destination = activeRuntime?.settlementById.get(shipment.toSettlementId) ?? world.settlements.find(item => item.id === shipment.toSettlementId);
     if (destination) for (const goods of shipment.goods) destination.economy.imports[goods.templateId] = (destination.economy.imports[goods.templateId] ?? 0) + goods.quantity;
   }
@@ -1378,17 +1385,29 @@ function createShipments(world: WorldState, settlementIds: ReadonlySet<number>):
   for (const route of world.tradeRoutes) {
     if (!route.active || (!settlementIds.has(route.fromSettlementId) && !settlementIds.has(route.toSettlementId))) continue;
     if (world.shipments.some(shipment => shipment.routeId === route.id && shipment.status === 'в пути')) continue;
-    const from = activeRuntime?.settlementById.get(route.fromSettlementId) ?? world.settlements.find(item => item.id === route.fromSettlementId);
-    const to = activeRuntime?.settlementById.get(route.toSettlementId) ?? world.settlements.find(item => item.id === route.toSettlementId);
+    const contract = activeTradeContractForRoute(world, route.id);
+    const fromId = contract?.fromSettlementId ?? route.fromSettlementId;
+    const toId = contract?.toSettlementId ?? route.toSettlementId;
+    const from = activeRuntime?.settlementById.get(fromId) ?? world.settlements.find(item => item.id === fromId);
+    const to = activeRuntime?.settlementById.get(toId) ?? world.settlements.find(item => item.id === toId);
     if (!from || !to) continue;
-    const candidates = Object.entries(from.economy.supply).filter(([templateId, quantity]) => quantity > (from.economy.demand[templateId] ?? 0) * 1.4 && (to.economy.supply[templateId] ?? 0) < (to.economy.demand[templateId] ?? 0));
+    const candidates = Object.entries(from.economy.supply)
+      .filter(([templateId, quantity]) => (!contract || templateId === contract.templateId)
+        && quantity > (from.economy.demand[templateId] ?? 0) * 1.15
+        && (to.economy.supply[templateId] ?? 0) < Math.max(to.economy.demand[templateId] ?? 0, contract?.minimumDestinationStock ?? 0));
     if (!candidates.length) continue;
-    const [templateId, available] = candidates.sort((a, b) => b[1] - a[1])[0]!;
+    const [templateId, available] = candidates.sort((a, b) => {
+      if (contract) return Number(b[0] === contract.templateId) - Number(a[0] === contract.templateId);
+      return b[1] - a[1];
+    })[0]!;
     const sellerFound = findSeller(world, from.id, [templateId]);
     const buyer = (activeRuntime?.establishmentsBySettlement.get(to.id) ?? world.establishments.filter(item => item.settlementId === to.id)).find(item => item.active && ['рынок', 'лавка', 'склад'].includes(item.type));
     if (!sellerFound || !buyer) continue;
-    const quantity = Math.max(1, Math.min(sellerFound.item.quantity * .25, available * .15, route.volume / 10));
-    const unitPrice = priceFor(from, templateId, sellerFound.item.quality);
+    const desired = contract?.targetQuantity ?? route.volume / 10;
+    const quantity = Math.max(1, Math.min(sellerFound.item.quantity * .25, available * .2, desired));
+    const sellerUnitPrice = priceFor(from, templateId, sellerFound.item.quality);
+    const unitPrice = regionalDeliveredUnitPrice(world, route, from, to, templateId, sellerUnitPrice);
+    if (contract && unitPrice > contract.maxUnitPrice) continue;
     const value = quantity * unitPrice;
     const paid = Math.min(buyer.cash, value);
     const actualQuantity = quantity * (paid / Math.max(.01, value));
@@ -1403,6 +1422,10 @@ function createShipments(world: WorldState, settlementIds: ReadonlySet<number>):
       goods: [{ templateId, quantity: actualQuantity, unitPrice }], departedTick: tick, arrivalTick: tick + Math.max(1, Math.ceil(distance / 3)), status: 'в пути', value: paid,
     };
     world.shipments.push(shipment);
+    if (contract) {
+      contract.lastShipmentTick = tick;
+      contract.history.push(`Партия ${actualQuantity.toFixed(1)} ед. отправлена по цене ${unitPrice.toFixed(1)} за единицу.`);
+    }
   }
 }
 

@@ -37,6 +37,7 @@ import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './t
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
 import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
+import { advanceRegionalEconomy, initializeRegionalEconomy } from './regionalEconomy';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -864,6 +865,7 @@ export function advanceOneMonth(
 
   if (schedule.economySettlementIds.size) runPhase(engine, 'Поля, посевы и уход за урожаем', onPhase, () => advanceAgriculture(world, rng, indexes, schedule.economySettlementIds));
   if (schedule.economySettlementIds.size) runPhase(engine, 'Домохозяйства, заведения и физическая экономика', onPhase, () => advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds, detailed.householdIds));
+  runPhase(engine, 'Региональные ресурсы, специализация и торговые зависимости', onPhase, () => advanceRegionalEconomy(world, monthStep));
   runPhase(engine, 'Личная экипировка, работа, покупки и местные потребности', onPhase, () => advanceLivingEconomy(world, rng, indexes, detailed, { fastForward }));
   if (schedule.economySettlementIds.size) runPhase(engine, 'Стройплощадки, материалы и работа строителей', onPhase, () => advanceConstruction(world, rng, indexes, schedule.economySettlementIds));
   if (schedule.economySettlementIds.size) runPhase(engine, 'Поселения и торговые пути', onPhase, () => advanceEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds));
@@ -959,6 +961,7 @@ export function initializeWorldSystems(world: WorldState): void {
   synchronizeEmploymentLinks(world);
   initializeCivilizationSystem(world);
   initializeTechnologyKnowledge(world);
+  initializeRegionalEconomy(world);
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);
   initializeCitySimulation(world);

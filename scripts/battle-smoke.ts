@@ -30,8 +30,9 @@ const war: War = {
 };
 world.wars.push(war);
 const before = world.characters.length;
+const battleRecordsBefore = world.battleRecords.length;
 const outcome = resolveSpatialArmyBattle(world, attacker, defender, war, target, new RNG('battle-smoke'), buildWorldIndexes(world));
-assert.equal(world.battleRecords.length, 1);
+assert.equal(world.battleRecords.length, battleRecordsBefore + 1, 'изолированный бой должен добавить ровно одну запись поверх прожитой истории');
 assert.ok(outcome.record.rounds >= 1);
 assert.ok(outcome.record.attackerUnitStates.length > 0 && outcome.record.defenderUnitStates.length > 0);
 assert.equal(outcome.record.prisonerIds.length, outcome.attackerCaptured + outcome.defenderCaptured);

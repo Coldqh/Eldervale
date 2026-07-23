@@ -391,6 +391,21 @@ function canEnterSettlement(world: WorldState, destination: Settlement, species:
   if (species.every(item => item === primary)) return true;
   const existing = settlementPopulationBreakdown(world, destination.id);
   if (species.every(item => existing.some(share => share.species === item))) return true;
+
+  // Обычная миграция может сформировать одно устойчивое меньшинство, но не должна
+  // постепенно превращать каждую торговую столицу в случайную смесь всех народов.
+  const existingSpecies = new Set(existing.filter(share => share.count > 0).map(share => share.species));
+  const combinedSpecies = new Set<Species>([...existingSpecies, ...species]);
+  const nonPrimarySpecies = [...combinedSpecies].filter(item => item !== primary);
+  if (combinedSpecies.size > 2 || nonPrimarySpecies.length > 1) return false;
+
+  const introducesMinority = [...species].some(item => !existingSpecies.has(item));
+  if (introducesMinority && existingSpecies.size <= 1) {
+    const mixedSettlementCount = world.settlements.filter(settlement => settlementPopulationBreakdown(world, settlement.id).filter(share => share.count > 0).length > 1).length;
+    const mixedSettlementLimit = Math.max(1, Math.ceil(world.settlements.length * .2));
+    if (mixedSettlementCount >= mixedSettlementLimit) return false;
+  }
+
   const refugeeReason = reason === 'война' || reason === 'эпидемия' || reason === 'климат' || reason === 'голод';
   const openPlace = destination.type === 'port' || destination.type === 'city' || destination.tradeRouteIds.length >= 2;
   if (!refugeeReason && !openPlace) return false;

@@ -28,7 +28,7 @@ const first = generateHistoricalWorld(config);
 const second = generateHistoricalWorld(config);
 const different = generateHistoricalWorld({ ...config, seed: 'lived-history-smoke-other' });
 
-assert.equal(first.version, 32);
+assert.equal(first.version, 33);
 assert.equal(first.history.engineVersion, 3);
 assert.equal(first.history.historicalSimulationVersion, 2);
 assert.ok(first.history.genesis, 'мир должен хранить отчёт генезиса');

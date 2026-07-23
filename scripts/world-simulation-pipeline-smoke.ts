@@ -132,13 +132,14 @@ destination.residentialCapacity = destination.population + 500;
 destination.prosperity = 100;
 destination.economy.wageIndex = 2;
 
-for (let step = 0; step < 120 && !migrationRecords(migrationWorld, 600).some(record => record.householdId === household!.household.id); step += 1) {
+const existingMigrationIds = new Set(migrationRecords(migrationWorld, 600).map(record => record.id));
+for (let step = 0; step < 120 && !migrationRecords(migrationWorld, 600).some(record => record.householdId === household!.household.id && !existingMigrationIds.has(record.id)); step += 1) {
   migrationWorld.month += 3;
   while (migrationWorld.month > 12) { migrationWorld.month -= 12; migrationWorld.year += 1; }
   advanceRaceDemography(migrationWorld, { elapsedMonths: 3 });
 }
 
-const record = migrationRecords(migrationWorld, 600).find(item => item.householdId === household!.household.id);
+const record = migrationRecords(migrationWorld, 600).find(item => item.householdId === household!.household.id && !existingMigrationIds.has(item.id));
 assert.ok(record, 'кризис должен переселить выбранное домохозяйство целиком');
 assert.deepEqual(new Set(record!.characterIds), migratingIds, 'запись миграции должна содержать всю живую семью');
 assert.equal(household!.household.settlementId, record!.toSettlementId, 'домохозяйство должно переехать в поселение назначения');

@@ -31,7 +31,7 @@ const config = {
 };
 
 const world = generateHistoricalWorld(config);
-assert.equal(world.version, 32, 'новый мир должен использовать схему 32');
+assert.equal(world.version, 33, 'новый мир должен использовать схему 33');
 assert.ok(!world.settlementExpeditions.some(item => ['forming', 'traveling', 'camped', 'returning'].includes(item.status)), 'сгенерированный мир не должен оставлять незавершённые исторические экспедиции');
 const baselineIntegrityErrors = new Set(inspectWorldIntegrity(world).errors);
 const returnWorld = structuredClone(world);
