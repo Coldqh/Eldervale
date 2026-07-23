@@ -68,7 +68,15 @@ export function initializeStateFormation(world: WorldState): void {
   const communityById = new Map(world.politicalCommunities.map(item => [item.id, item]));
   for (const settlement of world.settlements) {
     const existing = settlement.politicalCommunityId ? communityById.get(settlement.politicalCommunityId) : undefined;
-    if (existing && !['merged', 'collapsed'].includes(existing.status)) {
+    if (existing?.status === 'merged' && existing.successorCommunityId) {
+      const successor = communityById.get(existing.successorCommunityId);
+      if (successor && !['merged', 'collapsed'].includes(successor.status)) {
+        settlement.politicalCommunityId = successor.id;
+        if (!successor.settlementIds.includes(settlement.id)) successor.settlementIds.push(settlement.id);
+        continue;
+      }
+    }
+    if (existing && (existing.status !== 'collapsed' || settlement.population <= 3)) {
       if (!existing.settlementIds.includes(settlement.id)) existing.settlementIds.push(settlement.id);
       continue;
     }
@@ -300,6 +308,17 @@ function synchronizeCommunities(world: WorldState): void {
   for (const settlement of world.settlements) {
     const linked = settlement.politicalCommunityId ? world.politicalCommunities.find(item => item.id === settlement.politicalCommunityId) : undefined;
     if (linked && ACTIVE_COMMUNITY_STATUSES.has(linked.status)) continue;
+    if (linked?.status === 'merged' && linked.successorCommunityId) {
+      const successor = world.politicalCommunities.find(item => item.id === linked.successorCommunityId && ACTIVE_COMMUNITY_STATUSES.has(item.status));
+      if (successor) {
+        settlement.politicalCommunityId = successor.id;
+        if (!successor.settlementIds.includes(settlement.id)) successor.settlementIds.push(settlement.id);
+        continue;
+      }
+    }
+    // An empty ruined settlement keeps its final collapsed community as history.
+    // Recreating it every quarter used to produce hundreds of dead communities.
+    if (linked?.status === 'collapsed' && settlement.population <= 3) continue;
     const community = activeBySettlement.get(settlement.id) ?? createSettlementCommunity(world, settlement);
     if (!world.politicalCommunities.includes(community)) world.politicalCommunities.push(community);
     settlement.politicalCommunityId = community.id;
@@ -348,7 +367,9 @@ function normalizeCommunity(world: WorldState, community: PoliticalCommunity): v
   community.cultureId ??= settlements.map(item => world.settlementCultures.find(value => value.settlementId === item.id)?.dominantCultureId).find((id): id is number => typeof id === 'number');
   const leader = world.characters.find(item => item.id === community.leaderCharacterId && item.alive && settlements.some(settlement => settlement.id === item.settlementId));
   if (!leader) community.leaderCharacterId = chooseLocalLeader(world, settlements)?.id ?? 0;
-  for (const settlement of settlements) settlement.politicalCommunityId = community.id;
+  if (ACTIVE_COMMUNITY_STATUSES.has(community.status)) {
+    for (const settlement of settlements) settlement.politicalCommunityId = community.id;
+  }
 }
 
 function updateCommunityMetrics(world: WorldState, community: PoliticalCommunity, elapsedMonths: number): void {

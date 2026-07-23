@@ -80,8 +80,11 @@ export function advanceDailyLife(
 }
 
 export function routineForCharacter(world: WorldState, character: Character): DailyRoutine {
-  return (world.dailyRoutines ?? []).find(item => item.characterId === character.id)
-    ?? buildDailyRoutine(world, character, worldTick(world));
+  const expedition = activeExpeditionForCharacter(world, character.id);
+  if (expedition) return expeditionDailyRoutine(world, character, expedition, worldTick(world));
+  const cached = (world.dailyRoutines ?? []).find(item => item.characterId === character.id);
+  if (cached && !cached.stops.every(stop => stop.settlementId === 0)) return cached;
+  return buildDailyRoutine(world, character, worldTick(world));
 }
 
 export function routineStopForCharacter(world: WorldState, character: Character, phase: DayPhase): DailyRoutineStop {

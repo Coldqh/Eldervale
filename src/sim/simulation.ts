@@ -924,6 +924,10 @@ export function advanceOneMonth(
   synchronizeStateMachineReferences(world, new RNG(`${world.config.seed}:state-references:${world.year}:${world.month}`), indexes);
   synchronizeEmploymentLinks(world, indexes);
   synchronizeSettlementPopulation(engine);
+  // advanceOneMonth остаётся публичным низкоуровневым API и используется
+  // профилировщиком напрямую. Его результат тоже обязан иметь актуальный
+  // демографический snapshot, даже без внешней обвязки advanceWorldSystems.
+  advanceRaceDemography(world, { elapsedMonths: 0, indexes, recordHistory: false });
   if (!options.deferCitySimulation) advanceCitySimulation(world);
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
@@ -1000,6 +1004,11 @@ export function advanceWorldSystems(
 
   onPhase?.('Династии, поколения и наследие');
   advanceDynastyLegacy(engine.world, { elapsedMonths: monthStep });
+
+  // Династический и демографический ход может архивировать жителей уже после
+  // основной миграционной фазы. Перед финальными агрегатами пересчитываем доли
+  // из живых персонажей, не запуская новый цикл переселений.
+  advanceRaceDemography(engine.world, { elapsedMonths: 0, indexes: engine.indexes, recordHistory: false });
 
   synchronizeSettlementGovernmentLeaders(engine.world, engine.indexes);
   synchronizeStateMachineReferences(engine.world, new RNG(`${engine.world.config.seed}:state-references:${engine.world.year}:${engine.world.month}`), engine.indexes);

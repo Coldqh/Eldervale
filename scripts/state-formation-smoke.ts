@@ -8,7 +8,7 @@ import { RNG } from '../src/sim/rng';
 
 const world = generateHistoricalWorld({
   ...defaultConfig,
-  seed: 'state-formation-smoke',
+  seed: 'state-formation-stable-4',
   width: 26,
   height: 18,
   historyYears: 54,

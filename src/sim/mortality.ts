@@ -4,6 +4,7 @@ import { indexBurial, rebuildRelationshipIndexes } from './indexes';
 import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { inheritanceHeir } from './socialSystem';
+import { reconcileMaterialLocations } from './materialEconomy';
 
 export interface DeathContext {
   cause: string;
@@ -183,6 +184,14 @@ export function archiveCharactersBatch(world: WorldState, indexes: WorldIndexes 
 
   // Активные массивы и индексы очищаются одним проходом. Это критично при сотнях смертей за год.
   world.characters = world.characters.filter(item => !deadIds.has(item.id));
+  world.dailyRoutines = (world.dailyRoutines ?? []).filter(routine => !deadIds.has(routine.characterId));
+  world.personalLifeEvents = (world.personalLifeEvents ?? [])
+    .filter(event => !deadIds.has(event.characterId))
+    .map(event => ({
+      ...event,
+      otherCharacterIds: event.otherCharacterIds.filter(id => !deadIds.has(id)),
+      relatedRefs: event.relatedRefs.filter(ref => ref.kind !== 'character' || !deadIds.has(ref.id)),
+    }));
   if (indexes) {
     for (const id of deadIds) indexes.characterById.delete(id);
     for (const [settlementId, residents] of indexes.residentsBySettlement) indexes.residentsBySettlement.set(settlementId, residents.filter(item => !deadIds.has(item.id)));
@@ -721,4 +730,5 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
     world.households = world.households.filter(item => !emptyHouseholdIds.has(item.id));
     for (const settlement of world.settlements) settlement.householdIds = settlement.householdIds.filter(id => !emptyHouseholdIds.has(id));
   }
+  reconcileMaterialLocations(world);
 }

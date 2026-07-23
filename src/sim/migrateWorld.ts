@@ -24,7 +24,7 @@ import { initializeSocialSystem } from './socialSystem';
 import { initializeHealthSystem } from './healthSystem';
 import { initializeBattleSystem } from './battleSystem';
 import { initializeCultureSystem } from './cultureSystem';
-import { initializeCitySimulation } from './citySimulation';
+import { advanceCitySimulation, initializeCitySimulation } from './citySimulation';
 import { initializeCivilizationSystem } from './civilizationSystem';
 import { normalizeSettlementLayouts } from './cityMorphology';
 import { initializeSettlementLifecycle } from './settlementLifecycle';
@@ -337,6 +337,9 @@ export function migrateWorld(input: unknown): WorldState {
       sum + Number(character.alive && character.settlementId === settlement.id), 0);
   }
   initializeCitySimulation(localized as WorldState);
+  // Сохранение могло содержать актуальную версию snapshot, но устаревшие
+  // физические профили зданий. Миграция всегда завершает один чистый городской ход.
+  advanceCitySimulation(localized as WorldState);
 
   localized.history.engineVersion = 2;
   localized.history.historicalSimulationVersion ??= 1;

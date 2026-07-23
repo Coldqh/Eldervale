@@ -10,7 +10,7 @@ import { RNG } from './rng';
 import { initializeDecisionCore, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { initializeMindSystem } from './mindSystem';
 import { initializeSettlementLayouts } from './cityMorphology';
-import { advanceMaterialEconomy, generatePhysicalEconomy, pruneEmptyMaterialItems } from './materialEconomy';
+import { advanceMaterialEconomy, generatePhysicalEconomy, pruneEmptyMaterialItems, reconcileMaterialLocations } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, initializeAgricultureAndConstruction } from './agricultureConstruction';
 import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
@@ -693,46 +693,6 @@ function finalizeLivedHistory(
     `${world.settlements.length} поселений · ${world.kingdoms.length} держав · ${world.events.length} событий прожиты единым миром`);
 }
 
-
-function reconcileMaterialLocations(world: WorldState): void {
-  const located = new Set<number>();
-  const mark = (ids: readonly number[]) => ids.forEach(id => located.add(id));
-  for (const character of world.characters) mark(character.inventoryItemIds);
-  for (const household of world.households) mark(household.inventoryItemIds);
-  for (const building of world.buildings) mark(building.inventoryItemIds);
-  for (const establishment of world.establishments) mark(establishment.inventoryItemIds);
-  for (const army of world.armies) mark(army.inventoryItemIds);
-  for (const wagon of world.supplyWagons) mark(wagon.inventoryItemIds);
-  for (const merchant of world.travelingMerchants) mark(merchant.wagonInventoryItemIds);
-
-  const characterById = new Map(world.characters.map(character => [character.id, character]));
-  const householdById = new Map(world.households.map(household => [household.id, household]));
-  const buildingById = new Map(world.buildings.map(building => [building.id, building]));
-  const establishmentById = new Map(world.establishments.map(establishment => [establishment.id, establishment]));
-  const wagonById = new Map(world.supplyWagons.map(wagon => [wagon.id, wagon]));
-  const pushUnique = (ids: number[], id: number) => { if (!ids.includes(id)) ids.push(id); located.add(id); };
-
-  for (const item of world.items) {
-    if (located.has(item.id)) continue;
-    const owner = item.ownerCharacterId ? characterById.get(item.ownerCharacterId) : undefined;
-    if (owner) { pushUnique(owner.inventoryItemIds, item.id); continue; }
-    const household = item.householdId ? householdById.get(item.householdId) : undefined;
-    if (household) { pushUnique(household.inventoryItemIds, item.id); continue; }
-    const establishment = item.establishmentId ? establishmentById.get(item.establishmentId) : undefined;
-    if (establishment) { pushUnique(establishment.inventoryItemIds, item.id); continue; }
-    const wagon = item.supplyWagonId ? wagonById.get(item.supplyWagonId) : undefined;
-    if (wagon) { pushUnique(wagon.inventoryItemIds, item.id); continue; }
-    const building = item.buildingId ? buildingById.get(item.buildingId) : undefined;
-    if (building) { pushUnique(building.inventoryItemIds, item.id); continue; }
-    const fallback = world.buildings
-      .filter(candidate => candidate.settlementId === item.settlementId)
-      .sort((a, b) => Number(b.type === 'warehouse') - Number(a.type === 'warehouse') || a.id - b.id)[0];
-    if (fallback) {
-      item.buildingId = fallback.id;
-      pushUnique(fallback.inventoryItemIds, item.id);
-    }
-  }
-}
 
 function livedEraSummaries(world: WorldState, years: number): HistoricalEraSummary[] {
   const plans = eraPlans(years);

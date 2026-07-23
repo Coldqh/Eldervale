@@ -11,6 +11,7 @@ import {
   settlementLifecycleIntegrityIssues,
 } from '../src/sim/settlementLifecycle';
 import { RNG } from '../src/sim/rng';
+import { advanceBurials } from '../src/sim/mortality';
 import { advanceWorldSystems, createWorldSystemEngine } from '../src/sim/simulation';
 import type { WorldState } from '../src/types';
 
@@ -112,11 +113,13 @@ const indexes = buildWorldIndexes(world);
 let safety = 0;
 while (expedition!.status === 'traveling' && safety++ < 24) {
   advanceCalendar(world);
+  advanceBurials(world, new RNG(`settlement-lifecycle-burials-${safety}`));
   advanceSettlementLifecycle(world, new RNG(`settlement-lifecycle-travel-${safety}`), indexes, { elapsedMonths: 1 });
 }
 assert.equal(expedition!.status, 'camped', 'после маршрута переселенцы должны разбить постоянный лагерь');
 expedition!.campProgress = 100_000;
 advanceCalendar(world);
+advanceBurials(world, new RNG('settlement-lifecycle-burials-found'));
 const foundedResult = advanceSettlementLifecycle(world, new RNG('settlement-lifecycle-found'), indexes, { elapsedMonths: 1 });
 assert.equal(expedition!.status, 'founded', 'подготовленный лагерь должен стать постоянным поселением');
 assert.equal(foundedResult.founded, 1, 'месячный ход должен сообщить об основании поселения');

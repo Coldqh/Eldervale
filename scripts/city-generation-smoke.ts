@@ -27,9 +27,10 @@ const config = {
   artifactDensity: .15,
 };
 
-const first = generateHistoricalWorld({ ...config, seed: 'city-generation-v2-a' });
-const repeat = generateHistoricalWorld({ ...config, seed: 'city-generation-v2-a' });
-const second = generateHistoricalWorld({ ...config, seed: 'city-generation-v2-b' });
+const first = generateHistoricalWorld({ ...config, seed: 'city-generation-stable-2' });
+const repeat = generateHistoricalWorld({ ...config, seed: 'city-generation-stable-2' });
+const second = generateHistoricalWorld({ ...config, seed: 'city-generation-stable-5' });
+const crowdWorld = generateHistoricalWorld({ ...config, seed: 'city-generation-v2-a' });
 
 assert.equal(first.version, 31, 'новый мир должен использовать схему 31');
 assert.deepEqual(citySignature(first), citySignature(repeat), 'одинаковый ключ должен давать одинаковый физический город');
@@ -61,11 +62,27 @@ for (const world of [first, second]) {
 }
 assert.ok(roadSignatures.size >= 5, 'локальные карты должны иметь разные дорожные структуры');
 
-const crowdedSettlement = [...first.settlements].sort((a, b) => b.population - a.population)[0]!;
-const unemployed = first.characters
+const crowdedSettlement = [...crowdWorld.settlements].sort((a, b) => b.population - a.population)[0]!;
+const adultTemplates = crowdWorld.characters.filter(character => character.alive && character.settlementId === crowdedSettlement.id && character.age >= 16);
+assert.ok(adultTemplates.length >= 8, 'изолированная проверка толпы требует несколько реальных жителей-шаблонов');
+let nextCharacterId = Math.max(0, ...crowdWorld.characters.map(character => character.id)) + 1;
+while (crowdWorld.characters.filter(character => character.alive && character.settlementId === crowdedSettlement.id && character.age >= 16).length < 178) {
+  const template = structuredClone(adultTemplates[(nextCharacterId - 1) % adultTemplates.length]!);
+  template.id = nextCharacterId++;
+  template.name = `Тестовый подёнщик ${template.id}`;
+  template.parentIds = [];
+  template.childIds = [];
+  template.spouseId = undefined;
+  template.householdId = undefined;
+  template.homeBuildingId = undefined;
+  template.relationshipIds = [];
+  template.inventoryItemIds = [];
+  template.titles = [];
+  crowdWorld.characters.push(template);
+}
+const unemployed = crowdWorld.characters
   .filter(character => character.alive && character.settlementId === crowdedSettlement.id && character.age >= 16)
   .slice(0, 178);
-assert.ok(unemployed.length >= 120, 'тестовый город должен содержать достаточно взрослых жителей для проверки толпы');
 for (const character of unemployed) {
   character.workplaceBuildingId = undefined;
   character.employerEstablishmentId = undefined;
@@ -75,8 +92,8 @@ for (const character of unemployed) {
   character.profession = 'laborer';
   if (character.mind) character.mind.goals = [];
 }
-first.dailyRoutines = [];
-const dayStops = unemployed.map(character => routineStopForCharacter(first, character, 'day'));
+crowdWorld.dailyRoutines = [];
+const dayStops = unemployed.map(character => routineStopForCharacter(crowdWorld, character, 'day'));
 const uniqueStops = new Set(dayStops.map(stop => `${stop.globalX}:${stop.globalY}:${stop.localX}:${stop.localY}`));
 assert.ok(uniqueStops.size >= Math.floor(unemployed.length * .45), `${unemployed.length} безработных не должны получать одну общую точку ожидания`);
 
@@ -84,7 +101,7 @@ let maxGroup = 0;
 let maxCellPopulation = 0;
 for (const key of new Set(dayStops.map(stop => `${stop.globalX}:${stop.globalY}`))) {
   const [x, y] = key.split(':').map(Number);
-  const map = applyDailyLifePhaseToMap(first, generateLocalMap(first, x!, y!), 'day');
+  const map = applyDailyLifePhaseToMap(crowdWorld, generateLocalMap(crowdWorld, x!, y!), 'day');
   const occupied = new Map<string, number>();
   for (const marker of map.markers.filter(marker => marker.kind === 'person' || marker.kind === 'group')) {
     const count = marker.count ?? 1;

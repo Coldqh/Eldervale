@@ -13,6 +13,7 @@ import { initializeCultureSystem } from './cultureSystem';
 import { addMaterialItem } from './materialEconomy';
 import { placeName } from './names';
 import { hashSeed, RNG } from './rng';
+import { advanceRaceDemography } from './raceDemography';
 import { worldTick } from './scheduler';
 import { initializeSettlementLife } from './settlementLife';
 import { assignBuildingFootprintAcrossSettlement, buildingDimensions } from './spatial';
@@ -101,7 +102,10 @@ export function advanceSettlementLifecycle(
     if (before !== 'returned' && expedition.status === 'returned') result.returned += 1;
   }
 
-  if (result.changed && indexes) refreshDynamicWorldIndexes(indexes, world);
+  if (result.changed) {
+    advanceRaceDemography(world, { elapsedMonths: 0, indexes, recordHistory: false });
+    if (indexes) refreshDynamicWorldIndexes(indexes, world);
+  }
   return result;
 }
 

@@ -17,7 +17,7 @@ for (const species of ACTIVE_SPECIES) {
 
 const world = generateHistoricalWorld({
   ...defaultConfig,
-  seed: 'eldervale-population-migration-suite',
+  seed: 'population-migration-stable-0',
   width: 20,
   height: 16,
   historyYears: 45,

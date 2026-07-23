@@ -789,10 +789,144 @@ export function invalidateMaterialRuntime(world: WorldState): void {
   materialRuntimeCache.delete(world);
 }
 
+export interface MaterialLocationReconciliation {
+  relocated: number;
+  removed: number;
+}
+
+/**
+ * Restores the physical owner of every material item after deaths, migration,
+ * establishment closure and historical time compression. Item location is an
+ * economy invariant, so this lives beside the inventories rather than in an
+ * individual caller such as mortality or lived-history generation.
+ */
+export function reconcileMaterialLocations(world: WorldState): MaterialLocationReconciliation {
+  const itemIds = new Set(world.items.map(item => item.id));
+  const uniqueExisting = (ids: readonly number[]) => [...new Set(ids)].filter(id => itemIds.has(id));
+  for (const character of world.characters) character.inventoryItemIds = uniqueExisting(character.inventoryItemIds);
+  for (const household of world.households) household.inventoryItemIds = uniqueExisting(household.inventoryItemIds);
+  for (const building of world.buildings) building.inventoryItemIds = uniqueExisting(building.inventoryItemIds);
+  for (const establishment of world.establishments) establishment.inventoryItemIds = uniqueExisting(establishment.inventoryItemIds);
+  for (const army of world.armies) army.inventoryItemIds = uniqueExisting(army.inventoryItemIds ?? []);
+  for (const wagon of world.supplyWagons ?? []) wagon.inventoryItemIds = uniqueExisting(wagon.inventoryItemIds);
+  for (const merchant of world.travelingMerchants ?? []) merchant.wagonInventoryItemIds = uniqueExisting(merchant.wagonInventoryItemIds);
+
+  const characterById = new Map(world.characters.map(character => [character.id, character]));
+  const householdById = new Map(world.households.map(household => [household.id, household]));
+  const buildingById = new Map(world.buildings.map(building => [building.id, building]));
+  const establishmentById = new Map(world.establishments.map(establishment => [establishment.id, establishment]));
+  const wagonById = new Map((world.supplyWagons ?? []).map(wagon => [wagon.id, wagon]));
+  const located = new Set<number>();
+  const mark = (ids: readonly number[]) => ids.forEach(id => located.add(id));
+  world.characters.forEach(character => mark(character.inventoryItemIds));
+  world.households.forEach(household => mark(household.inventoryItemIds));
+  world.buildings.forEach(building => mark(building.inventoryItemIds));
+  world.establishments.forEach(establishment => mark(establishment.inventoryItemIds));
+  world.armies.forEach(army => mark(army.inventoryItemIds ?? []));
+  (world.supplyWagons ?? []).forEach(wagon => mark(wagon.inventoryItemIds));
+  (world.travelingMerchants ?? []).forEach(merchant => mark(merchant.wagonInventoryItemIds));
+
+  const fallbackBuildingBySettlement = new Map<number, Building>();
+  for (const building of world.buildings) {
+    if (building.condition <= 0) continue;
+    const current = fallbackBuildingBySettlement.get(building.settlementId);
+    const priority = Number(['warehouse', 'market', 'shop'].includes(building.type));
+    const currentPriority = current ? Number(['warehouse', 'market', 'shop'].includes(current.type)) : -1;
+    if (!current || priority > currentPriority || (priority === currentPriority && building.id < current.id)) fallbackBuildingBySettlement.set(building.settlementId, building);
+  }
+  const fallbackHouseholdBySettlement = new Map<number, Household>();
+  for (const household of world.households) if (household.memberIds.length && !fallbackHouseholdBySettlement.has(household.settlementId)) fallbackHouseholdBySettlement.set(household.settlementId, household);
+  const fallbackCharacterBySettlement = new Map<number, Character>();
+  for (const character of world.characters) if (character.alive && !fallbackCharacterBySettlement.has(character.settlementId)) fallbackCharacterBySettlement.set(character.settlementId, character);
+
+  let relocated = 0;
+  const removeIds = new Set<number>();
+  const place = (ids: number[], id: number) => {
+    ids.push(id);
+    located.add(id);
+    relocated += 1;
+  };
+
+  for (const item of world.items) {
+    if (item.ownerCharacterId && !characterById.has(item.ownerCharacterId)) item.ownerCharacterId = undefined;
+    if (item.householdId && !householdById.has(item.householdId)) item.householdId = undefined;
+    if (item.buildingId && !buildingById.has(item.buildingId)) item.buildingId = undefined;
+    if (item.establishmentId && !establishmentById.has(item.establishmentId)) item.establishmentId = undefined;
+    if (item.supplyWagonId && !wagonById.has(item.supplyWagonId)) item.supplyWagonId = undefined;
+    if (located.has(item.id)) continue;
+
+    const owner = item.ownerCharacterId ? characterById.get(item.ownerCharacterId) : undefined;
+    if (owner) { place(owner.inventoryItemIds, item.id); continue; }
+    const household = item.householdId ? householdById.get(item.householdId) : undefined;
+    if (household) { place(household.inventoryItemIds, item.id); continue; }
+    const establishment = item.establishmentId ? establishmentById.get(item.establishmentId) : undefined;
+    if (establishment) { place(establishment.inventoryItemIds, item.id); continue; }
+    const wagon = item.supplyWagonId ? wagonById.get(item.supplyWagonId) : undefined;
+    if (wagon) { place(wagon.inventoryItemIds, item.id); continue; }
+    const building = item.buildingId ? buildingById.get(item.buildingId) : undefined;
+    if (building) { place(building.inventoryItemIds, item.id); continue; }
+
+    const fallbackBuilding = fallbackBuildingBySettlement.get(item.settlementId);
+    if (fallbackBuilding) {
+      item.ownerCharacterId = undefined;
+      item.householdId = undefined;
+      item.establishmentId = fallbackBuilding.establishmentId;
+      item.buildingId = fallbackBuilding.id;
+      const fallbackEstablishment = fallbackBuilding.establishmentId ? establishmentById.get(fallbackBuilding.establishmentId) : undefined;
+      if (fallbackEstablishment) place(fallbackEstablishment.inventoryItemIds, item.id);
+      else place(fallbackBuilding.inventoryItemIds, item.id);
+      item.history.push(`Передано на хранение в ${fallbackBuilding.name}, потому что прежний владелец или инвентарь исчез.`);
+      continue;
+    }
+
+    const fallbackHousehold = fallbackHouseholdBySettlement.get(item.settlementId);
+    if (fallbackHousehold) {
+      item.ownerCharacterId = undefined;
+      item.householdId = fallbackHousehold.id;
+      item.buildingId = fallbackHousehold.homeBuildingId;
+      item.establishmentId = undefined;
+      place(fallbackHousehold.inventoryItemIds, item.id);
+      item.history.push('Передано ближайшему живому домохозяйству после утраты прежнего места хранения.');
+      continue;
+    }
+
+    const fallbackCharacter = fallbackCharacterBySettlement.get(item.settlementId);
+    if (fallbackCharacter) {
+      item.ownerCharacterId = fallbackCharacter.id;
+      item.householdId = fallbackCharacter.householdId;
+      item.buildingId = fallbackCharacter.homeBuildingId;
+      item.establishmentId = undefined;
+      place(fallbackCharacter.inventoryItemIds, item.id);
+      item.history.push(`Подобрано жителем ${fallbackCharacter.name} после утраты прежнего места хранения.`);
+      continue;
+    }
+
+    // В полностью опустевшей области предмет больше не участвует в активной
+    // материальной экономике. Руины и артефакты моделируются отдельными сущностями.
+    removeIds.add(item.id);
+  }
+
+  if (removeIds.size) {
+    world.items = world.items.filter(item => !removeIds.has(item.id));
+    const clean = (ids: number[]) => ids.filter(id => !removeIds.has(id));
+    world.characters.forEach(character => { character.inventoryItemIds = clean(character.inventoryItemIds); });
+    world.households.forEach(household => { household.inventoryItemIds = clean(household.inventoryItemIds); });
+    world.buildings.forEach(building => { building.inventoryItemIds = clean(building.inventoryItemIds); });
+    world.establishments.forEach(establishment => { establishment.inventoryItemIds = clean(establishment.inventoryItemIds); });
+    world.armies.forEach(army => { army.inventoryItemIds = clean(army.inventoryItemIds ?? []); });
+    (world.supplyWagons ?? []).forEach(wagon => { wagon.inventoryItemIds = clean(wagon.inventoryItemIds); });
+    (world.travelingMerchants ?? []).forEach(merchant => { merchant.wagonInventoryItemIds = clean(merchant.wagonInventoryItemIds); });
+  }
+
+  if (relocated || removeIds.size) invalidateMaterialRuntime(world);
+  return { relocated, removed: removeIds.size };
+}
+
 export function pruneEmptyMaterialItems(world: WorldState, indexes?: WorldIndexes): void {
-  const changed = cleanEmptyItems(world);
-  if (changed && indexes) indexes.itemById = new Map(world.items.map(item => [item.id, item]));
-  if (changed) invalidateMaterialRuntime(world);
+  const reconciliation = reconcileMaterialLocations(world);
+  const changed = cleanEmptyItems(world) || reconciliation.removed > 0;
+  if ((changed || reconciliation.relocated > 0) && indexes) indexes.itemById = new Map(world.items.map(item => [item.id, item]));
+  if (changed || reconciliation.relocated > 0) invalidateMaterialRuntime(world);
 }
 
 function spoilItems(world: WorldState, settlementIds: ReadonlySet<number>, elapsedMonths: number): void {
