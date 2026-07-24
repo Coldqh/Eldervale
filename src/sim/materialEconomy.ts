@@ -1431,11 +1431,26 @@ function recalculateMarket(world: WorldState, settlement: Settlement): void {
     }
   }
   const foodSupply = marketFoodSupply + householdFoodSupply;
+  const physicalMeat = world.items.reduce((sum, item) => sum + Number(
+    item.settlementId === settlement.id && item.templateId === 'meat' && item.quantity > 0 && item.condition > 0 && !item.supplyWagonId
+  ) * item.quantity, 0);
+  const physicalHides = world.items.reduce((sum, item) => sum + Number(
+    item.settlementId === settlement.id && item.templateId === 'raw_hide' && item.quantity > 0 && item.condition > 0 && !item.supplyWagonId
+  ) * item.quantity, 0);
+  // Эти поля оставлены для старого UI, но больше не являются отдельным запасом:
+  // каждый пересчёт полностью восстанавливает их из физических предметов.
+  settlement.stockpile['мясо'] = physicalMeat;
+  settlement.stockpile['шкуры'] = physicalHides;
   settlement.food = Math.max(0, Math.min(180, Math.round(foodSupply / Math.max(1, people) * 36)));
   const shortage = foodSupply < people * .055;
   const had = settlement.shortages.includes('пища');
   if (shortage && !had) settlement.shortages.push('пища');
   if (!shortage && had && foodSupply > people * .11) settlement.shortages = settlement.shortages.filter(item => item !== 'пища');
+}
+
+export function refreshSettlementMaterialSummary(world: WorldState, settlementId: number): void {
+  const settlement = activeRuntime?.settlementById.get(settlementId) ?? world.settlements.find(item => item.id === settlementId);
+  if (settlement) recalculateMarket(world, settlement);
 }
 
 function recalculateAllMarkets(world: WorldState): void {
@@ -1586,7 +1601,6 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
       const key = String(settlementId);
       const lastTick = world.simulation.economyLastTickBySettlement[key] ?? Math.max(0, tick - 1);
       const elapsedMonths = Math.max(1, Math.min(12, tick - lastTick));
-      spoilItems(world, new Set([settlementId]), elapsedMonths);
       settlement.economy.lastMonthlyTrade = 0;
       for (const establishmentId of settlement.establishmentIds) {
         const establishment = indexes.establishmentById.get(establishmentId);
@@ -1619,6 +1633,10 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         const kingdom = indexes.kingdomById.get(settlement.kingdomId);
         if (kingdom) kingdom.treasury += householdTax;
       }
+      // Сначала жители и заведения получают шанс купить, приготовить и съесть товар.
+      // Старение в начале тика делало добычу, собранную после прошлого хозяйственного
+      // расчёта, испорченной ещё до первой возможности попасть к покупателю.
+      spoilItems(world, new Set([settlementId]), elapsedMonths);
       recalculateMarket(world, settlement);
       world.simulation.economyLastTickBySettlement[key] = tick;
     }
@@ -1644,10 +1662,21 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   for (const character of world.characters) if (expeditionCharacterIds.has(character.id)) for (const itemId of character.inventoryItemIds ?? []) expeditionItemIds.add(itemId);
   const locations = new Map<number, number>();
   const countLocation = (ids: number[]) => { for (const id of ids) locations.set(id, (locations.get(id) ?? 0) + 1); };
+  const physicalHuntStockBySettlement = new Map<number, { meat: number; hides: number }>();
+  for (const item of world.items) {
+    if (item.quantity <= 0 || item.condition <= 0 || item.supplyWagonId || !['meat', 'raw_hide'].includes(item.templateId)) continue;
+    const current = physicalHuntStockBySettlement.get(item.settlementId) ?? { meat: 0, hides: 0 };
+    if (item.templateId === 'meat') current.meat += item.quantity;
+    else current.hides += item.quantity;
+    physicalHuntStockBySettlement.set(item.settlementId, current);
+  }
   for (const settlement of world.settlements) {
     if (!settlement.economy) issues.push(`${settlement.name}: отсутствует экономика`);
     if (settlement.householdIds.some(id => !householdIds.has(id))) issues.push(`${settlement.name}: ссылка на несуществующее домохозяйство`);
     if (settlement.buildingIds.some(id => !buildingIds.has(id))) issues.push(`${settlement.name}: ссылка на несуществующее здание`);
+    const physical = physicalHuntStockBySettlement.get(settlement.id) ?? { meat: 0, hides: 0 };
+    if (Math.abs((settlement.stockpile['мясо'] ?? 0) - physical.meat) > .001) issues.push(`${settlement.name}: показатель мяса расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['шкуры'] ?? 0) - physical.hides) > .001) issues.push(`${settlement.name}: показатель шкур расходится с физическим остатком`);
   }
   for (const building of world.buildings) {
     if (!settlementIds.has(building.settlementId)) issues.push(`${building.name}: нет поселения`);

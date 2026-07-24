@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Premium cocktail bar</title>
+  <desc id="desc">Dark bar interior with bottle shelves, marble counter and burgundy seating.</desc>
+  <rect width="1200" height="720" fill="#09090b"/>
+  <rect x="46" y="46" width="1108" height="622" rx="20" fill="#151216"/>
+  <rect x="88" y="84" width="700" height="352" fill="#211a1e"/>
+  <g fill="#35282d">
+    <rect x="112" y="118" width="652" height="14"/><rect x="112" y="210" width="652" height="14"/><rect x="112" y="302" width="652" height="14"/><rect x="112" y="394" width="652" height="14"/>
+  </g>
+  <g fill="#09090a">
+    <path d="M138 152h18v13l7 12v32h-32v-32l7-12z"/><path d="M196 144h20v14l8 14v37h-36v-37l8-14z"/><path d="M258 152h17v12l7 12v33h-31v-33l7-12z"/><path d="M316 148h20v14l8 13v34h-36v-34l8-13z"/><path d="M382 143h18v13l8 13v40h-34v-40l8-13z"/><path d="M445 151h20v14l8 13v31h-36v-31l8-13z"/><path d="M509 146h18v13l8 13v37h-34v-37l8-13z"/><path d="M572 152h20v14l8 13v30h-36v-30l8-13z"/><path d="M638 142h19v14l8 13v40h-35v-40l8-13z"/><path d="M704 150h18v13l8 13v33h-34v-33l8-13z"/>
+  </g>
+  <g fill="#8f3152"><rect x="134" y="184" width="26" height="11"/><rect x="192" y="182" width="28" height="11"/><rect x="312" y="184" width="28" height="11"/><rect x="378" y="183" width="26" height="11"/><rect x="441" y="184" width="28" height="11"/><rect x="634" y="183" width="27" height="11"/><rect x="700" y="184" width="26" height="11"/></g>
+  <rect x="72" y="450" width="1064" height="52" rx="10" fill="#b1aaa0"/>
+  <rect x="88" y="502" width="1032" height="126" fill="#252024"/>
+  <rect x="118" y="526" width="390" height="72" fill="#30262b"/>
+  <rect x="828" y="526" width="258" height="72" fill="#30262b"/>
+  <g fill="#712341">
+    <path d="M844 354h112l20 96H824z"/><path d="M1000 354h112l20 96H980z"/>
+  </g>
+  <g stroke="#a48d72" stroke-width="13"><path d="M900 450v176M1056 450v176"/><path d="M856 626h88M1012 626h88"/></g>
+  <g>
+    <path d="M592 368h52l-8 34h-36z" fill="#c2b17f"/><path d="M618 402v50" stroke="#c2b17f" stroke-width="8"/><path d="M596 454h44" stroke="#c2b17f" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <rect x="826" y="84" width="278" height="216" fill="#1b171a"/>
+  <circle cx="965" cy="188" r="72" fill="#7e2948"/><circle cx="965" cy="188" r="48" fill="#151216"/>
+  <rect x="934" y="232" width="62" height="8" fill="#b8aa82"/>
+</svg>

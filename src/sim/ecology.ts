@@ -1,8 +1,9 @@
-import type { AlchemyRecipe, AnimalPopulation, NaturalIngredient, Terrain, WorldState } from '../types';
+import type { AlchemyRecipe, AnimalPopulation, Character, Establishment, NaturalIngredient, Terrain, WorldState } from '../types';
 import { appendCausalEvent } from './causality';
 import { RNG } from './rng';
 import type { WorldIndexes } from './indexes';
 import { addAnimalPopulationToIndexes, coordinateKey, nearbyTileKeys, rebuildAnimalIndexes, workers } from './indexes';
+import { addMaterialItem, refreshSettlementMaterialSummary } from './materialEconomy';
 
 interface AnimalDefinition {
   species: string;
@@ -259,6 +260,116 @@ function nearbyIngredients(indexes: WorldIndexes, x: number, y: number, radius: 
   return result;
 }
 
+interface HuntYield {
+  meat: number;
+  hides: number;
+}
+
+interface DeliveredHuntYield extends HuntYield {
+  hunterRevenue: number;
+}
+
+const HUNT_YIELD_BY_SPECIES: Record<string, HuntYield> = {
+  'заяц': { meat: .12, hides: .18 },
+  'олень': { meat: 1.15, hides: 1 },
+  'северный олень': { meat: 1.25, hides: 1 },
+  'кабан': { meat: .9, hides: .72 },
+  'горный козёл': { meat: .58, hides: .9 },
+  'болотный тур': { meat: 2.4, hides: 1.2 },
+  'песчаная антилопа': { meat: .68, hides: .88 },
+  'береговой тюлень': { meat: .82, hides: .8 },
+};
+
+function physicalYield(species: string, killed: number): HuntYield {
+  const perAnimal = HUNT_YIELD_BY_SPECIES[species] ?? { meat: .55, hides: .65 };
+  return {
+    meat: Math.max(.05, Math.round(killed * perAnimal.meat * 100) / 100),
+    hides: Math.max(.05, Math.round(killed * perAnimal.hides * 100) / 100),
+  };
+}
+
+function huntBuyer(indexes: WorldIndexes, settlementId: number, templateId: 'meat' | 'raw_hide'): Establishment | undefined {
+  const priority = templateId === 'meat'
+    ? ['продовольственная лавка', 'рынок', 'лавка', 'склад', 'таверна', 'постоялый двор']
+    : ['кожевенная мастерская', 'рынок', 'склад', 'лавка'];
+  const rank = new Map(priority.map((type, index) => [type, index]));
+  return [...(indexes.establishmentsBySettlement.get(settlementId) ?? [])]
+    .filter(establishment => establishment.active && rank.has(establishment.type))
+    .sort((a, b) => (rank.get(a.type) ?? 999) - (rank.get(b.type) ?? 999) || b.cash - a.cash || a.id - b.id)[0];
+}
+
+function hunterHouseholdShares(hunters: Character[]): { householdId: number; weight: number }[] {
+  const counts = new Map<number, number>();
+  for (const hunter of hunters) if (hunter.householdId) counts.set(hunter.householdId, (counts.get(hunter.householdId) ?? 0) + 1);
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  if (!total) return [];
+  return [...counts.entries()].map(([householdId, count]) => ({ householdId, weight: count / total }));
+}
+
+function payHunters(indexes: WorldIndexes, hunters: Character[], amount: number): void {
+  if (amount <= .0001) return;
+  const shares = hunterHouseholdShares(hunters);
+  if (shares.length) {
+    for (const share of shares) {
+      const household = indexes.householdById.get(share.householdId);
+      if (!household) continue;
+      const payment = amount * share.weight;
+      household.wealth += payment;
+      household.monthlyIncome += payment;
+    }
+    return;
+  }
+  const leadHunter = hunters[0];
+  if (leadHunter) leadHunter.wallet += amount;
+}
+
+function storeUnsoldHuntYield(
+  world: WorldState, indexes: WorldIndexes, hunters: Character[], settlementId: number, templateId: 'meat' | 'raw_hide', quantity: number, quality: number, source: string,
+): void {
+  if (quantity <= .0001) return;
+  const householdId = hunters.find(hunter => hunter.householdId)?.householdId;
+  const household = householdId ? indexes.householdById.get(householdId) : undefined;
+  const leadHunter = hunters[0];
+  addMaterialItem(world, templateId, quantity, settlementId, household
+    ? { householdId: household.id, buildingId: household.homeBuildingId }
+    : leadHunter ? { ownerCharacterId: leadHunter.id } : {}, source, quality, indexes.itemById, false, leadHunter);
+}
+
+function sellOrStoreHuntYield(
+  world: WorldState, indexes: WorldIndexes, hunters: Character[], settlementId: number, templateId: 'meat' | 'raw_hide', quantity: number, quality: number, species: string,
+): number {
+  if (quantity <= .0001) return 0;
+  const buyer = huntBuyer(indexes, settlementId, templateId);
+  const baseUnitPrice = templateId === 'meat' ? 14 : 10;
+  const procurementUnitPrice = baseUnitPrice * (.42 + quality / 250);
+  const purchased = buyer ? Math.min(quantity, buyer.cash / Math.max(.01, procurementUnitPrice)) : 0;
+  let payment = 0;
+  if (buyer && purchased > .0001) {
+    payment = purchased * procurementUnitPrice;
+    buyer.cash -= payment;
+    buyer.monthlyExpenses += payment;
+    payHunters(indexes, hunters, payment);
+    addMaterialItem(world, templateId, purchased, settlementId, { establishmentId: buyer.id, buildingId: buyer.buildingId },
+      `куплено у охотников после добычи ${species}`, quality, indexes.itemById);
+  }
+  const remainder = quantity - purchased;
+  if (remainder > .0001) storeUnsoldHuntYield(world, indexes, hunters, settlementId, templateId, remainder, quality,
+    `доля охотников после добычи ${species}`);
+  return payment;
+}
+
+function deliverHuntYield(
+  world: WorldState, rng: RNG, indexes: WorldIndexes, settlementId: number, hunters: Character[], species: string, killed: number,
+): DeliveredHuntYield {
+  const yieldAmount = physicalYield(species, killed);
+  const averageSkill = hunters.reduce((sum, hunter) => sum + (hunter.skills.hunter ?? 0), 0) / Math.max(1, hunters.length);
+  const quality = Math.max(32, Math.min(86, Math.round(42 + averageSkill * .42 + rng.int(-4, 6))));
+  const hunterRevenue = sellOrStoreHuntYield(world, indexes, hunters, settlementId, 'meat', yieldAmount.meat, quality, species)
+    + sellOrStoreHuntYield(world, indexes, hunters, settlementId, 'raw_hide', yieldAmount.hides, quality, species);
+  refreshSettlementMaterialSummary(world, settlementId);
+  return { ...yieldAmount, hunterRevenue };
+}
+
 function huntAnimals(world: WorldState, rng: RNG, indexes: WorldIndexes, settlementIds: ReadonlySet<number>, activeSettlementIds: ReadonlySet<number>): void {
   for (const settlementId of settlementIds) {
     const settlement = indexes.settlementById.get(settlementId);
@@ -269,16 +380,15 @@ function huntAnimals(world: WorldState, rng: RNG, indexes: WorldIndexes, settlem
       .filter(population => population.count > 2 && population.diet !== 'хищник');
     if (!candidates.length) continue;
     const target = candidates.reduce((best, item) => item.count > best.count ? item : best);
-    const need = settlement.food < 45 ? 1.45 : 1;
+    const urgentFoodNeed = settlement.food < 45;
+    const need = urgentFoodNeed ? 1.45 : 1;
     const elapsedMonths = activeSettlementIds.has(settlement.id) ? 1 : 3;
     const killed = Math.min(target.count - 1, Math.max(1, Math.round(hunters.length * world.config.huntingPressure * need * rng.int(1, 3) * Math.min(2, elapsedMonths * .7))));
     if (killed <= 0) continue;
     target.count -= killed;
     target.huntedThisYear += killed;
     target.lastCause = `охота жителей поселения ${settlement.name}`;
-    settlement.food = Math.min(240, settlement.food + killed * 2);
-    settlement.stockpile['мясо'] = (settlement.stockpile['мясо'] ?? 0) + killed * 2;
-    settlement.stockpile['шкуры'] = (settlement.stockpile['шкуры'] ?? 0) + Math.max(1, killed);
+    const delivered = deliverHuntYield(world, rng, indexes, settlement.id, hunters, target.species, killed);
     const dangerous = rng.chance(.012 * hunters.length + (target.species.includes('кабан') ? .04 : 0));
     if (dangerous) {
       const victim = rng.pick(hunters);
@@ -287,16 +397,16 @@ function huntAnimals(world: WorldState, rng: RNG, indexes: WorldIndexes, settlem
       appendCausalEvent(world, {
         kind: 'hunt', title: `${victim.name} ранен на охоте`, description: `Охотники добыли ${killed} животных, но один из них получил тяжёлую рану.`,
         cause: `поселению ${settlement.name} требовались мясо и шкуры`, conditions: [`в угодьях было ${target.count + killed} животных`, `на охоту вышли ${hunters.length} охотников`],
-        decision: `охотники выбрали добычу «${target.species}»`, outcome: `получено мясо и шкуры, ${victim.name} ранен`,
-        consequences: ['запасы пищи выросли', 'численность животных снизилась', 'охотник получил постоянный след'],
+        decision: `охотники выбрали добычу «${target.species}»`, outcome: `получено ${delivered.meat.toFixed(1)} туш мяса и ${delivered.hides.toFixed(1)} шкур, ${victim.name} ранен`,
+        consequences: ['физическая добыча поступила семьям и покупателям', 'численность животных снизилась', 'охотник получил постоянный след'],
         entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'character', id: victim.id }, { kind: 'animalPopulation', id: target.id }], importance: 3,
       });
     } else if (killed >= 8 || settlement.food < 30) {
       appendCausalEvent(world, {
         kind: 'hunt', title: `Охотники ${settlement.name} вернулись с добычей`, description: `Добыто ${killed} животных вида «${target.species}».`,
-        cause: settlement.food < 45 ? 'нехватка пищи' : 'спрос на мясо и шкуры', conditions: [`рядом существовала популяция из ${target.count + killed} особей`, `в поселении работали ${hunters.length} охотников`],
-        decision: `охотники отправились в клетку ${target.x}:${target.y}`, outcome: `запасы пищи выросли на ${killed * 2}`,
-        consequences: ['поселение получило мясо и шкуры', 'животная популяция сократилась'], entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
+        cause: urgentFoodNeed ? 'нехватка пищи' : 'спрос на мясо и шкуры', conditions: [`рядом существовала популяция из ${target.count + killed} особей`, `в поселении работали ${hunters.length} охотников`],
+        decision: `охотники отправились в клетку ${target.x}:${target.y}`, outcome: `получено ${delivered.meat.toFixed(1)} туш мяса и ${delivered.hides.toFixed(1)} шкур${delivered.hunterRevenue > 0 ? `, охотники выручили ${delivered.hunterRevenue.toFixed(1)} крон` : ''}`,
+        consequences: ['добыча существует как физические предметы', 'животная популяция сократилась'], entityRefs: [{ kind: 'settlement', id: settlement.id }, { kind: 'animalPopulation', id: target.id }], importance: 2,
       });
     }
   }
