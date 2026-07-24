@@ -29,6 +29,25 @@ const foreignPaths = [
   'src/components/system',
   'src/components/ui',
   'src/hooks/useCareerSave.ts',
+  // Загрязнение, попавшее в main вместе с интерфейсом другого проекта.
+  'src/features/brand',
+  'src/features/market',
+  'src/features/onboarding',
+  'src/features/production',
+  'src/features/shell',
+  'src/features/today',
+  'src/features/world',
+  'src/ui/EditorialVisual.tsx',
+  'src/ui/FeedbackStates.tsx',
+  'src/ui/Icon.tsx',
+  'src/ui/MobileUI.tsx',
+  'src/styles/global.css',
+  'docs/FEATURE_SPEC_031_PREMIUM_INTERFACE.md',
+  'docs/UX_AUDIT_031.md',
+  'public/art/bar.svg',
+  'public/art/cellar.svg',
+  'public/art/city.svg',
+  'public/art/production.svg',
 ];
 
 const removed = [];

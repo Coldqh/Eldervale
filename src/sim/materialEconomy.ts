@@ -173,6 +173,8 @@ const buildingMapping: Record<string, BuildingType> = {
 
 const residentialTypes = new Set<BuildingType>(['house', 'tenement', 'manor', 'barracks', 'monastery']);
 const foodTemplates = new Set(['bread', 'grain', 'wheat', 'barley', 'rye', 'flour', 'vegetables', 'fruit', 'meat', 'smoked_meat', 'fish', 'salted_fish', 'milk', 'eggs', 'stew', 'roast']);
+const cerealTemplates = new Set(['grain', 'wheat', 'barley', 'rye']);
+const agriculturalHarvestTemplates = new Set(['grain', 'wheat', 'barley', 'rye', 'vegetables', 'flax', 'straw']);
 
 function needState(tick: number): NeedState {
   return { hunger: 10, thirst: 8, rest: 12, warmth: 10, safety: 12, social: 18, lastUpdatedTick: tick };
@@ -300,6 +302,15 @@ export function consumeSettlementMaterial(world: WorldState, settlementId: numbe
     const used = Math.min(item.quantity, remaining);
     item.quantity -= used;
     remaining -= used;
+  }
+  return quantity - remaining;
+}
+
+export function consumeSettlementMaterials(world: WorldState, settlementId: number, templateIds: readonly string[], quantity: number): number {
+  let remaining = Math.max(0, quantity);
+  for (const templateId of templateIds) {
+    if (remaining <= .0001) break;
+    remaining -= consumeSettlementMaterial(world, settlementId, templateId, remaining);
   }
   return quantity - remaining;
 }
@@ -928,10 +939,25 @@ export function reconcileMaterialLocations(world: WorldState): MaterialLocationR
 }
 
 export function pruneEmptyMaterialItems(world: WorldState, indexes?: WorldIndexes): void {
+  const previousSettlementByItem = new Map(world.items.map(item => [item.id, item.settlementId]));
   const reconciliation = reconcileMaterialLocations(world);
   const changed = cleanEmptyItems(world) || reconciliation.removed > 0;
-  if ((changed || reconciliation.relocated > 0) && indexes) indexes.itemById = new Map(world.items.map(item => [item.id, item]));
-  if (changed || reconciliation.relocated > 0) invalidateMaterialRuntime(world);
+  if (changed || reconciliation.relocated > 0) {
+    const affectedSettlementIds = new Set<number>();
+    const remainingIds = new Set<number>();
+    for (const item of world.items) {
+      remainingIds.add(item.id);
+      const previousSettlementId = previousSettlementByItem.get(item.id);
+      if (previousSettlementId !== undefined && previousSettlementId !== item.settlementId) {
+        affectedSettlementIds.add(previousSettlementId);
+        affectedSettlementIds.add(item.settlementId);
+      }
+    }
+    for (const [itemId, settlementId] of previousSettlementByItem) if (!remainingIds.has(itemId)) affectedSettlementIds.add(settlementId);
+    invalidateMaterialRuntime(world);
+    for (const settlementId of affectedSettlementIds) refreshSettlementMaterialSummary(world, settlementId);
+    if (indexes) indexes.itemById = new Map(world.items.map(item => [item.id, item]));
+  }
 }
 
 function spoilItems(world: WorldState, settlementIds: ReadonlySet<number>, elapsedMonths: number): void {
@@ -945,7 +971,7 @@ function spoilItems(world: WorldState, settlementIds: ReadonlySet<number>, elaps
   }
 }
 
-function transferItemBetweenEstablishments(world: WorldState, seller: Establishment, buyer: Establishment, item: WorldItem, quantity: number): number {
+function transferItemBetweenEstablishments(world: WorldState, seller: Establishment, buyer: Establishment, item: WorldItem, quantity: number, source = `поставка от ${seller.name}`, forceUnique = false): number {
   const moved = Math.min(quantity, item.quantity);
   if (moved <= .0001) return 0;
   const settlement = activeRuntime?.settlementById.get(buyer.settlementId) ?? world.settlements.find(candidate => candidate.id === buyer.settlementId);
@@ -965,9 +991,79 @@ function transferItemBetweenEstablishments(world: WorldState, seller: Establishm
     templateId: item.templateId, name: item.name, category: item.category, material: item.material, quantity: affordableQuantity, unit: item.unit, weightPerUnit: item.weightPerUnit,
     quality: item.quality, condition: item.condition, freshness: item.freshness, perishabilityMonths: item.perishabilityMonths, baseValue: item.baseValue,
     settlementId: buyer.settlementId, establishmentId: buyer.id, buildingId: buyer.buildingId, createdYear: world.year,
-    source: `поставка от ${seller.name}`, history: [`Передано заведению ${buyer.name} в ${world.year}.${String(world.month).padStart(2, '0')}.`],
-  });
+    source, history: [`Передано заведению ${buyer.name} в ${world.year}.${String(world.month).padStart(2, '0')}.`, `Происхождение партии: ${item.source}.`],
+  }, undefined, forceUnique);
   return affordableQuantity;
+}
+
+function allocateHarvestWorkerShare(world: WorldState, farm: Establishment, item: WorldItem): number {
+  const marker = 'Натуральная доля работников выделена:';
+  if (item.history.some(entry => entry.startsWith(marker))) return 0;
+  const householdIds = new Set<number>();
+  for (const characterId of [...farm.workerIds, farm.ownerCharacterId]) {
+    const character = activeRuntime?.characterById.get(characterId) ?? world.characters.find(candidate => candidate.id === characterId);
+    if (character?.alive && character.householdId) householdIds.add(character.householdId);
+  }
+  const households = [...householdIds]
+    .map(id => activeRuntime?.householdById.get(id) ?? world.households.find(candidate => candidate.id === id))
+    .filter((household): household is Household => Boolean(household && household.settlementId === farm.settlementId))
+    .sort((a, b) => a.id - b.id);
+  const shareRatio = foodTemplates.has(item.templateId) ? .18 : .08;
+  const totalShare = households.length ? Math.min(item.quantity, item.quantity * shareRatio) : 0;
+  if (totalShare > .0001) {
+    const sharePerHousehold = totalShare / households.length;
+    for (const household of households) {
+      addItem(world, {
+        templateId: item.templateId, name: item.name, category: item.category, material: item.material, quantity: sharePerHousehold, unit: item.unit, weightPerUnit: item.weightPerUnit,
+        quality: item.quality, condition: item.condition, freshness: item.freshness, perishabilityMonths: item.perishabilityMonths, baseValue: item.baseValue,
+        settlementId: farm.settlementId, householdId: household.id, buildingId: household.homeBuildingId, createdYear: world.year,
+        source: `натуральная доля урожая от ${farm.name}; ${item.source}`,
+        history: [`Получено семьёй работников ${farm.name} после жатвы в ${world.year}.${String(world.month).padStart(2, '0')}.`],
+      }, undefined, true);
+    }
+    item.quantity -= totalShare;
+  }
+  item.history.push(`${marker} ${totalShare.toFixed(2)} ед. между ${households.length} семьями.`);
+  return totalShare;
+}
+
+export function routeAgriculturalHarvestToGranaries(world: WorldState, settlementId: number): { movedQuantity: number; paid: number } {
+  const local = activeRuntime?.establishmentsBySettlement.get(settlementId) ?? world.establishments.filter(item => item.settlementId === settlementId);
+  const farms = local.filter(item => item.active && item.type === 'ферма').sort((a, b) => a.id - b.id);
+  const granaries = local.filter(item => item.active && item.type === 'склад').sort((a, b) => a.id - b.id);
+  if (!farms.length || !granaries.length) return { movedQuantity: 0, paid: 0 };
+
+  let movedQuantity = 0;
+  let paid = 0;
+  for (const farm of farms) {
+    const harvestItems = farm.inventoryItemIds
+      .map(id => activeRuntime?.itemById.get(id) ?? world.items.find(item => item.id === id))
+      .filter((item): item is WorldItem => Boolean(item
+        && item.quantity > .0001
+        && item.condition > 0
+        && agriculturalHarvestTemplates.has(item.templateId)
+        && (item.source.includes('урожай поля') || item.source.includes('жатвы поля'))))
+      .sort((a, b) => a.freshness - b.freshness || a.id - b.id);
+    for (const item of harvestItems) {
+      if (item.quantity <= .0001) continue;
+      const granary = granaries[(item.id + farm.id) % granaries.length]!;
+      allocateHarvestWorkerShare(world, farm, item);
+      const quantityForStorage = Math.max(0, item.quantity);
+      if (quantityForStorage <= .0001) continue;
+      const cashBefore = farm.cash;
+      const moved = transferItemBetweenEstablishments(
+        world, farm, granary, item, quantityForStorage,
+        `урожай поля принят в амбар ${granary.name}; ${item.source}`,
+        true,
+      );
+      if (moved <= .0001) continue;
+      movedQuantity += moved;
+      paid += Math.max(0, farm.cash - cashBefore);
+      item.history.push(`${moved.toFixed(2)} ед. урожая передано в ${granary.name} для хранения и дальнейшей продажи.`);
+      granary.history.push(`Принято ${moved.toFixed(2)} ед. ${item.name} от ${farm.name}.`);
+    }
+  }
+  return { movedQuantity, paid };
 }
 
 function restockRecipeInputs(world: WorldState, establishment: Establishment, recipe: ProductionRecipe, elapsedMonths: number): void {
@@ -1437,10 +1533,28 @@ function recalculateMarket(world: WorldState, settlement: Settlement): void {
   const physicalHides = world.items.reduce((sum, item) => sum + Number(
     item.settlementId === settlement.id && item.templateId === 'raw_hide' && item.quantity > 0 && item.condition > 0 && !item.supplyWagonId
   ) * item.quantity, 0);
+  const agriculture = { grain: 0, wheat: 0, barley: 0, rye: 0, vegetables: 0, flax: 0, straw: 0 };
+  for (const item of world.items) {
+    if (item.settlementId !== settlement.id || item.quantity <= 0 || item.condition <= 0 || item.supplyWagonId) continue;
+    if (cerealTemplates.has(item.templateId)) agriculture.grain += item.quantity;
+    if (item.templateId === 'wheat') agriculture.wheat += item.quantity;
+    else if (item.templateId === 'barley') agriculture.barley += item.quantity;
+    else if (item.templateId === 'rye') agriculture.rye += item.quantity;
+    else if (item.templateId === 'vegetables') agriculture.vegetables += item.quantity;
+    else if (item.templateId === 'flax') agriculture.flax += item.quantity;
+    else if (item.templateId === 'straw') agriculture.straw += item.quantity;
+  }
   // Эти поля оставлены для старого UI, но больше не являются отдельным запасом:
   // каждый пересчёт полностью восстанавливает их из физических предметов.
   settlement.stockpile['мясо'] = physicalMeat;
   settlement.stockpile['шкуры'] = physicalHides;
+  settlement.stockpile['зерно'] = agriculture.grain;
+  settlement.stockpile['пшеница'] = agriculture.wheat;
+  settlement.stockpile['ячмень'] = agriculture.barley;
+  settlement.stockpile['рожь'] = agriculture.rye;
+  settlement.stockpile['овощи'] = agriculture.vegetables;
+  settlement.stockpile['лён'] = agriculture.flax;
+  settlement.stockpile['солома'] = agriculture.straw;
   settlement.food = Math.max(0, Math.min(180, Math.round(foodSupply / Math.max(1, people) * 36)));
   const shortage = foodSupply < people * .055;
   const had = settlement.shortages.includes('пища');
@@ -1611,6 +1725,7 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         .map(id => indexes.establishmentById.get(id))
         .filter((item): item is Establishment => Boolean(item))
         .sort((a, b) => (productionPriority[a.type] ?? 10) - (productionPriority[b.type] ?? 10) || a.id - b.id);
+      routeAgriculturalHarvestToGranaries(world, settlement.id);
       for (const establishment of localEstablishments) runProduction(world, establishment, rng, elapsedMonths);
       distributeSettlementStaples(world, settlement, localEstablishments, elapsedMonths);
       for (const householdId of settlement.householdIds) {
@@ -1663,20 +1778,42 @@ export function materialEconomyIntegrityIssues(world: WorldState): string[] {
   const locations = new Map<number, number>();
   const countLocation = (ids: number[]) => { for (const id of ids) locations.set(id, (locations.get(id) ?? 0) + 1); };
   const physicalHuntStockBySettlement = new Map<number, { meat: number; hides: number }>();
+  const physicalAgricultureStockBySettlement = new Map<number, { grain: number; wheat: number; barley: number; rye: number; vegetables: number; flax: number; straw: number }>();
   for (const item of world.items) {
-    if (item.quantity <= 0 || item.condition <= 0 || item.supplyWagonId || !['meat', 'raw_hide'].includes(item.templateId)) continue;
-    const current = physicalHuntStockBySettlement.get(item.settlementId) ?? { meat: 0, hides: 0 };
-    if (item.templateId === 'meat') current.meat += item.quantity;
-    else current.hides += item.quantity;
-    physicalHuntStockBySettlement.set(item.settlementId, current);
+    if (item.quantity <= 0 || item.condition <= 0 || item.supplyWagonId) continue;
+    if (item.templateId === 'meat' || item.templateId === 'raw_hide') {
+      const current = physicalHuntStockBySettlement.get(item.settlementId) ?? { meat: 0, hides: 0 };
+      if (item.templateId === 'meat') current.meat += item.quantity;
+      else current.hides += item.quantity;
+      physicalHuntStockBySettlement.set(item.settlementId, current);
+    }
+    if (agriculturalHarvestTemplates.has(item.templateId) || item.templateId === 'grain') {
+      const current = physicalAgricultureStockBySettlement.get(item.settlementId) ?? { grain: 0, wheat: 0, barley: 0, rye: 0, vegetables: 0, flax: 0, straw: 0 };
+      if (cerealTemplates.has(item.templateId)) current.grain += item.quantity;
+      if (item.templateId === 'wheat') current.wheat += item.quantity;
+      else if (item.templateId === 'barley') current.barley += item.quantity;
+      else if (item.templateId === 'rye') current.rye += item.quantity;
+      else if (item.templateId === 'vegetables') current.vegetables += item.quantity;
+      else if (item.templateId === 'flax') current.flax += item.quantity;
+      else if (item.templateId === 'straw') current.straw += item.quantity;
+      physicalAgricultureStockBySettlement.set(item.settlementId, current);
+    }
   }
   for (const settlement of world.settlements) {
     if (!settlement.economy) issues.push(`${settlement.name}: отсутствует экономика`);
     if (settlement.householdIds.some(id => !householdIds.has(id))) issues.push(`${settlement.name}: ссылка на несуществующее домохозяйство`);
     if (settlement.buildingIds.some(id => !buildingIds.has(id))) issues.push(`${settlement.name}: ссылка на несуществующее здание`);
     const physical = physicalHuntStockBySettlement.get(settlement.id) ?? { meat: 0, hides: 0 };
+    const crops = physicalAgricultureStockBySettlement.get(settlement.id) ?? { grain: 0, wheat: 0, barley: 0, rye: 0, vegetables: 0, flax: 0, straw: 0 };
     if (Math.abs((settlement.stockpile['мясо'] ?? 0) - physical.meat) > .001) issues.push(`${settlement.name}: показатель мяса расходится с физическим остатком`);
     if (Math.abs((settlement.stockpile['шкуры'] ?? 0) - physical.hides) > .001) issues.push(`${settlement.name}: показатель шкур расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['зерно'] ?? 0) - crops.grain) > .001) issues.push(`${settlement.name}: показатель зерна расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['пшеница'] ?? 0) - crops.wheat) > .001) issues.push(`${settlement.name}: показатель пшеницы расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['ячмень'] ?? 0) - crops.barley) > .001) issues.push(`${settlement.name}: показатель ячменя расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['рожь'] ?? 0) - crops.rye) > .001) issues.push(`${settlement.name}: показатель ржи расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['овощи'] ?? 0) - crops.vegetables) > .001) issues.push(`${settlement.name}: показатель овощей расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['лён'] ?? 0) - crops.flax) > .001) issues.push(`${settlement.name}: показатель льна расходится с физическим остатком`);
+    if (Math.abs((settlement.stockpile['солома'] ?? 0) - crops.straw) > .001) issues.push(`${settlement.name}: показатель соломы расходится с физическим остатком`);
   }
   for (const building of world.buildings) {
     if (!settlementIds.has(building.settlementId)) issues.push(`${building.name}: нет поселения`);

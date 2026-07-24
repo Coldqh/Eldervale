@@ -11,7 +11,7 @@ import { buildSettlementLayout } from './cityMorphology';
 import { initializeCivilizationSystem } from './civilizationSystem';
 import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './technologyKnowledge';
 import { initializeCultureSystem } from './cultureSystem';
-import { addMaterialItem } from './materialEconomy';
+import { addMaterialItem, consumeSettlementMaterials, pruneEmptyMaterialItems, refreshSettlementMaterialSummary } from './materialEconomy';
 import { placeName } from './names';
 import { hashSeed, RNG } from './rng';
 import { advanceRaceDemography } from './raceDemography';
@@ -68,6 +68,82 @@ export function activeExpeditionForCharacter(world: WorldState, characterId: num
   return (world.settlementExpeditions ?? []).find(item => ACTIVE_STATUSES.has(item.status) && item.memberIds.includes(characterId));
 }
 
+export function reconcileSettlementExpeditionReferences(world: WorldState): boolean {
+  let changed = false;
+  const characterById = new Map(world.characters.map(character => [character.id, character]));
+  const householdById = new Map(world.households.map(household => [household.id, household]));
+  const removeHouseholdIds = new Set<number>();
+
+  for (const expedition of world.settlementExpeditions.filter(item => ACTIVE_STATUSES.has(item.status))) {
+    const liveMembers = expedition.memberIds
+      .map(id => characterById.get(id))
+      .filter((character): character is Character => Boolean(character?.alive));
+    const liveMemberIds = new Set(liveMembers.map(character => character.id));
+    if (liveMembers.length !== expedition.memberIds.length) {
+      expedition.memberIds = liveMembers.map(character => character.id);
+      changed = true;
+    }
+
+    const existingHouseholds = expedition.householdIds
+      .map(id => householdById.get(id))
+      .filter((household): household is Household => Boolean(household));
+    const validHouseholds = existingHouseholds.filter(household => household.memberIds.some(id => liveMemberIds.has(id)));
+    const invalidHouseholds = existingHouseholds.filter(household => !validHouseholds.includes(household));
+    const carrier = validHouseholds[0];
+
+    for (const household of invalidHouseholds) {
+      for (const itemId of household.inventoryItemIds) {
+        const item = world.items.find(candidate => candidate.id === itemId);
+        if (!item) continue;
+        if (carrier) {
+          item.householdId = carrier.id;
+          item.ownerCharacterId = undefined;
+          item.establishmentId = undefined;
+          item.buildingId = undefined;
+          item.settlementId = 0;
+          if (!carrier.inventoryItemIds.includes(item.id)) carrier.inventoryItemIds.push(item.id);
+          item.history.push(`Груз передан семье №${carrier.id} после гибели последнего члена семьи №${household.id} в экспедиции №${expedition.id}.`);
+        } else {
+          item.quantity = 0;
+          item.history.push(`Груз утрачен после гибели всех участников экспедиции №${expedition.id}.`);
+        }
+      }
+      household.inventoryItemIds = [];
+      removeHouseholdIds.add(household.id);
+      changed = true;
+    }
+
+    const validHouseholdIds = new Set(validHouseholds.map(household => household.id));
+    if (expedition.householdIds.length !== validHouseholds.length || expedition.householdIds.some(id => !validHouseholdIds.has(id))) {
+      expedition.householdIds = validHouseholds.map(household => household.id);
+      changed = true;
+    }
+    for (const member of liveMembers) {
+      if (member.expeditionId !== expedition.id) { member.expeditionId = expedition.id; changed = true; }
+    }
+    if (!liveMemberIds.has(expedition.leaderCharacterId)) {
+      const successor = [...liveMembers].sort((a, b) => leadershipScore(b) - leadershipScore(a) || a.id - b.id)[0];
+      if (successor) {
+        expedition.leaderCharacterId = successor.id;
+        expedition.history.push(`${successor.name} принял руководство после смерти прежнего лидера.`);
+      } else {
+        expedition.status = 'failed';
+        expedition.failureReason = 'все участники погибли';
+        expedition.resolvedTick = worldTick(world);
+        expedition.history.push('Экспедиция прекратила существование после гибели всех участников.');
+      }
+      changed = true;
+    }
+  }
+
+  if (removeHouseholdIds.size) {
+    world.households = world.households.filter(household => !removeHouseholdIds.has(household.id));
+    for (const settlement of world.settlements) settlement.householdIds = settlement.householdIds.filter(id => !removeHouseholdIds.has(id));
+  }
+  if (changed) pruneEmptyMaterialItems(world);
+  return changed;
+}
+
 export function advanceSettlementLifecycle(
   world: WorldState,
   rng: RNG,
@@ -75,7 +151,8 @@ export function advanceSettlementLifecycle(
   options: SettlementLifecycleAdvanceOptions = {},
 ): SettlementLifecycleResult {
   if (world.simulation.settlementLifecycleVersion !== 1) initializeSettlementLifecycle(world);
-  const result: SettlementLifecycleResult = { formed: 0, founded: 0, failed: 0, returned: 0, changed: false };
+  const reconciledBeforeAdvance = reconcileSettlementExpeditionReferences(world);
+  const result: SettlementLifecycleResult = { formed: 0, founded: 0, failed: 0, returned: 0, changed: reconciledBeforeAdvance };
   const elapsedMonths = Math.max(1, Math.floor(options.elapsedMonths ?? 1));
 
   if (options.allowFormation) {
@@ -103,6 +180,7 @@ export function advanceSettlementLifecycle(
     if (before !== 'returned' && expedition.status === 'returned') result.returned += 1;
   }
 
+  result.changed = reconcileSettlementExpeditionReferences(world) || result.changed;
   if (result.changed) {
     advanceRaceDemography(world, { elapsedMonths: 0, indexes, recordHistory: false });
     if (indexes) refreshDynamicWorldIndexes(indexes, world);
@@ -377,7 +455,7 @@ function foundSettlement(world: WorldState, expedition: SettlementExpedition, rn
     notableCharacterIds: members.sort((a, b) => b.renown - a.renown || a.id - b.id).slice(0, 6).map(member => member.id),
     damaged: 0,
     resource,
-    stockpile: { [resource]: 8, зерно: expedition.supplies.seedGrain, древесина: expedition.supplies.timber, камень: tile.terrain === 'hills' ? 18 : 6 },
+    stockpile: { [resource]: 8, зерно: 0, древесина: expedition.supplies.timber, камень: tile.terrain === 'hills' ? 18 : 6 },
     livestock: { куры: expedition.supplies.livestock * 2, козы: expedition.supplies.livestock, лошади: Math.max(0, Math.floor(expedition.supplies.livestock / 3)) },
     shortages: expedition.supplies.foodPersonDays < members.length * 60 ? ['пища'] : [],
     tradeRouteIds: [],
@@ -443,6 +521,7 @@ function foundSettlement(world: WorldState, expedition: SettlementExpedition, rn
   initializeCivilizationSystem(world, new RNG(`${world.config.seed}:цивилизация-нового-поселения:${id}`));
   initializeTechnologyKnowledge(world, new RNG(`${world.config.seed}:знания-нового-поселения:${id}`));
   reconcileTechnologyKnowledge(world);
+  refreshSettlementMaterialSummary(world, settlement.id);
   initializeStateFormation(world);
   initializeCitySimulation(world);
   appendCausalEvent(world, {
@@ -599,6 +678,7 @@ function restoreReturnedExpedition(world: WorldState, expedition: SettlementExpe
   }
   origin.population = world.characters.filter(character => character.alive && character.settlementId === origin.id).length;
   origin.households = origin.householdIds.length;
+  refreshSettlementMaterialSummary(world, origin.id);
   clearExpeditionMembership(world, expedition);
   expedition.status = 'returned';
   expedition.resolvedTick = worldTick(world);
@@ -652,6 +732,7 @@ function failExpedition(world: WorldState, expedition: SettlementExpedition, rea
     }
     refuge.population = world.characters.filter(character => character.alive && character.settlementId === refuge.id).length;
     refuge.households = refuge.householdIds.length;
+    refreshSettlementMaterialSummary(world, refuge.id);
   }
   clearExpeditionMembership(world, expedition);
   expedition.status = 'failed';
@@ -718,19 +799,38 @@ function detachExpeditionFromOrigin(world: WorldState, origin: Settlement, exped
   }
   origin.population = world.characters.filter(character => character.alive && character.settlementId === origin.id).length;
   origin.households = origin.householdIds.length;
-  origin.food = Math.max(0, origin.food - Math.ceil(members.length / 4));
-  origin.stockpile.зерно = Math.max(0, (origin.stockpile.зерно ?? 0) - expedition.supplies.seedGrain);
+  const carriedSeedGrain = consumeSettlementMaterials(world, origin.id, ['grain', 'wheat', 'barley', 'rye'], expedition.supplies.seedGrain);
+  expedition.supplies.seedGrain = carriedSeedGrain;
+  const carrierHousehold = households.find(household => household.memberIds.includes(expedition.leaderCharacterId)) ?? households[0];
+  if (carrierHousehold && carriedSeedGrain > .0001) {
+    addMaterialItem(world, 'grain', carriedSeedGrain, 0, { householdId: carrierHousehold.id }, `семенной груз экспедиции №${expedition.id}`, 58, undefined, true);
+  }
+  if (carriedSeedGrain < 4) expedition.history.push('Экспедиция вышла почти без физического семенного зерна; основание общины под угрозой.');
   origin.stockpile.древесина = Math.max(0, (origin.stockpile.древесина ?? 0) - expedition.supplies.timber);
   origin.economy.coinSupply = Math.max(0, origin.economy.coinSupply - expedition.supplies.coin);
+  pruneEmptyMaterialItems(world);
+  refreshSettlementMaterialSummary(world, origin.id);
 }
 
 function selectExpeditionHouseholds(world: WorldState, origin: Settlement, rng: RNG, requested?: readonly number[]): Household[] {
   const requestedSet = requested ? new Set(requested) : undefined;
   const activeMemberIds = new Set(world.settlementExpeditions.filter(item => ACTIVE_STATUSES.has(item.status)).flatMap(item => item.memberIds));
+  const servingIds = new Set(world.armies.flatMap(army => army.soldierIds ?? []));
+  const travelingMerchantIds = new Set((world.travelingMerchants ?? []).map(merchant => merchant.characterId));
+  const unavailable = (characterId: number): boolean => {
+    const character = world.characters.find(candidate => candidate.id === characterId);
+    if (!character?.alive) return false;
+    return activeMemberIds.has(characterId)
+      || servingIds.has(characterId)
+      || travelingMerchantIds.has(characterId)
+      || ['гарнизон', 'поход', 'пленник'].includes(character.serviceStatus ?? '')
+      || character.legalStatus === 'заключён'
+      || character.legalStatus === 'под стражей';
+  };
   const candidates = world.households
     .filter(household => household.settlementId === origin.id && (!requestedSet || requestedSet.has(household.id)))
     .filter(household => household.memberIds.some(id => world.characters.some(character => character.id === id && character.alive && character.age >= 18)))
-    .filter(household => household.memberIds.every(id => !activeMemberIds.has(id)))
+    .filter(household => household.memberIds.every(id => !unavailable(id)))
     .filter(household => !household.memberIds.some(id => world.characters.find(character => character.id === id)?.titles.length))
     .sort((a, b) => householdExpeditionScore(world, b) - householdExpeditionScore(world, a) || a.id - b.id);
   const populationLimit = Math.max(8, Math.min(36, Math.floor(origin.population * .16)));

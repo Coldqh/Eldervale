@@ -23,7 +23,7 @@ const config = {
   historyYears: 48,
   kingdomCount: 3,
   settlementCount: 9,
-  populationScale: .55,
+  populationScale: .58,
   localMapSize: 96 as const,
   monsterDensity: .12,
   artifactDensity: .12,
@@ -83,6 +83,10 @@ assert.ok(expedition!.memberIds.length >= 6, 'экспедиция должна 
 assert.ok(expedition!.householdIds.length >= 1, 'экспедиция должна содержать целые домохозяйства');
 assert.ok(expedition!.route.length >= 2, 'экспедиция должна хранить реальный сухопутный маршрут');
 assert.equal(origin!.population, originPopulationBefore - expedition!.memberIds.length, 'уехавшие жители должны исчезнуть из населения исходного города');
+const physicalSeedCargo = world.items
+  .filter(item => item.settlementId === 0 && item.templateId === 'grain' && item.source.includes(`экспедиции №${expedition!.id}`))
+  .reduce((sum, item) => sum + item.quantity, 0);
+assert.ok(Math.abs(physicalSeedCargo - expedition!.supplies.seedGrain) < .0001, 'семенной запас экспедиции должен существовать физическим грузом');
 
 for (const householdId of expedition!.householdIds) {
   const household = world.households.find(item => item.id === householdId)!;

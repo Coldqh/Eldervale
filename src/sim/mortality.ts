@@ -473,6 +473,9 @@ function detachDeadKnowledge(world: WorldState, deadIds: Set<number>): void {
 
 function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById: Map<number, Character>): void {
   const liveById = new Map(world.characters.map(item => [item.id, item]));
+  const activeExpeditionHouseholdIds = new Set((world.settlementExpeditions ?? [])
+    .filter(expedition => ['forming', 'traveling', 'camped', 'returning'].includes(expedition.status))
+    .flatMap(expedition => expedition.householdIds));
   const emptyHouseholdIds = new Set<number>();
   for (const deceased of deadById.values()) {
     const heir = inheritanceHeir(world, deceased);
@@ -517,7 +520,7 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   for (const household of world.households) {
     household.memberIds = household.memberIds.filter(id => !deadIds.has(id));
     if (deadIds.has(household.headCharacterId)) household.headCharacterId = household.memberIds.find(id => liveById.has(id)) ?? 0;
-    if (!household.memberIds.length) emptyHouseholdIds.add(household.id);
+    if (!household.memberIds.length && !activeExpeditionHouseholdIds.has(household.id)) emptyHouseholdIds.add(household.id);
   }
 
   for (const building of world.buildings) {

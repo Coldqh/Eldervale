@@ -35,7 +35,7 @@ import { advanceCitySimulation, initializeCitySimulation } from './citySimulatio
 import { advanceCivilizationSystem, initializeCivilizationSystem } from './civilizationSystem';
 import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './technologyKnowledge';
 import { CIVILIZATION_CONTENT } from '../content/coreContent';
-import { advanceSettlementLifecycle, initializeSettlementLifecycle } from './settlementLifecycle';
+import { advanceSettlementLifecycle, initializeSettlementLifecycle, reconcileSettlementExpeditionReferences } from './settlementLifecycle';
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 import { advanceRegionalEconomy, initializeRegionalEconomy } from './regionalEconomy';
 import { initializeWorldLaw, reconcileWorldLawStates } from './worldLaw';
@@ -1239,6 +1239,9 @@ export function advanceWorldSystems(
 
   onPhase?.('Физические интерьеры, сон и износ мебели');
   applyInteriorMonthlyEffects(engine.world, monthStep);
+  // Поздние смерти и династические переходы не должны оставлять экспедиции
+  // со ссылками на исчезнувшие семьи или бесхозным грузом вне поселений.
+  if (reconcileSettlementExpeditionReferences(engine.world)) refreshDynamicWorldIndexes(engine.indexes, engine.world);
   // Последняя граница хода: никакая поздняя система не должна оставить человека
   // одновременно заключённым, путешествующим или служащим и гражданским работником.
   reconcileWorldLawStates(engine.world);

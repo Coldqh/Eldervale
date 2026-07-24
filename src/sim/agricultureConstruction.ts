@@ -5,7 +5,7 @@ import type {
 import type { CityProjectRequest } from '../cityTypes';
 import type { WorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
-import { addMaterialItem, consumeSettlementMaterial } from './materialEconomy';
+import { addMaterialItem, consumeSettlementMaterial, refreshSettlementMaterialSummary } from './materialEconomy';
 import { RNG, hashSeed } from './rng';
 import { assignConstructionFootprint, assignFieldCells, buildingDimensions } from './spatial';
 import { worldTick } from './scheduler';
@@ -165,6 +165,7 @@ function advanceAgricultureSettlementMonth(
   settlementId: number,
   tick: number,
 ): void {
+  let materialChanged = false;
   for (const field of world.fields) {
     if (field.settlementId !== settlementId) continue;
     const crop = CROPS[field.crop];
@@ -216,14 +217,15 @@ function advanceAgricultureSettlementMonth(
       field.lastWorkedTick = tick;
     }
 
-    if (field.state === 'готово к жатве') harvestField(world, field, crop, establishment, availableLabor, rng);
+    if (field.state === 'готово к жатве') materialChanged = harvestField(world, field, crop, establishment, availableLabor, rng) || materialChanged;
     if (world.month >= 11 && !['убрано', 'пар'].includes(field.state)) failField(world, field, 'урожай не успели убрать до холодов');
   }
+  if (materialChanged) refreshSettlementMaterialSummary(world, settlementId);
 }
 
-function harvestField(world: WorldState, field: FieldPlot, crop: CropDefinition, establishment: Establishment | undefined, availableLabor: number, rng: RNG): void {
+function harvestField(world: WorldState, field: FieldPlot, crop: CropDefinition, establishment: Establishment | undefined, availableLabor: number, rng: RNG): boolean {
   field.laborDone += availableLabor;
-  if (field.laborDone < field.laborRequired) return;
+  if (field.laborDone < field.laborRequired) return false;
   const moistureFactor = Math.max(.2, 1 - Math.abs(field.moisture - crop.moistureTarget) / 100);
   const careFactor = Math.max(.15, 1 - field.weeds / 150 - field.pests / 130);
   const fertilityFactor = .45 + field.fertility / 125;
@@ -236,8 +238,6 @@ function harvestField(world: WorldState, field: FieldPlot, crop: CropDefinition,
   field.state = 'убрано'; field.harvestedYear = world.year; field.expectedYield = yieldAmount; field.laborDone = 0;
   field.fertility = clamp(field.fertility - rng.int(2, 7), 20, 100);
   field.history.push(`В ${world.year} году собрано ${yieldAmount} единиц урожая.`);
-  const settlement = world.settlements.find(item => item.id === field.settlementId);
-  if (settlement) settlement.food = Math.min(100, settlement.food + Math.max(1, Math.round(yieldAmount / Math.max(8, settlement.population / 10))));
   if (yieldAmount <= Math.max(2, field.cells.length * crop.baseYieldPerCell * .35) || yieldAmount >= field.cells.length * crop.baseYieldPerCell * 1.05) {
     appendCausalEvent(world, {
       kind: 'agriculture', title: yieldAmount < field.cells.length * crop.baseYieldPerCell * .5 ? `Слабый урожай: ${field.crop}` : `Богатый урожай: ${field.crop}`,
@@ -249,6 +249,7 @@ function harvestField(world: WorldState, field: FieldPlot, crop: CropDefinition,
       entityRefs: [{ kind: 'field', id: field.id }, { kind: 'settlement', id: field.settlementId }], importance: 2,
     });
   }
+  return true;
 }
 
 function failField(world: WorldState, field: FieldPlot, cause: string): void {
