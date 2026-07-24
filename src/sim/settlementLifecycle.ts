@@ -6,6 +6,7 @@ import type { WorldIndexes } from './indexes';
 import { refreshDynamicWorldIndexes } from './indexes';
 import { appendCausalEvent } from './causality';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
+import { initializeLivestockSystem } from './livestockSystem';
 import { initializeCitySimulation } from './citySimulation';
 import { buildSettlementLayout } from './cityMorphology';
 import { initializeCivilizationSystem } from './civilizationSystem';
@@ -504,6 +505,7 @@ function foundSettlement(world: WorldState, expedition: SettlementExpedition, rn
   createFounderBuildings(world, settlement, expedition, households, members, rng);
   createFounderEmployment(world, settlement, expedition, members);
   initializeAgricultureAndConstruction(world, new RNG(`${world.config.seed}:поля-нового-поселения:${id}`));
+  initializeLivestockSystem(world, new RNG(`${world.config.seed}:стада-нового-поселения:${id}`));
   linkFounderRoute(world, settlement, expedition.originSettlementId, rng);
 
   expedition.status = 'founded';

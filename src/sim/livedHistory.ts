@@ -12,6 +12,7 @@ import { initializeMindSystem } from './mindSystem';
 import { initializeSettlementLayouts } from './cityMorphology';
 import { advanceMaterialEconomy, generatePhysicalEconomy, pruneEmptyMaterialItems, reconcileMaterialLocations } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, initializeAgricultureAndConstruction } from './agricultureConstruction';
+import { advanceLivestockSystem, initializeLivestockSystem } from './livestockSystem';
 import { initializeLivingEconomy } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { initializePhysicalArmySystem } from './physicalArmy';
@@ -412,6 +413,7 @@ function initializeGenesisSystems(world: WorldState, config: WorldConfig, onProg
   initializeSettlementLayouts(world);
   generatePhysicalEconomy(world, new RNG(`${config.seed}:генезис-повседневная-жизнь-v1`));
   initializeAgricultureAndConstruction(world, new RNG(`${config.seed}:генезис-земледелие-и-стройка-v1`));
+  initializeLivestockSystem(world, new RNG(`${config.seed}:генезис-животноводство-v1`));
   initializeLivingEconomy(world, new RNG(`${config.seed}:генезис-личная-экономика-v1`));
   initializeMilitaryInfrastructure(world, new RNG(`${config.seed}:генезис-военная-инфраструктура-v1`));
   initializePhysicalArmySystem(world, new RNG(`${config.seed}:генезис-физические-армии-v1`));
@@ -556,6 +558,7 @@ function bridgeSkippedGenerations(world: WorldState, indexes: WorldIndexes, from
       ensureSimulationRuntime(world);
       const rng = new RNG(`${world.config.seed}:исторический-квартал:${year}:${month}`);
       advanceAgriculture(world, rng, indexes, settlementIds);
+      advanceLivestockSystem(world, rng, settlementIds);
       advanceMaterialEconomy(world, rng, indexes, settlementIds, new Set());
       if (month === 1) advanceCitySimulation(world);
       if (month === 4 || month === 10) advanceConstruction(world, rng, indexes, settlementIds);

@@ -687,7 +687,10 @@ export function generatePhysicalEconomy(world: WorldState, rng: RNG, report?: (p
   world.nextIds.productionRecipe ??= 1;
   world.nextIds.employment ??= 1;
   world.nextIds.shipment ??= 1;
-  world.productionRecipes = world.productionRecipes.filter(recipe => !['Сбор урожая зерна', 'Сбор овощей и кореньев'].includes(recipe.name));
+  world.productionRecipes = world.productionRecipes.filter(recipe => ![
+    'Сбор урожая зерна', 'Сбор овощей и кореньев',
+    'Молочное хозяйство', 'Птичий двор',
+  ].includes(recipe.name));
   for (const recipe of world.productionRecipes) {
     recipe.key ||= stableRecipeKey(recipe.name);
     const definition = CIVILIZATION_CONTENT.recipeByKey.get(recipe.key) ?? CIVILIZATION_CONTENT.recipes.find(item => item.name === recipe.name);

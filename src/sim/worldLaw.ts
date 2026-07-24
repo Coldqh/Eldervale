@@ -1,4 +1,5 @@
 import type { Character, WorldState } from '../types';
+import { livestockIntegrityIssues } from './livestockSystem';
 
 const WORLD_LAW_VERSION = 1 as const;
 const SYNTHETIC_DEPOSIT_MARKER = 'чтобы его хозяйство имело физическую ресурсную базу';
@@ -110,7 +111,7 @@ export function worldLawIntegrityIssues(world: WorldState): string[] {
     }
   }
 
-  return [...new Set(issues)];
+  return [...new Set([...issues, ...livestockIntegrityIssues(world)])];
 }
 
 export function characterActivityState(world: WorldState, character: Character): string {

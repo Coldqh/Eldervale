@@ -5,6 +5,7 @@ import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
 import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems, synchronizeSettlementMaterialLinks } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
+import { advanceLivestockSystem } from './livestockSystem';
 import { advanceLivingEconomy, detailedPopulationContext, synchronizeEmploymentLinks } from './livingEconomy';
 import { advanceMilitaryInfrastructure, applyArmyCasualties, synchronizeArmyStrength } from './militaryInfrastructure';
 import { normalizeKingdomCapitals } from './kingdomState';
@@ -1067,6 +1068,7 @@ export function advanceOneMonth(
   const detailed = detailedPopulationContext(world, indexes, schedule.activeSettlementIds);
 
   if (schedule.economySettlementIds.size) runPhase(engine, 'Поля, посевы и уход за урожаем', onPhase, () => advanceAgriculture(world, rng, indexes, schedule.economySettlementIds));
+  if (schedule.economySettlementIds.size) runPhase(engine, 'Стада, корм, приплод и животная продукция', onPhase, () => advanceLivestockSystem(world, rng, schedule.economySettlementIds));
   if (schedule.economySettlementIds.size) runPhase(engine, 'Домохозяйства, заведения и физическая экономика', onPhase, () => advanceMaterialEconomy(world, rng, indexes, schedule.economySettlementIds, schedule.activeSettlementIds, detailed.householdIds));
   runPhase(engine, 'Региональные ресурсы, специализация и торговые зависимости', onPhase, () => advanceRegionalEconomy(world, monthStep));
   runPhase(engine, 'Советы, гильдии, переговоры и коллективные решения', onPhase, () => advanceInstitutionSystem(world, rng));

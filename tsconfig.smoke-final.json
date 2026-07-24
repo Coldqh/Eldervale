@@ -34,6 +34,7 @@
     "scripts/next-event-smoke.ts",
     "scripts/physical-hunt-economy-smoke.ts",
     "scripts/physical-agriculture-economy-smoke.ts",
+    "scripts/physical-livestock-economy-smoke.ts",
     "scripts/population-migration-smoke.ts",
     "scripts/race-demography-smoke.ts",
     "scripts/regional-economy-smoke.ts",

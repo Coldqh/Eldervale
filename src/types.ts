@@ -1660,6 +1660,27 @@ export interface AnimalPopulation {
   history: string[];
 }
 
+export type DomesticSpecies = 'куры' | 'козы' | 'овцы' | 'коровы' | 'лошади';
+
+export interface DomesticHerd {
+  id: number;
+  settlementId: number;
+  buildingId: number;
+  establishmentId?: number;
+  species: DomesticSpecies;
+  adults: number;
+  young: number;
+  health: number;
+  nutrition: number;
+  shelterQuality: number;
+  lastTick: number;
+  lastBirthYear?: number;
+  lastMaturityYear?: number;
+  lastShearingYear?: number;
+  lastCullYear?: number;
+  history: string[];
+}
+
 export interface NaturalIngredient {
   id: number;
   name: string;
@@ -1921,6 +1942,7 @@ export interface WorldState {
   cemeteries: Cemetery[];
   burials: BurialRecord[];
   animalPopulations: AnimalPopulation[];
+  domesticHerds?: DomesticHerd[];
   ingredients: NaturalIngredient[];
   alchemyRecipes: AlchemyRecipe[];
   artifacts: Artifact[];

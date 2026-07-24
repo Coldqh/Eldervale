@@ -11,6 +11,7 @@ import { rebuildTerritoryHistoryFromCurrent } from './territory';
 import { compactDeadEntities, ensureCemeteries, synchronizeMortalityIds } from './mortality';
 import { ensureAllBuildingFootprints } from './spatial';
 import { initializeAgricultureAndConstruction } from './agricultureConstruction';
+import { initializeLivestockSystem } from './livestockSystem';
 import { initializeLivingEconomy, synchronizeEmploymentLinks } from './livingEconomy';
 import { initializeMilitaryInfrastructure } from './militaryInfrastructure';
 import { initializePhysicalArmySystem } from './physicalArmy';
@@ -329,6 +330,7 @@ export function migrateWorld(input: unknown): WorldState {
   generatePhysicalEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-повседневная-жизнь-v1`));
   ensureAllBuildingFootprints(localized as WorldState);
   initializeAgricultureAndConstruction(localized as WorldState, new RNG(`${localized.config.seed}:переход-земледелие-стройка-v1`));
+  initializeLivestockSystem(localized as WorldState, new RNG(`${localized.config.seed}:переход-животноводство-v1`));
   initializeLivingEconomy(localized as WorldState, new RNG(`${localized.config.seed}:переход-личная-экономика-v1`));
   initializeDecisionCore(localized as WorldState);
   initializeMindSystem(localized as WorldState);
