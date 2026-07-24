@@ -197,6 +197,7 @@ function processMigrationCycles(
 ): void {
   const maxGroups = Math.min(28, 2 + cycles * 3 + Math.floor(world.settlements.length / 10));
   let moved = 0;
+  const movedCharacterIds = new Set<number>();
   const origins = [...world.settlements]
     .map(settlement => ({ settlement, pressure: migrationPressure(world, settlement) }))
     .filter(entry => entry.pressure >= 34)
@@ -208,6 +209,7 @@ function processMigrationCycles(
       .sort((a, b) => migrationRank(world, originEntry.settlement.id, a.characterIds[0]!) - migrationRank(world, originEntry.settlement.id, b.characterIds[0]!));
     for (const group of groups) {
       if (moved >= maxGroups) break;
+      if (group.characterIds.some(id => movedCharacterIds.has(id))) continue;
       const reason = migrationReason(world, originEntry.settlement);
       const destination = chooseDestination(world, originEntry.settlement, group.species, reason);
       if (!destination) continue;
@@ -216,7 +218,10 @@ function processMigrationCycles(
       const chance = Math.min(.72, .06 + originEntry.pressure / 170 + improvement / 240) * raceDefinition(group.species[0]!).migrationDrive;
       if ((hashSeed(`${world.config.seed}:миграция:${worldTick(world)}:${group.characterIds.join('-')}:${destination.id}`) % 10000) / 10000 >= chance) continue;
       if (!canEnterSettlement(world, destination, group.species, reason, group.characterIds[0]!)) continue;
-      if (moveGroup(world, state, originEntry.settlement, destination, group, reason, indexes, recordHistory)) moved += 1;
+      if (moveGroup(world, state, originEntry.settlement, destination, group, reason, indexes, recordHistory)) {
+        moved += 1;
+        for (const id of group.characterIds) movedCharacterIds.add(id);
+      }
     }
   }
 }

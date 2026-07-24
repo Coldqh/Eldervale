@@ -72,7 +72,8 @@ assert.ok(first.relationships.every(relation => relation.trust !== undefined && 
 assert.ok(Array.isArray(first.socialObligations), 'мир должен хранить личные обязательства');
 assert.ok(first.armies.every(army => !first.tiles[army.y * first.config.width + army.x]?.settlementId), 'армии не должны размещаться в поселениях');
 assert.equal(first.armyLocalPositions.length, first.armies.reduce((sum, army) => sum + army.soldierIds.length, 0), 'каждый солдат должен иметь отдельную локальную позицию');
-assert.ok(first.armyCamps.some(camp => camp.mode === 'camp' && camp.structureIds.length > 10), 'полевой лагерь должен состоять из реальных сооружений');
+assert.equal(first.armyCamps.length, first.armies.length, 'каждая полевая армия должна иметь пространственное состояние лагеря или колонны');
+assert.ok(first.armyCamps.every(camp => camp.mode !== 'camp' || camp.structureIds.length > 10), 'развёрнутый полевой лагерь должен состоять из реальных сооружений');
 const animalArchive = aggregateArchiveRows(first, 'animalPopulation')!;
 const resourceArchive = aggregateArchiveRows(first, 'ingredient')!;
 const itemArchive = aggregateArchiveRows(first, 'item')!;

@@ -32,6 +32,7 @@
     "scripts/lived-history-smoke.ts",
     "scripts/lived-history-stability-smoke.ts",
     "scripts/next-event-smoke.ts",
+    "scripts/physical-finance-economy-smoke.ts",
     "scripts/physical-hunt-economy-smoke.ts",
     "scripts/physical-agriculture-economy-smoke.ts",
     "scripts/physical-livestock-economy-smoke.ts",

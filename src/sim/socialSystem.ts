@@ -9,6 +9,7 @@ import { decisionKnowledge, recordDecision, recordStateDelta } from './decisionC
 import { addCharacterSecret, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { RNG, hashSeed } from './rng';
 import { worldTick } from './scheduler';
+import { transferMoney } from './financialSystem';
 
 const MAX_OBLIGATIONS = 2_400;
 const MAX_RELATIONSHIPS_PER_CHARACTER = 18;
@@ -643,7 +644,12 @@ function mergeHouseholds(world: WorldState, a: Character, b: Character, indexes:
     if (sourceHome) sourceHome.residentIds = sourceHome.residentIds.filter(residentId => residentId !== id);
     if (targetHome) addUnique(targetHome.residentIds, id);
   }
-  target.wealth += source.wealth; target.debt += source.debt; target.inventoryItemIds.push(...source.inventoryItemIds.filter(id => !target.inventoryItemIds.includes(id)));
+  transferMoney(world, {
+    payer: { kind: 'household', id: source.id }, payee: { kind: 'household', id: target.id },
+    amount: source.wealth, kind: 'other', purpose: `объединение домохозяйств ${source.id} и ${target.id}`,
+    settlementId: target.settlementId,
+  });
+  target.debt += source.debt; target.inventoryItemIds.push(...source.inventoryItemIds.filter(id => !target.inventoryItemIds.includes(id)));
   for (const itemId of source.inventoryItemIds) {
     const item = indexes.itemById.get(itemId);
     if (item?.householdId === source.id) { item.householdId = target.id; item.settlementId = target.settlementId; item.buildingId = target.homeBuildingId; }
@@ -667,16 +673,21 @@ function splitHouseholdAfterDivorce(world: WorldState, leaving: Character, stayi
   if (!source || source.id !== staying.householdId || source.memberIds.length < 2) return;
   const wealth = source.wealth * .35;
   const debt = source.debt * .35;
-  source.wealth -= wealth; source.debt -= debt; source.memberIds = source.memberIds.filter(id => id !== leaving.id);
+  source.debt -= debt; source.memberIds = source.memberIds.filter(id => id !== leaving.id);
   const settlement = indexes.settlementById.get(leaving.settlementId);
   if (!settlement) return;
   const home = (indexes.buildingsBySettlement.get(settlement.id) ?? []).find(item => ['house', 'tenement', 'manor'].includes(item.type) && item.condition > 25 && !item.householdId);
   const household: Household = {
     id: world.nextIds.household++, settlementId: settlement.id, homeBuildingId: home?.id, headCharacterId: leaving.id, memberIds: [leaving.id], status: wealth > 80 ? 'зажиточные' : wealth < 8 ? 'бедные' : 'обычные',
-    wealth, debt, monthlyIncome: 0, monthlyExpenses: 0, foodReserveDays: 0, fuelReserveDays: 0, inventoryItemIds: [], needs: { ...leaving.needs }, history: [`Создано после развода в ${world.year} году.`],
+    wealth: 0, debt, monthlyIncome: 0, monthlyExpenses: 0, foodReserveDays: 0, fuelReserveDays: 0, inventoryItemIds: [], needs: { ...leaving.needs }, history: [`Создано после развода в ${world.year} году.`],
   };
   world.households.push(household); settlement.householdIds.push(household.id); indexes.householdById.set(household.id, household);
   const list = indexes.householdsBySettlement.get(settlement.id) ?? []; list.push(household); indexes.householdsBySettlement.set(settlement.id, list);
+  transferMoney(world, {
+    payer: { kind: 'household', id: source.id }, payee: { kind: 'household', id: household.id },
+    amount: wealth, kind: 'other', purpose: `раздел имущества после развода ${leaving.name}`,
+    settlementId: settlement.id, kingdomId: leaving.kingdomId,
+  });
   leaving.householdId = household.id; leaving.homeBuildingId = home?.id; leaving.homeless = !home;
   if (home) { home.householdId = household.id; addUnique(home.residentIds, leaving.id); }
   if (source.homeBuildingId) { const oldHome = indexes.buildingById.get(source.homeBuildingId); if (oldHome) oldHome.residentIds = oldHome.residentIds.filter(id => id !== leaving.id); }
@@ -685,13 +696,19 @@ function splitHouseholdAfterDivorce(world: WorldState, leaving: Character, stayi
 
 function transferPrivateMoney(world: WorldState, from: Character, to: Character, amount: number): number {
   let remaining = Math.max(0, amount);
-  const fromWallet = Math.min(from.wallet, remaining); from.wallet -= fromWallet; remaining -= fromWallet;
+  const walletPayment = transferMoney(world, {
+    payer: { kind: 'character', id: from.id }, payee: { kind: 'character', id: to.id },
+    amount: remaining, kind: 'other', purpose: `личный денежный перевод от ${from.name} к ${to.name}`,
+    settlementId: from.settlementId, kingdomId: from.kingdomId,
+  });
+  remaining -= walletPayment.paid;
   const household = from.householdId ? world.households.find(item => item.id === from.householdId) : undefined;
-  const fromHousehold = household ? Math.min(household.wealth, remaining) : 0;
-  if (household) household.wealth -= fromHousehold;
-  const paid = fromWallet + fromHousehold;
-  to.wallet += paid;
-  return paid;
+  const householdPayment = household && remaining > 0 ? transferMoney(world, {
+    payer: { kind: 'household', id: household.id }, payee: { kind: 'character', id: to.id },
+    amount: remaining, kind: 'other', purpose: `семейный денежный перевод от ${from.name} к ${to.name}`,
+    settlementId: from.settlementId, kingdomId: from.kingdomId,
+  }) : { paid: 0 };
+  return walletPayment.paid + householdPayment.paid;
 }
 
 function relationshipKind(relationship: Relationship, a: Character, b: Character): Relationship['kind'] {

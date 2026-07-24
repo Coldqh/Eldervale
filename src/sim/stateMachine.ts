@@ -14,6 +14,7 @@ import { worldTick } from './scheduler';
 import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { recruitFactionThroughRelationships } from './socialSystem';
+import { setFinancialObligation, transferMoney } from './financialSystem';
 
 const OFFICE_DEFINITIONS: Record<CourtOfficeKind, { professions: string[]; salary: number; influence: number }> = {
   'канцлер': { professions: ['scribe', 'merchant', 'priest'], salary: 12, influence: 18 },
@@ -209,8 +210,25 @@ function collapseExtinctRealms(world: WorldState, rng: RNG, tick: number): void 
       return aDistance - bDistance || b.armyStrength - a.armyStrength || a.id - b.id;
     })[0]!;
 
-    const capturedTreasury = Math.max(0, fallen.treasury) * .35;
-    successor.treasury += capturedTreasury;
+    const fallenTreasury = Math.max(0, fallen.treasury);
+    const capturedTreasury = fallenTreasury * .35;
+    transferMoney(world, {
+      payer: { kind: 'kingdom', id: fallen.id },
+      payee: { kind: 'kingdom', id: successor.id },
+      amount: capturedTreasury,
+      kind: 'governmentTransfer',
+      purpose: `захваченная казна государства ${fallen.name}`,
+      kingdomId: successor.id,
+      settlementId: origin?.id,
+    });
+    transferMoney(world, {
+      payer: { kind: 'kingdom', id: fallen.id },
+      amount: Math.max(0, fallen.treasury),
+      kind: 'loss',
+      purpose: `утрата остатка казны при распаде государства ${fallen.name}`,
+      kingdomId: fallen.id,
+      settlementId: origin?.id,
+    });
     successor.stability = clamp(successor.stability - Math.min(8, 2 + fallenSettlements.length), 0, 100);
     if (!world.history.fallenRealms.some(realm => realm.formerKingdomId === fallen.id)) {
       world.history.fallenRealms.push({
@@ -614,8 +632,12 @@ function updateVassals(world: WorldState, kingdom: Kingdom, state: KingdomGovern
     if (localGovernment && tick - contract.lastPaidTick >= 1) {
       const baseDue = Math.max(0, Math.min(localGovernment.treasury * contract.taxRate, (settlement?.population ?? 0) * .08));
       const withheld = contract.status === 'мятеж' ? baseDue : contract.status === 'отказывается' ? baseDue * rng.int(45, 90) / 100 : contract.status === 'напряжение' ? baseDue * rng.int(5, 35) / 100 : 0;
-      const paid = Math.max(0, Math.min(localGovernment.treasury, baseDue - withheld));
-      localGovernment.treasury -= paid; kingdom.treasury += paid; state.monthlyTaxIncome += paid; contract.taxArrears += baseDue - paid;
+      const payment = transferMoney(world, {
+        payer: { kind: 'settlementGovernment', id: localGovernment.id }, payee: { kind: 'kingdom', id: kingdom.id }, amount: Math.max(0, baseDue - withheld),
+        kind: 'governmentTransfer', purpose: `вассальный налог по договору ${contract.id}`, settlementId: settlement?.id, kingdomId: kingdom.id,
+      });
+      const paid = payment.paid;
+      state.monthlyTaxIncome += paid; contract.taxArrears += baseDue - paid;
       if (paid > 0) contract.lastPaidTick = tick;
       if (withheld > 0) contract.history.push(`Вассал удержал ${withheld.toFixed(1)} крон налога.`);
     }
@@ -631,18 +653,31 @@ function runStateBudget(world: WorldState, kingdom: Kingdom, state: KingdomGover
     const holder = livingCharacter(world, office.holderCharacterId);
     if (!holder) continue;
     const due = office.salary;
-    const paid = Math.min(Math.max(0, kingdom.treasury), due);
-    kingdom.treasury -= paid; state.monthlyCourtCost += paid;
-    holder.wallet += paid * .35;
     const household = holder.householdId ? world.households.find(item => item.id === holder.householdId) : undefined;
-    if (household) household.wealth += paid * .65;
-    if (paid < due) { state.debt += due - paid; office.loyalty = clamp(office.loyalty - 3, 0, 100); }
+    const available = Math.min(Math.max(0, kingdom.treasury), due);
+    const walletPayment = transferMoney(world, {
+      payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'character', id: holder.id }, amount: household ? available * .35 : available,
+      kind: 'courtPayroll', purpose: `жалование должности ${office.kind}`, settlementId: holder.settlementId, kingdomId: kingdom.id,
+    });
+    const householdPayment = household ? transferMoney(world, {
+      payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'household', id: household.id }, amount: available - walletPayment.paid,
+      kind: 'courtPayroll', purpose: `семейная часть жалования должности ${office.kind}`, settlementId: household.settlementId, kingdomId: kingdom.id,
+    }) : { paid: 0 };
+    const paid = walletPayment.paid + householdPayment.paid;
+    state.monthlyCourtCost += paid;
+    const arrears = Math.max(0, due - paid);
+    setFinancialObligation(world, {
+      debtor: { kind: 'kingdom', id: kingdom.id }, creditor: household ? { kind: 'household', id: household.id } : { kind: 'character', id: holder.id },
+      kind: 'stateDebt', amount: arrears, purpose: `задолженность по должности ${office.id}`, dueTick: tick + 1, settlementId: holder.settlementId, kingdomId: kingdom.id,
+    });
+    if (arrears > 0) { state.debt += arrears; office.loyalty = clamp(office.loyalty - 3, 0, 100); }
   }
 
   const capitalGovernment = world.settlementGovernments.find(item => item.settlementId === state.capitalSettlementId);
   if (capitalGovernment && capitalGovernment.treasury > 40 && kingdom.treasury < 20) {
     const emergency = Math.min(capitalGovernment.treasury * .08, 12);
-    capitalGovernment.treasury -= emergency; kingdom.treasury += emergency; state.monthlyTaxIncome += emergency;
+    const payment = transferMoney(world, { payer: { kind: 'settlementGovernment', id: capitalGovernment.id }, payee: { kind: 'kingdom', id: kingdom.id }, amount: emergency, kind: 'governmentTransfer', purpose: 'экстренный перевод столичной казны', settlementId: capitalGovernment.settlementId, kingdomId: kingdom.id });
+    state.monthlyTaxIncome += payment.paid;
   }
 
   const urgent = world.settlements.filter(item => item.kingdomId === kingdom.id && (item.shortages.length || item.damaged > 55 || item.unrest > 75));
@@ -650,15 +685,18 @@ function runStateBudget(world: WorldState, kingdom: Kingdom, state: KingdomGover
     const target = [...urgent].sort((a, b) => b.unrest + b.damaged - a.unrest - a.damaged)[0]!;
     const local = world.settlementGovernments.find(item => item.settlementId === target.id);
     const relief = Math.min(kingdom.treasury * .04, Math.max(4, target.population * .015));
-    kingdom.treasury -= relief; if (local) local.treasury += relief; state.monthlyReliefCost += relief;
-    target.unrest = clamp(target.unrest - relief / 4, 0, 100);
+    const payment = local ? transferMoney(world, { payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'settlementGovernment', id: local.id }, amount: relief, kind: 'relief', purpose: `помощь поселению ${target.name}`, settlementId: target.id, kingdomId: kingdom.id }) : { paid: 0 };
+    state.monthlyReliefCost += payment.paid;
+    target.unrest = clamp(target.unrest - payment.paid / 4, 0, 100);
   }
 
-  const maintenance = Math.min(Math.max(0, kingdom.treasury), Math.max(0, world.settlements.filter(item => item.kingdomId === kingdom.id).length * .6));
-  kingdom.treasury -= maintenance; state.monthlyInfrastructureCost += maintenance;
+  const maintenanceDue = Math.max(0, world.settlements.filter(item => item.kingdomId === kingdom.id).length * .6);
+  const maintenance = transferMoney(world, { payer: { kind: 'kingdom', id: kingdom.id }, amount: Math.min(Math.max(0, kingdom.treasury), maintenanceDue), kind: 'maintenance', purpose: 'содержание государственных дорог и учреждений', kingdomId: kingdom.id });
+  state.monthlyInfrastructureCost += maintenance.paid;
   if (state.debt > 0 && kingdom.treasury > 80) {
     const repayment = Math.min(state.debt, kingdom.treasury * .03);
-    kingdom.treasury -= repayment; state.debt -= repayment;
+    const payment = transferMoney(world, { payer: { kind: 'kingdom', id: kingdom.id }, amount: repayment, kind: 'debtPayment', purpose: 'погашение государственного долга внешним кредиторам', kingdomId: kingdom.id });
+    state.debt -= payment.paid;
   }
   state.corruption = clamp(state.corruption + (state.administration < 35 ? .35 : -.15) + (kingdom.treasury < 0 ? .4 : 0), 0, 100);
   state.legitimacy = clamp(state.legitimacy + (kingdom.stability - 50) / 500 - state.debt / 30000, 0, 100);
@@ -797,8 +835,10 @@ function executeOrder(world: WorldState, kingdom: Kingdom, state: KingdomGovernm
   let outcome = '';
   if (order.kind === 'помощь поселению') {
     const local = world.settlementGovernments.find(item => item.settlementId === target.id);
-    const paid = Math.min(Math.max(0, kingdom.treasury), order.cost);
-    kingdom.treasury -= paid; if (local) local.treasury += paid; state.monthlyReliefCost += paid; target.unrest = clamp(target.unrest - paid / 2.5, 0, 100);
+    const requested = Math.min(Math.max(0, kingdom.treasury), order.cost);
+    const payment = local ? transferMoney(world, { payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'settlementGovernment', id: local.id }, amount: requested, kind: 'relief', purpose: `королевский приказ о помощи ${target.name}`, settlementId: target.id, kingdomId: kingdom.id }) : { paid: 0 };
+    const paid = payment.paid;
+    state.monthlyReliefCost += paid; target.unrest = clamp(target.unrest - paid / 2.5, 0, 100);
     outcome = `передано ${paid.toFixed(1)} крон местной власти`;
   } else if (order.kind === 'укрепление границы') {
     const type = target.type === 'fortress' || target.type === 'city' ? 'watchtower' : 'barracks';
@@ -807,7 +847,10 @@ function executeOrder(world: WorldState, kingdom: Kingdom, state: KingdomGovernm
   } else if (order.kind === 'требование налогов') {
     const local = world.settlementGovernments.find(item => item.settlementId === target.id);
     const demanded = contract ? Math.min(contract.taxArrears, local?.treasury ?? 0) : 0;
-    if (local && demanded > 0) { local.treasury -= demanded; kingdom.treasury += demanded; contract!.taxArrears -= demanded; contract!.loyalty = clamp(contract!.loyalty - 5, 0, 100); }
+    if (local && demanded > 0) {
+      const payment = transferMoney(world, { payer: { kind: 'settlementGovernment', id: local.id }, payee: { kind: 'kingdom', id: kingdom.id }, amount: demanded, kind: 'governmentTransfer', purpose: `взыскание недоимки по договору ${contract!.id}`, settlementId: target.id, kingdomId: kingdom.id });
+      contract!.taxArrears -= payment.paid; contract!.loyalty = clamp(contract!.loyalty - 5, 0, 100);
+    }
     outcome = demanded > 0 ? `взыскано ${demanded.toFixed(1)} крон недоимки` : 'в местной казне не оказалось средств';
   } else if (order.kind === 'расследование коррупции') {
     const reduction = rng.int(4, 14); state.corruption = clamp(state.corruption - reduction, 0, 100); outcome = `коррупция снижена на ${reduction} пунктов`;

@@ -13,6 +13,7 @@ import { worldTick } from './scheduler';
 import { decisionKnowledge, linkDecisionToEvent, recordDecision, recordStateDelta } from './decisionCore';
 import { addCharacterSecret, ensureCharacterMind, scoreMotivatedAction, setDecisionMoment } from './mindSystem';
 import { applyJudicialInfluence, witnessWillReport } from './socialSystem';
+import { transferMoney } from './financialSystem';
 
 const CIVIC_BUILDINGS: Partial<Record<BuildingType, { minPopulation: number; label: string; rooms: string[] }>> = {
   townHall: { minPopulation: 90, label: 'городская управа', rooms: ['зал совета', 'канцелярия', 'казначейская', 'приёмная'] },
@@ -122,32 +123,40 @@ function ensureGovernment(world: WorldState, settlement: Settlement, rng: RNG, i
     .filter(character => character.id !== leader.id)
     .sort((a, b) => councilScore(b) - councilScore(a) || a.id - b.id)
     .slice(0, Math.max(2, Math.min(8, Math.ceil(settlement.population / 350))));
-  const treasurySeed = collectFoundingTreasury(world, settlement.id);
   const government: SettlementGovernment = {
     id: world.nextIds.settlementGovernment++, settlementId: settlement.id, leaderCharacterId: leader.id,
-    councilCharacterIds: council.map(item => item.id), treasury: treasurySeed, monthlyTaxIncome: 0, monthlyExpenses: 0,
+    councilCharacterIds: council.map(item => item.id), treasury: 0, monthlyTaxIncome: 0, monthlyExpenses: 0,
     corruption: rng.int(2, Math.min(55, 8 + Math.round(settlement.unrest / 3))), guardIds: [], judgeIds: [], firefighterIds: [], teacherIds: [], gravediggerIds: [], prisonerIds: [],
     laws: ['запрет ночного грабежа', 'обязанность тушить соседний пожар', 'рыночные меры и весы', 'штраф за нападение в пределах поселения'],
-    activeDecision: treasurySeed > 0 ? 'поддержание порядка и запасов' : 'собрать средства на работу управления', history: [`Местное управление оформлено не позднее ${world.year} года на взносы жителей и заведений: ${treasurySeed.toFixed(1)} крон.`],
+    activeDecision: 'собрать средства на работу управления', history: [],
   };
   leader.visualRole = leader.titles.length ? leader.visualRole ?? 'official' : 'mayor';
   world.settlementGovernments.push(government);
+  const treasurySeed = collectFoundingTreasury(world, settlement.id, government);
+  government.activeDecision = treasurySeed > 0 ? 'поддержание порядка и запасов' : 'собрать средства на работу управления';
+  government.history.push(`Местное управление оформлено не позднее ${world.year} года на взносы жителей и заведений: ${treasurySeed.toFixed(1)} крон.`);
   return government;
 }
 
-function collectFoundingTreasury(world: WorldState, settlementId: number): number {
+function collectFoundingTreasury(world: WorldState, settlementId: number, government: SettlementGovernment): number {
   let treasury = 0;
   const households = world.households.filter(household => household.settlementId === settlementId).sort((a, b) => b.wealth - a.wealth || a.id - b.id);
   for (const household of households) {
     const contribution = Math.min(household.wealth, Math.max(0, household.wealth * .025));
-    household.wealth -= contribution;
-    treasury += contribution;
+    const payment = transferMoney(world, {
+      payer: { kind: 'household', id: household.id }, payee: { kind: 'settlementGovernment', id: government.id }, amount: contribution,
+      kind: 'capitalContribution', purpose: 'учредительный взнос местному управлению', settlementId, kingdomId: world.settlements.find(item => item.id === settlementId)?.kingdomId,
+    });
+    treasury += payment.paid;
   }
   const establishments = world.establishments.filter(establishment => establishment.settlementId === settlementId && establishment.active).sort((a, b) => b.cash - a.cash || a.id - b.id);
   for (const establishment of establishments) {
     const contribution = Math.min(establishment.cash, Math.max(0, establishment.cash * .02));
-    establishment.cash -= contribution;
-    treasury += contribution;
+    const payment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee: { kind: 'settlementGovernment', id: government.id }, amount: contribution,
+      kind: 'capitalContribution', purpose: 'учредительный взнос заведения местному управлению', settlementId, kingdomId: world.settlements.find(item => item.id === settlementId)?.kingdomId,
+    });
+    treasury += payment.paid;
   }
   return Math.round(treasury * 100) / 100;
 }
@@ -589,16 +598,88 @@ function updateDistrictConditions(world: WorldState, settlement: Settlement, gov
 }
 
 function collectLocalTaxes(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number): void {
-  const base = settlement.economy.lastMonthlyTrade * settlement.economy.taxRate * .42 + settlement.population * settlement.prosperity / 10000;
-  const collected = Math.max(0, base * elapsedMonths * (1 - government.corruption / 140));
-  government.monthlyTaxIncome = collected; government.treasury += collected;
+  const tick = worldTick(world);
+  const alreadyCollected = (world.financialTransactions ?? [])
+    .filter(item => item.tick === tick && item.kind === 'tax' && item.payee?.kind === 'settlementGovernment' && item.payee.id === government.id)
+    .reduce((sum, item) => sum + item.amount, 0);
+  const planned = Math.max(0, (
+    settlement.economy.lastMonthlyTrade * settlement.economy.taxRate * .42
+    + settlement.population * settlement.prosperity / 10000
+  ) * elapsedMonths * (1 - government.corruption / 140));
+  let remaining = Math.max(0, planned - alreadyCollected);
+  let collected = alreadyCollected;
+
+  const households = world.households
+    .filter(item => item.settlementId === settlement.id && item.wealth > .01)
+    .sort((a, b) => b.monthlyIncome - a.monthlyIncome || b.wealth - a.wealth || a.id - b.id);
+  for (const household of households) {
+    if (remaining <= .0001) break;
+    const capacity = Math.min(household.wealth, Math.max(.05, household.monthlyIncome * settlement.economy.taxRate * .2 + household.wealth * .012));
+    const payment = transferMoney(world, {
+      payer: { kind: 'household', id: household.id }, payee: { kind: 'settlementGovernment', id: government.id }, amount: Math.min(remaining, capacity),
+      kind: 'tax', purpose: `местный подушный и имущественный сбор семьи ${household.id}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    remaining -= payment.paid;
+    collected += payment.paid;
+  }
+
+  const establishments = world.establishments
+    .filter(item => item.settlementId === settlement.id && item.active && item.cash > .01)
+    .sort((a, b) => b.monthlyRevenue - a.monthlyRevenue || b.cash - a.cash || a.id - b.id);
+  for (const establishment of establishments) {
+    if (remaining <= .0001) break;
+    const capacity = Math.min(establishment.cash, Math.max(.05, establishment.monthlyRevenue * settlement.economy.taxRate * .18 + establishment.cash * .008));
+    const payment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee: { kind: 'settlementGovernment', id: government.id }, amount: Math.min(remaining, capacity),
+      kind: 'tax', purpose: `местный торговый и имущественный сбор ${establishment.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    remaining -= payment.paid;
+    collected += payment.paid;
+    establishment.monthlyExpenses += payment.paid;
+  }
+  government.monthlyTaxIncome = collected;
 }
 
 function fundServices(world: WorldState, settlement: Settlement, government: SettlementGovernment, elapsedMonths: number, indexes: WorldIndexes): void {
-  const payroll = (government.guardIds.length * 1.2 + government.judgeIds.length * 2.4 + government.firefighterIds.length * 1 + government.teacherIds.length * .9 + government.gravediggerIds.length * .7) * elapsedMonths;
-  const maintenance = (indexes.buildingsBySettlement.get(settlement.id) ?? []).filter(item => ['townHall', 'courthouse', 'prison', 'fireStation', 'school', 'shelter'].includes(item.type)).length * 1.4 * elapsedMonths;
-  const due = payroll + maintenance;
-  const paid = Math.min(government.treasury, due); government.treasury -= paid; government.monthlyExpenses = paid;
+  const serviceRates = new Map<number, number>();
+  const addService = (ids: number[], rate: number) => ids.forEach(id => serviceRates.set(id, Math.max(serviceRates.get(id) ?? 0, rate)));
+  addService(government.guardIds, 1.2);
+  addService(government.judgeIds, 2.4);
+  addService(government.firefighterIds, 1);
+  addService(government.teacherIds, .9);
+  addService(government.gravediggerIds, .7);
+
+  let payrollPaid = 0;
+  let payrollDue = 0;
+  for (const [characterId, rate] of serviceRates) {
+    const character = indexes.characterById.get(characterId);
+    if (!character?.alive) continue;
+    const due = rate * elapsedMonths;
+    payrollDue += due;
+    const available = Math.min(government.treasury, due);
+    const walletPayment = transferMoney(world, {
+      payer: { kind: 'settlementGovernment', id: government.id }, payee: { kind: 'character', id: character.id }, amount: available * .35,
+      kind: 'servicePayroll', purpose: `жалование городской службы: ${character.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
+    const familyPayment = household ? transferMoney(world, {
+      payer: { kind: 'settlementGovernment', id: government.id }, payee: { kind: 'household', id: household.id }, amount: available - walletPayment.paid,
+      kind: 'servicePayroll', purpose: `семейная часть жалования городской службы: ${character.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    }) : { paid: 0 };
+    const paid = walletPayment.paid + familyPayment.paid;
+    payrollPaid += paid;
+    if (household) household.monthlyIncome += paid;
+  }
+
+  const maintenanceDue = (indexes.buildingsBySettlement.get(settlement.id) ?? [])
+    .filter(item => ['townHall', 'courthouse', 'prison', 'fireStation', 'school', 'shelter'].includes(item.type)).length * 1.4 * elapsedMonths;
+  const maintenance = transferMoney(world, {
+    payer: { kind: 'settlementGovernment', id: government.id }, amount: Math.min(government.treasury, maintenanceDue),
+    kind: 'maintenance', purpose: `содержание общественных зданий ${settlement.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+  });
+  const due = payrollDue + maintenanceDue;
+  const paid = payrollPaid + maintenance.paid;
+  government.monthlyExpenses = paid;
   if (paid < due * .65) {
     settlement.unrest = clamp(settlement.unrest + 2 * elapsedMonths, 0, 100);
     for (const state of world.districtCivicStates.filter(item => item.settlementId === settlement.id)) state.safety = clamp(state.safety - 1.5 * elapsedMonths, 0, 100);
@@ -627,7 +708,10 @@ function releaseCompletedSentences(world: WorldState, tick: number): void {
 function applySentence(world: WorldState, government: SettlementGovernment, defendant: Character, courtCase: CourtCase): void {
   const verdict = courtCase.verdict ?? 'оправдание';
   if (verdict === 'оправдание') { defendant.legalStatus = 'свободен'; return; }
-  if (verdict === 'штраф') { const paid = Math.min(defendant.wallet ?? 0, courtCase.fine); defendant.wallet = Math.max(0, (defendant.wallet ?? 0) - paid); government.treasury += paid; defendant.legalStatus = 'свободен'; return; }
+  if (verdict === 'штраф') {
+    transferMoney(world, { payer: { kind: 'character', id: defendant.id }, payee: { kind: 'settlementGovernment', id: government.id }, amount: courtCase.fine, kind: 'fine', purpose: `судебный штраф по делу ${courtCase.id}`, settlementId: government.settlementId, kingdomId: defendant.kingdomId });
+    defendant.legalStatus = 'свободен'; return;
+  }
   if (verdict === 'общественные работы') { defendant.legalStatus = 'свободен'; defendant.schedule.currentActivity = 'исполняет общественные работы'; return; }
   if (verdict === 'изгнание') { defendant.legalStatus = 'свободен'; defendant.loyalty = Math.max(0, defendant.loyalty - 25); defendant.biography.push(`Изгнан из поселения в ${world.year} году.`); return; }
   if (verdict === 'заключение') {
@@ -653,8 +737,11 @@ function transferStolenProperty(world: WorldState, perpetrator: Character, victi
     crime.stolenItemIds.push(item.id);
   } else {
     const amount = Math.min(victim.wallet ?? 0, rng.int(1, Math.max(1, Math.round((victim.wallet ?? 0) * .4))));
-    victim.wallet = Math.max(0, (victim.wallet ?? 0) - amount);
-    perpetrator.wallet = (perpetrator.wallet ?? 0) + amount;
+    transferMoney(world, {
+      payer: { kind: 'character', id: victim.id }, payee: { kind: 'character', id: perpetrator.id },
+      amount, kind: 'loss', purpose: `похищение денег: преступление №${crime.id}`,
+      settlementId: victim.settlementId, kingdomId: victim.kingdomId,
+    });
   }
 }
 

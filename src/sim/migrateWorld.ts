@@ -70,6 +70,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.shipments ??= [];
   localized.travelingMerchants ??= [];
   localized.marketTransactions ??= [];
+  localized.financialTransactions ??= [];
+  localized.financialObligations ??= [];
   localized.knowledgeFacts ??= [];
   localized.memories ??= [];
   localized.rumors ??= [];
@@ -281,6 +283,8 @@ export function migrateWorld(input: unknown): WorldState {
   localized.nextIds.shipment = Math.max(0, ...localized.shipments.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.travelingMerchant = Math.max(0, ...localized.travelingMerchants.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.marketTransaction = Math.max(0, ...localized.marketTransactions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.financialTransaction = Math.max(0, ...localized.financialTransactions.map((item: any) => item.id ?? 0)) + 1;
+  localized.nextIds.financialObligation = Math.max(0, ...localized.financialObligations.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.knowledgeFact = Math.max(0, ...localized.knowledgeFacts.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.memory = Math.max(0, ...localized.memories.map((item: any) => item.id ?? 0)) + 1;
   localized.nextIds.rumor = Math.max(0, ...localized.rumors.map((item: any) => item.id ?? 0)) + 1;

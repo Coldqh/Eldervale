@@ -221,6 +221,8 @@ function prepareGenesis(world: WorldState, config: WorldConfig): GenesisPreparat
   world.shipments = [];
   world.travelingMerchants = [];
   world.marketTransactions = [];
+  world.financialTransactions = [];
+  world.financialObligations = [];
   world.knowledgeFacts = [];
   world.memories = [];
   world.rumors = [];

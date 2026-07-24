@@ -56,13 +56,14 @@ if (!world.tradeRoutes.some(route => (route.fromSettlementId === origin.id && ro
 origin.shortages = ['еда', 'вода']; origin.food = 0; origin.unrest = 100; origin.damaged = 90; origin.residentialCapacity = Math.max(1, Math.floor(origin.population * .5)); origin.prosperity = 10;
 destination.shortages = []; destination.food = 120; destination.unrest = 0; destination.damaged = 0; destination.residentialCapacity = destination.population + 300; destination.prosperity = 100; destination.economy.wageIndex = 2;
 
-for (let step = 0; step < 48 && migrationRecords(world).length === 0; step += 1) {
+const previousMigrationIds = new Set(migrationRecords(world).map(item => item.id));
+for (let step = 0; step < 48 && migrationRecords(world).every(item => previousMigrationIds.has(item.id)); step += 1) {
   world.month += 3;
   while (world.month > 12) { world.month -= 12; world.year += 1; }
   advanceRaceDemography(world, { elapsedMonths: 3 });
 }
-const records = migrationRecords(world);
-assert.ok(records.length > 0, 'тяжёлый кризис должен породить реальный переезд');
+const records = migrationRecords(world).filter(item => !previousMigrationIds.has(item.id));
+assert.ok(records.length > 0, 'тяжёлый кризис должен породить новый реальный переезд, а не использовать запись из прожитой истории');
 const record = records[0]!;
 assert.ok(record.characterIds.length > 0, 'переезд должен содержать конкретных жителей');
 for (const id of record.characterIds) {

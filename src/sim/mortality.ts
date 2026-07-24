@@ -5,6 +5,7 @@ import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { inheritanceHeir } from './socialSystem';
 import { reconcileMaterialLocations } from './materialEconomy';
+import { transferMoney } from './financialSystem';
 
 export interface DeathContext {
   cause: string;
@@ -180,6 +181,31 @@ export function archiveCharactersBatch(world: WorldState, indexes: WorldIndexes 
   for (const entry of unique.values()) {
     entry.character.alive = false;
     entry.character.deathYear = world.year;
+  }
+
+  for (const deceased of deadById.values()) {
+    const heir = inheritanceHeir(world, deceased);
+    if (deceased.wallet > 0) {
+      if (heir) {
+        transferMoney(world, {
+          payer: { kind: 'character', id: deceased.id }, payee: { kind: 'character', id: heir.id },
+          amount: deceased.wallet, kind: 'other', purpose: `личное наследство после смерти ${deceased.name}`,
+          settlementId: heir.settlementId, kingdomId: heir.kingdomId,
+        });
+        heir.biography.push(`В ${world.year} году получил личное наследство после смерти ${deceased.name}.`);
+        const household = heir.householdId ? world.households.find(item => item.id === heir.householdId) : undefined;
+        if (household) household.history.push(`Личные деньги ${deceased.name} перешли наследнику ${heir.name}.`);
+      } else {
+        const government = world.settlementGovernments.find(item => item.settlementId === deceased.settlementId);
+        transferMoney(world, {
+          payer: { kind: 'character', id: deceased.id },
+          payee: government ? { kind: 'settlementGovernment', id: government.id } : undefined,
+          amount: deceased.wallet, kind: government ? 'tax' : 'loss',
+          purpose: government ? `невостребованные личные деньги после смерти ${deceased.name}` : `утрата личных денег после смерти ${deceased.name}`,
+          settlementId: deceased.settlementId, kingdomId: deceased.kingdomId,
+        });
+      }
+    }
   }
 
   // Активные массивы и индексы очищаются одним проходом. Это критично при сотнях смертей за год.
@@ -477,15 +503,6 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
     .filter(expedition => ['forming', 'traveling', 'camped', 'returning'].includes(expedition.status))
     .flatMap(expedition => expedition.householdIds));
   const emptyHouseholdIds = new Set<number>();
-  for (const deceased of deadById.values()) {
-    const heir = inheritanceHeir(world, deceased);
-    if (heir && deceased.wallet > 0) {
-      heir.wallet += deceased.wallet;
-      heir.biography.push(`В ${world.year} году получил личное наследство после смерти ${deceased.name}.`);
-      const household = heir.householdId ? world.households.find(item => item.id === heir.householdId) : undefined;
-      if (household) household.history.push(`Личные деньги ${deceased.name} перешли наследнику ${heir.name}.`);
-    }
-  }
   for (const survivor of world.characters) {
     if (survivor.spouseId && deadIds.has(survivor.spouseId)) {
       const former = deadById.get(survivor.spouseId);
@@ -583,8 +600,13 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
       item.history.push(`Груз остался после смерти странствующего торговца ${owner?.name ?? merchant.characterId}.`);
     }
     if (household && merchant.cash > 0) {
-      household.wealth += merchant.cash;
-      household.history.push(`Получено ${Math.round(merchant.cash)} крон после смерти странствующего торговца ${owner?.name ?? merchant.characterId}.`);
+      const inheritedCash = merchant.cash;
+      transferMoney(world, {
+        payer: { kind: 'travelingMerchant', id: merchant.id }, payee: { kind: 'household', id: household.id },
+        amount: inheritedCash, kind: 'other', purpose: `наследство после смерти странствующего торговца ${owner?.name ?? merchant.characterId}`,
+        settlementId: household.settlementId, kingdomId: owner?.kingdomId,
+      });
+      household.history.push(`Получено ${Math.round(inheritedCash)} крон после смерти странствующего торговца ${owner?.name ?? merchant.characterId}.`);
     }
   }
   if (deadMerchants.length) {
@@ -720,6 +742,15 @@ function detachCharactersBatch(world: WorldState, deadIds: Set<number>, deadById
   if (emptyHouseholdIds.size) {
     for (const household of world.households.filter(item => emptyHouseholdIds.has(item.id))) {
       const building = household.homeBuildingId ? buildingById.get(household.homeBuildingId) : undefined;
+      const government = world.settlementGovernments.find(item => item.settlementId === household.settlementId);
+      transferMoney(world, {
+        payer: { kind: 'household', id: household.id },
+        payee: government ? { kind: 'settlementGovernment', id: government.id } : undefined,
+        amount: household.wealth,
+        kind: government ? 'tax' : 'loss',
+        purpose: government ? `невостребованное имущество угасшего домохозяйства ${household.id}` : `утрата денег угасшего домохозяйства ${household.id}`,
+        settlementId: household.settlementId,
+      });
       for (const itemId of household.inventoryItemIds) {
         const item = itemById.get(itemId);
         if (!item) continue;

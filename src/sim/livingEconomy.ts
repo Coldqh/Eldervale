@@ -10,6 +10,7 @@ import { hashSeed, RNG } from './rng';
 import { worldTick } from './scheduler';
 import { workplaceConnectionScore } from './socialSystem';
 import { availableRecipesForSettlement } from './civilizationSystem';
+import { transferMoney } from './financialSystem';
 
 const CLOTHING_SLOTS: EquipmentSlot[] = ['head', 'body', 'legs', 'feet', 'hands', 'cloak'];
 const FOOD_IDS = ['stew', 'roast', 'bread', 'vegetables', 'salted_fish', 'smoked_meat', 'fish', 'meat', 'eggs', 'milk', 'fruit', 'flour', 'wheat', 'rye', 'barley', 'grain'] as const;
@@ -148,8 +149,6 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
     const householdCapital = household ? Math.min(household.wealth, Math.max(0, household.wealth * .12)) : 0;
     const capital = walletCapital + householdCapital;
     if (capital < 2) continue;
-    character.wallet = 0;
-    if (household) household.wealth -= householdCapital;
 
     const merchantId = world.nextIds.travelingMerchant++;
     const merchant: TravelingMerchant = {
@@ -158,8 +157,18 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
       arrivalTick: worldTick(world) + Math.max(1, Math.ceil(Math.hypot(
         world.settlements.find(item => item.id === route.fromSettlementId)!.x - world.settlements.find(item => item.id === route.toSettlementId)!.x,
         world.settlements.find(item => item.id === route.fromSettlementId)!.y - world.settlements.find(item => item.id === route.toSettlementId)!.y,
-      ) / 3)), wagonInventoryItemIds: [], cash: capital, status: 'в пути', history: ['Вложил собственные деньги в товар и начал странствовать между поселениями.'],
+      ) / 3)), wagonInventoryItemIds: [], cash: 0, status: 'в пути', history: ['Вложил собственные деньги в товар и начал странствовать между поселениями.'],
     };
+    world.travelingMerchants.push(merchant);
+    const merchantAccount = { kind: 'travelingMerchant' as const, id: merchant.id };
+    const walletContribution = transferMoney(world, {
+      payer: { kind: 'character', id: character.id }, payee: merchantAccount, amount: walletCapital, kind: 'capitalContribution',
+      purpose: 'личный капитал странствующего торговца', settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    }).paid;
+    const familyContribution = household ? transferMoney(world, {
+      payer: { kind: 'household', id: household.id }, payee: merchantAccount, amount: householdCapital, kind: 'capitalContribution',
+      purpose: 'семейный капитал странствующего торговца', settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    }).paid : 0;
 
     let purchased = 0;
     const spendingLimit = capital * .78;
@@ -169,13 +178,18 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
       const budget = Math.max(0, spendingLimit - purchased);
       const quantity = Math.min(item.quantity * .3, budget / unitPrice, 8);
       if (quantity <= .05) continue;
-      const paid = quantity * unitPrice;
-      item.quantity -= quantity;
-      establishment.cash += paid;
+      const requestedPayment = quantity * unitPrice;
+      const payment = transferMoney(world, {
+        payer: merchantAccount, payee: { kind: 'establishment', id: establishment.id }, amount: requestedPayment, kind: 'trade',
+        purpose: `закупка ${item.name} для странствующей торговли`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+      });
+      const paid = payment.paid;
+      const paidQuantity = quantity * (paid / Math.max(.01, requestedPayment));
+      if (paidQuantity <= .05) continue;
+      item.quantity -= paidQuantity;
       establishment.monthlyRevenue += paid;
-      merchant.cash -= paid;
       purchased += paid;
-      const stock = addMaterialItem(world, item.templateId, quantity, settlement.id, { ownerCharacterId: character.id }, `куплено у ${establishment.name} для странствующей торговли`, item.quality);
+      const stock = addMaterialItem(world, item.templateId, paidQuantity, settlement.id, { ownerCharacterId: character.id }, `куплено у ${establishment.name} для странствующей торговли`, item.quality);
       if (!stock) continue;
       stock.dye = item.dye;
       stock.condition = item.condition;
@@ -184,12 +198,14 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
       addTransaction(world, {
         settlementId: settlement.id, buyerCharacterId: character.id, sellerCharacterId: establishment.ownerCharacterId,
         establishmentId: establishment.id, travelingMerchantId: merchant.id, templateId: item.templateId,
-        quantity, totalPrice: paid, purpose: 'закупка товара для странствующей торговли',
+        quantity: paidQuantity, totalPrice: paid, purpose: 'закупка товара для странствующей торговли',
       });
     }
     if (!merchant.wagonInventoryItemIds.length) {
-      character.wallet += merchant.cash;
-      world.nextIds.travelingMerchant = Math.max(1, world.nextIds.travelingMerchant - 1);
+      transferMoney(world, { payer: merchantAccount, payee: { kind: 'character', id: character.id }, amount: Math.min(merchant.cash, walletContribution), kind: 'capitalContribution', purpose: 'возврат неиспользованного личного капитала', settlementId: settlement.id, kingdomId: settlement.kingdomId });
+      if (household && merchant.cash > 0) transferMoney(world, { payer: merchantAccount, payee: { kind: 'household', id: household.id }, amount: Math.min(merchant.cash, familyContribution), kind: 'capitalContribution', purpose: 'возврат неиспользованного семейного капитала', settlementId: settlement.id, kingdomId: settlement.kingdomId });
+      world.travelingMerchants = world.travelingMerchants.filter(item => item.id !== merchant.id);
+      // Идентификатор не переиспользуется: журнал уже содержит проводки попытки запуска.
       continue;
     }
 
@@ -207,7 +223,6 @@ function createTravelingMerchants(world: WorldState, rng: RNG): void {
     character.workplaceBuildingId = undefined;
     character.profession = 'merchant';
     character.workplace = 'странствующая торговля';
-    world.travelingMerchants.push(merchant);
   }
 }
 
@@ -276,18 +291,28 @@ function retailPrice(settlement: Settlement, item: WorldItem): number {
   return Math.max(.05, local * (.72 + item.quality / 180));
 }
 
-function pay(character: Character, household: Household | undefined, amount: number): boolean {
-  if (amount <= .0001) return true;
-  const walletPart = Math.min(character.wallet, amount);
-  character.wallet -= walletPart;
-  const remaining = amount - walletPart;
-  if (remaining <= .0001) return true;
-  if (!household || household.wealth + .0001 < remaining) {
-    character.wallet += walletPart;
-    return false;
-  }
-  household.wealth -= remaining;
-  return true;
+function pay(
+  world: WorldState,
+  character: Character,
+  household: Household | undefined,
+  establishment: Establishment,
+  amount: number,
+  settlement: Settlement,
+  purpose: string,
+): number {
+  if (amount <= .0001) return 0;
+  const available = Math.max(0, character.wallet ?? 0) + Math.max(0, household?.wealth ?? 0);
+  if (available + .0001 < amount) return 0;
+  const walletPayment = transferMoney(world, {
+    payer: { kind: 'character', id: character.id }, payee: { kind: 'establishment', id: establishment.id }, amount: Math.min(character.wallet ?? 0, amount),
+    kind: 'trade', purpose, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+  });
+  const remaining = amount - walletPayment.paid;
+  const householdPayment = household && remaining > .0001 ? transferMoney(world, {
+    payer: { kind: 'household', id: household.id }, payee: { kind: 'establishment', id: establishment.id }, amount: remaining,
+    kind: 'trade', purpose, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+  }) : { paid: 0 };
+  return walletPayment.paid + householdPayment.paid;
 }
 
 function buyAndConsume(world: WorldState, character: Character, household: Household | undefined, settlement: Settlement, ids: readonly string[], quantity: number, purpose: string, itemById: ReadonlyMap<number, WorldItem>, establishments: readonly Establishment[]): number {
@@ -295,9 +320,8 @@ function buyAndConsume(world: WorldState, character: Character, household: House
   if (!offer) return 0;
   const moved = Math.min(quantity, offer.item.quantity);
   const price = retailPrice(settlement, offer.item) * moved;
-  if (moved <= .0001 || !pay(character, household, price)) return 0;
+  if (moved <= .0001 || pay(world, character, household, offer.establishment, price, settlement, purpose) + .0001 < price) return 0;
   offer.item.quantity -= moved;
-  offer.establishment.cash += price;
   offer.establishment.monthlyRevenue += price;
   settlement.economy.lastMonthlyTrade += price;
   addTransaction(world, {
@@ -332,9 +356,8 @@ function buyEquipment(world: WorldState, character: Character, household: Househ
   const offer = retailOffer(world, settlement.id, ids, itemById, establishments);
   if (!offer) return false;
   const price = retailPrice(settlement, offer.item);
-  if (!pay(character, household, price)) return false;
+  if (pay(world, character, household, offer.establishment, price, settlement, `покупка экипировки ${offer.item.name}`) + .0001 < price) return false;
   offer.item.quantity -= 1;
-  offer.establishment.cash += price;
   offer.establishment.monthlyRevenue += price;
   const item = addMaterialItem(world, offer.item.templateId, 1, settlement.id, { ownerCharacterId: character.id }, `куплено у ${offer.establishment.name}`, offer.item.quality, itemById, true, character);
   if (!item) return false;
@@ -413,7 +436,7 @@ function compactWear(world: WorldState, rng: RNG, _detailedCharacterIds: Readonl
     const household = character.householdId ? world.households.find(item => item.id === character.householdId) : undefined;
     if (character.equipment.condition < 24 && household && household.wealth > 4) {
       const cost = Math.min(household.wealth, 4 + character.equipment.quality * .08);
-      household.wealth -= cost;
+      transferMoney(world, { payer: { kind: 'household', id: household.id }, amount: cost, kind: 'maintenance', purpose: `ремонт экипировки ${character.name}`, settlementId: character.settlementId, kingdomId: character.kingdomId });
       character.equipment.condition = Math.min(75, character.equipment.condition + 38);
       character.equipment.lastMaintainedTick = worldTick(world);
     }
@@ -518,12 +541,16 @@ function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndex
       const paid = Math.min(buyer.cash, quantity * unit);
       const moved = paid / Math.max(.01, unit);
       if (moved <= .05) continue;
-      item.quantity -= moved;
-      buyer.cash -= paid;
-      merchant.cash += paid;
-      const stock = addMaterialItem(world, item.templateId, moved, settlement.id, { establishmentId: buyer.id, buildingId: buyer.buildingId }, `куплено у странствующего торговца ${character.name}`, item.quality);
+      const payment = transferMoney(world, {
+        payer: { kind: 'establishment', id: buyer.id }, payee: { kind: 'travelingMerchant', id: merchant.id }, amount: paid,
+        kind: 'trade', purpose: `оптовая покупка ${item.name} у странствующего торговца`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+      });
+      if (payment.paid <= .0001) continue;
+      const transferred = moved * (payment.paid / paid);
+      item.quantity -= transferred;
+      const stock = addMaterialItem(world, item.templateId, transferred, settlement.id, { establishmentId: buyer.id, buildingId: buyer.buildingId }, `куплено у странствующего торговца ${character.name}`, item.quality);
       if (stock) stock.dye = item.dye;
-      addTransaction(world, { settlementId: settlement.id, sellerCharacterId: character.id, establishmentId: buyer.id, travelingMerchantId: merchant.id, templateId: item.templateId, quantity: moved, totalPrice: paid, purpose: 'оптовая продажа странствующего торговца' });
+      addTransaction(world, { settlementId: settlement.id, sellerCharacterId: character.id, establishmentId: buyer.id, travelingMerchantId: merchant.id, templateId: item.templateId, quantity: transferred, totalPrice: payment.paid, purpose: 'оптовая продажа странствующего торговца' });
     }
     const nextIndex = (merchant.routeSettlementIds.indexOf(merchant.currentSettlementId) + 1) % merchant.routeSettlementIds.length;
     merchant.nextSettlementId = merchant.routeSettlementIds[nextIndex];
@@ -531,7 +558,7 @@ function moveTravelingMerchants(world: WorldState, rng: RNG, indexes: WorldIndex
     const distance = next ? Math.hypot(next.x - settlement.x, next.y - settlement.y) : 1;
     const route = world.tradeRoutes.find(item => [item.fromSettlementId, item.toSettlementId].includes(merchant.currentSettlementId) && [item.fromSettlementId, item.toSettlementId].includes(merchant.nextSettlementId!));
     if (route && route.safety < 35 && rng.chance((35 - route.safety) / 180)) {
-      merchant.cash *= .65;
+      transferMoney(world, { payer: { kind: 'travelingMerchant', id: merchant.id }, amount: merchant.cash * .35, kind: 'loss', purpose: 'монеты похищены при ограблении каравана', settlementId: merchant.currentSettlementId, kingdomId: character.kingdomId });
       for (const itemId of merchant.wagonInventoryItemIds) {
         const item = indexes.itemById.get(itemId);
         if (item) item.quantity *= .6;

@@ -18,6 +18,7 @@ import { RNG } from './rng';
 import { worldTick } from './scheduler';
 import { recordKingdomFoundation, transferPoliticalTerritory } from './territory';
 import { authorizeStateFoundation, markInstitutionDecisionExecuted } from './institutionSystem';
+import { transferMoney } from './financialSystem';
 
 const ACTIVE_COMMUNITY_STATUSES = new Set<PoliticalCommunityStatus>(['integrated', 'frontier', 'autonomous', 'independent', 'organizing-state']);
 const STATE_COLORS = ['#774b4b', '#4b6477', '#6d5d3e', '#45654f', '#67517a', '#7a643f', '#536b70', '#6f4f62', '#4f6a47', '#735744'];
@@ -411,7 +412,18 @@ function updateCommunityMetrics(world: WorldState, community: PoliticalCommunity
   community.independencePressure = approach(community.independencePressure, pressure, Math.min(1, elapsedMonths / 5));
   const autonomyDelta = (community.independencePressure - 45) / 24 * elapsedMonths - (community.status === 'integrated' && snapshot.connectedToCapital ? .5 * elapsedMonths : 0);
   community.autonomy = clamp(community.autonomy + autonomyDelta, 0, 100);
-  community.treasury = Math.max(0, community.treasury + localGovernments.reduce((sum, government) => sum + Number(government?.monthlyTaxIncome ?? 0), 0) * elapsedMonths * .08);
+  for (const government of localGovernments) {
+    if (!government) continue;
+    transferMoney(world, {
+      payer: { kind: 'settlementGovernment', id: government.id },
+      payee: { kind: 'politicalCommunity', id: community.id },
+      amount: Number(government.monthlyTaxIncome ?? 0) * elapsedMonths * .08,
+      kind: 'governmentTransfer',
+      purpose: `взнос общины ${community.name} из местных налогов`,
+      settlementId: government.settlementId,
+      kingdomId: community.currentKingdomId,
+    });
+  }
 }
 
 function advanceCommunityStatus(world: WorldState, community: PoliticalCommunity, force: boolean): PoliticalTransitionKind | undefined {

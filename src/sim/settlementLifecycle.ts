@@ -13,6 +13,7 @@ import { initializeCivilizationSystem } from './civilizationSystem';
 import { initializeTechnologyKnowledge, reconcileTechnologyKnowledge } from './technologyKnowledge';
 import { initializeCultureSystem } from './cultureSystem';
 import { addMaterialItem, consumeSettlementMaterials, pruneEmptyMaterialItems, refreshSettlementMaterialSummary } from './materialEconomy';
+import { transferMoney } from './financialSystem';
 import { placeName } from './names';
 import { hashSeed, RNG } from './rng';
 import { advanceRaceDemography } from './raceDemography';
@@ -93,6 +94,13 @@ export function reconcileSettlementExpeditionReferences(world: WorldState): bool
     const carrier = validHouseholds[0];
 
     for (const household of invalidHouseholds) {
+      transferMoney(world, {
+        payer: { kind: 'household', id: household.id },
+        payee: carrier ? { kind: 'household', id: carrier.id } : undefined,
+        amount: household.wealth,
+        kind: carrier ? 'other' : 'loss',
+        purpose: carrier ? `деньги погибшей семьи ${household.id} переданы семье ${carrier.id} в экспедиции ${expedition.id}` : `деньги утрачены после гибели экспедиции ${expedition.id}`,
+      });
       for (const itemId of household.inventoryItemIds) {
         const item = world.items.find(candidate => candidate.id === itemId);
         if (!item) continue;
@@ -851,10 +859,21 @@ function selectExpeditionHouseholds(world: WorldState, origin: Settlement, rng: 
 
 function candidateOrigins(world: WorldState): Settlement[] {
   const tick = worldTick(world);
-  return world.settlements.filter(settlement => settlement.population >= 55
-    && settlement.householdIds.length >= 4
-    && !world.settlementExpeditions.some(item => item.originSettlementId === settlement.id && ACTIVE_STATUSES.has(item.status))
-    && !world.settlementExpeditions.some(item => item.originSettlementId === settlement.id && tick - item.formedTick < 72));
+  return world.settlements.filter(settlement => {
+    if (settlement.population < 55 || settlement.householdIds.length < 4) return false;
+    if (world.settlementExpeditions.some(item => item.originSettlementId === settlement.id && ACTIVE_STATUSES.has(item.status))) return false;
+    const latest = world.settlementExpeditions
+      .filter(item => item.originSettlementId === settlement.id)
+      .sort((a, b) => b.formedTick - a.formedTick || b.id - a.id)[0];
+    if (!latest) return true;
+    const monthsSinceAttempt = tick - latest.formedTick;
+    const city = world.cityStates.find(item => item.settlementId === settlement.id);
+    const shelterCollapse = Boolean(city && city.housing.permanentBeds === 0
+      && city.housing.peopleWithoutPermanentBed >= Math.max(1, city.population * .8));
+    // Обычная община отдыхает шесть лет после провала. Полная физическая потеря
+    // жилья снимает запрет через год: люди не ждут календарный cooldown без кроватей.
+    return monthsSinceAttempt >= 72 || (shelterCollapse && monthsSinceAttempt >= 12);
+  });
 }
 
 function foundingPressure(world: WorldState, settlement: Settlement): { score: number; cause: SettlementExpeditionCause } {

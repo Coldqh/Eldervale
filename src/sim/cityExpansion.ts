@@ -1,6 +1,7 @@
 import type { DistrictCivicState, Settlement, SettlementDistrict, Tile, WorldState } from '../types';
 import { appendCausalEvent } from './causality';
 import { markCityDirty } from './cityState';
+import { transferMoney } from './financialSystem';
 
 type DistrictRole = SettlementDistrict['role'];
 
@@ -46,7 +47,15 @@ export function expandSettlementDistrict(
     role,
     name: nextDistrictName(settlement, role),
   };
-  government.treasury -= cost;
+  const payment = transferMoney(world, {
+    payer: { kind: 'settlementGovernment', id: government.id },
+    amount: cost,
+    kind: 'maintenance',
+    purpose: `дороги, межевание и водоотвод для района «${district.name}»`,
+    settlementId: settlement.id,
+    kingdomId: settlement.kingdomId,
+  });
+  if (payment.paid + .0001 < cost) return { ok: false, cost, reason: 'городская казна не смогла провести оплату расширения' };
   government.history.push(`В ${world.year}.${String(world.month).padStart(2, '0')} выделено ${cost} монет на район «${district.name}»: ${reason}.`);
   settlement.districts.push(district);
   settlement.history.push(`В ${world.year} году к городу присоединён район «${district.name}» (${role}).`);

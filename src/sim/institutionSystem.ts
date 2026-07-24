@@ -13,6 +13,7 @@ import { chooseBestOption, decisionKnowledge, linkDecisionToEvent, recordDecisio
 import { ensureCharacterMind, scoreMotivatedAction } from './mindSystem';
 import { worldTick } from './scheduler';
 import { RNG } from './rng';
+import { transferMoney } from './financialSystem';
 
 interface InstitutionProposalInput {
   kind: InstitutionDecisionKind;
@@ -50,6 +51,12 @@ export function advanceInstitutionSystem(world: WorldState, rng = new RNG(`${wor
   advanceCityCouncils(world, rng);
   advanceTradeNegotiations(world, rng);
   trimInstitutionHistory(world);
+}
+
+export function reconcileInstitutionReferences(world: WorldState): void {
+  if (world.simulation.institutionSystemVersion !== 1) initializeInstitutionSystem(world);
+  reconcileInstitutionActors(world);
+  reconcileTradeRepresentatives(world);
 }
 
 export function authorizeTechnologyResearch(
@@ -359,7 +366,19 @@ function advanceCityCouncils(world: WorldState, rng: RNG): void {
     });
     const chosen = chooseBestOption(decision.optionScores);
     if (chosen.id === 'approve' && affordable) {
-      government.treasury -= reserve;
+      const reservation = transferMoney(world, {
+        payer: { kind: 'settlementGovernment', id: government.id },
+        amount: reserve,
+        kind: 'maintenance',
+        purpose: `подготовительный резерв проекта ${request.requestedBuildingType}`,
+        settlementId: settlement.id,
+        kingdomId: settlement.kingdomId,
+      });
+      if (reservation.paid + .0001 < reserve) {
+        deferCityProjectRequest(world, request.id, 'казна не смогла провести денежный резерв', tick + 3, decision.id);
+        resolveInstitutionDecision(world, decision, 'defer', 'платёж резерва не прошёл');
+        continue;
+      }
       approveCityProjectRequest(world, request.id, `${actor.name} и совет одобрили проект; за подготовку зарезервировано ${reserve} крон.`, decision.id, reserve);
       resolveInstitutionDecision(world, decision, 'approve', `проект одобрен голосами ${supporters.length + 1} участников`);
       government.activeDecision = `исполнение решения по проекту ${request.requestedBuildingType}`;

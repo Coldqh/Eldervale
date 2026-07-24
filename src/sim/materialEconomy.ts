@@ -17,6 +17,7 @@ import {
   activeTradeContractForRoute, recordRegionalShipmentOutcome, regionalDeliveredUnitPrice,
   regionalPriceMultiplier, reserveRegionalExtraction,
 } from './regionalEconomy';
+import { addFinancialObligation, outstandingFinancialDebt, setFinancialObligation, transferMoney } from './financialSystem';
 
 type ItemTemplate = ResourceDefinition;
 
@@ -602,7 +603,7 @@ function createEstablishments(world: WorldState, rng: RNG): void {
         id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: establishmentName(type, settlement, index, rng), type,
         ownerCharacterId: owner.id, workerIds: workers.map(worker => worker.id), supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
         recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id), openHour: type === 'таверна' || type === 'постоялый двор' ? 10 : 7,
-        closeHour: type === 'таверна' || type === 'постоялый двор' ? 1 : type === 'рынок' ? 17 : 19, reputation: rng.int(28, 82), cash: Math.max(20, Math.round(owner.wealth * .65 + rng.int(15, 120))),
+        closeHour: type === 'таверна' || type === 'постоялый двор' ? 1 : type === 'рынок' ? 17 : 19, reputation: rng.int(28, 82), cash: 0,
         debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {}, history: [`Открыто в ${settlement.name} не позднее ${world.year} года.`],
       };
       world.establishments.push(establishment);
@@ -612,7 +613,18 @@ function createEstablishments(world: WorldState, rng: RNG): void {
       building.establishmentId = establishment.id;
       building.ownerCharacterId = owner.id;
       building.workerIds = [...establishment.workerIds];
-      owner.wealth = Math.max(0, owner.wealth - Math.round(establishment.cash * .25));
+      const foundingCapital = Math.max(20, Math.round(owner.wealth * .65 + rng.int(15, 120)));
+      transferMoney(world, {
+        payee: { kind: 'establishment', id: establishment.id },
+        amount: foundingCapital,
+        kind: 'capitalContribution',
+        purpose: `начальный капитал заведения ${establishment.name} из имущества, существовавшего до детальной финансовой истории`,
+        settlementId: settlement.id,
+        kingdomId: settlement.kingdomId,
+      });
+      // `Character.wealth` — социальная оценка состояния, не отдельный денежный счёт.
+      // Сохраняем прежнее влияние основания дела на статус владельца.
+      owner.wealth = Math.max(0, owner.wealth - Math.round(foundingCapital * .25));
       for (const worker of workers) {
         const skill = worker.skills[worker.profession] ?? 10;
         const contract: EmploymentContract = {
@@ -983,11 +995,20 @@ function transferItemBetweenEstablishments(world: WorldState, seller: Establishm
   const affordableQuantity = Math.min(moved, (buyer.cash + Math.max(0, creditLimit - buyer.debt)) / Math.max(.01, unitPrice));
   if (affordableQuantity <= .0001) return 0;
   const total = affordableQuantity * unitPrice;
-  const paid = Math.min(buyer.cash, total);
-  buyer.cash -= paid;
-  buyer.debt += Math.max(0, total - paid);
-  seller.cash += paid;
-  seller.monthlyRevenue += paid;
+  const payment = transferMoney(world, {
+    payer: { kind: 'establishment', id: buyer.id }, payee: { kind: 'establishment', id: seller.id }, amount: total,
+    kind: 'trade', purpose: `${source}: ${item.name}`, settlementId: buyer.settlementId,
+    kingdomId: settlement?.kingdomId,
+  });
+  const unpaid = Math.max(0, total - payment.paid);
+  if (unpaid > .0001) {
+    addFinancialObligation(world, {
+      debtor: { kind: 'establishment', id: buyer.id }, creditor: { kind: 'establishment', id: seller.id }, kind: 'tradeCredit', amount: unpaid,
+      purpose: `${source}: ${item.templateId}`, dueTick: worldTick(world) + 2, settlementId: buyer.settlementId, kingdomId: settlement?.kingdomId,
+    });
+    buyer.debt += unpaid;
+  }
+  seller.monthlyRevenue += payment.paid;
   buyer.monthlyExpenses += total;
   item.quantity -= affordableQuantity;
   addItem(world, {
@@ -1308,13 +1329,20 @@ function distributeSettlementStaples(
       if (moved <= .0001) continue;
       if (!workerHousehold) {
         const cost = moved * unitPrice;
-        const paid = Math.min(entry.household.wealth, cost);
-        entry.household.wealth -= paid;
-        entry.household.debt += Math.max(0, cost - paid);
-        entry.household.monthlyExpenses += paid;
-        offer.establishment.cash += paid;
-        offer.establishment.monthlyRevenue += paid;
-        settlement.economy.lastMonthlyTrade += paid;
+        const payment = transferMoney(world, {
+          payer: { kind: 'household', id: entry.household.id }, payee: { kind: 'establishment', id: offer.establishment.id }, amount: cost,
+          kind: 'trade', purpose: `покупка ${offer.item.name} для питания`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+        });
+        if (payment.unpaid > .0001) {
+          addFinancialObligation(world, {
+            debtor: { kind: 'household', id: entry.household.id }, creditor: { kind: 'establishment', id: offer.establishment.id }, kind: 'tradeCredit', amount: payment.unpaid,
+            purpose: `продовольственный долг: ${offer.item.templateId}`, dueTick: worldTick(world) + 2, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+          });
+          entry.household.debt += payment.unpaid;
+        }
+        entry.household.monthlyExpenses += cost;
+        offer.establishment.monthlyRevenue += payment.paid;
+        settlement.economy.lastMonthlyTrade += payment.paid;
       }
       remainingNutrition -= moved * nutritionPerUnit;
     }
@@ -1412,12 +1440,14 @@ function buyHouseholdNeeds(world: WorldState, settlement: Settlement, household:
     const unitPrice = priceFor(settlement, seller.item.templateId, seller.item.quality);
     const affordable = Math.min(desired, household.wealth / unitPrice);
     const moved = transferItemToHousehold(world, seller.establishment, seller.item, household, affordable);
-    const paid = moved * unitPrice;
-    household.wealth = Math.max(0, household.wealth - paid);
-    household.monthlyExpenses += paid;
-    seller.establishment.cash += paid;
-    seller.establishment.monthlyRevenue += paid;
-    settlement.economy.lastMonthlyTrade += paid;
+    const requestedPayment = moved * unitPrice;
+    const payment = transferMoney(world, {
+      payer: { kind: 'household', id: household.id }, payee: { kind: 'establishment', id: seller.establishment.id }, amount: requestedPayment,
+      kind: 'trade', purpose: `покупка ${seller.item.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    household.monthlyExpenses += payment.paid;
+    seller.establishment.monthlyRevenue += payment.paid;
+    settlement.economy.lastMonthlyTrade += payment.paid;
   }
 }
 
@@ -1430,21 +1460,29 @@ function payWagesAndTaxes(world: WorldState, settlement: Settlement, establishme
     const character = activeRuntime?.characterById.get(contract.characterId) ?? world.characters.find(item => item.id === contract.characterId);
     const household = character?.householdId ? activeRuntime?.householdById.get(character.householdId) ?? world.households.find(item => item.id === character.householdId) : undefined;
     if (!character || !household) continue;
-    const dueWage = contract.wage * elapsedMonths + Math.max(0, contract.arrears ?? 0);
-    const paid = Math.min(establishment.cash, dueWage);
-    establishment.cash -= paid;
+    const previousArrears = Math.max(0, contract.arrears ?? 0);
+    const dueWage = contract.wage * elapsedMonths + previousArrears;
+    const available = Math.min(establishment.cash, dueWage);
+    const personalPayment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee: { kind: 'character', id: character.id }, amount: available * .25,
+      kind: 'wage', purpose: `личная часть жалования по договору ${contract.id}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    const familyPayment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee: { kind: 'household', id: household.id }, amount: available - personalPayment.paid,
+      kind: 'wage', purpose: `семейная часть жалования по договору ${contract.id}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    const paid = personalPayment.paid + familyPayment.paid;
     establishment.monthlyExpenses += paid;
-    const personalShare = paid * .25;
-    const familyShare = paid - personalShare;
-    character.wallet = Math.max(0, (character.wallet ?? 0) + personalShare);
-    household.wealth += familyShare;
     household.monthlyIncome += paid;
     character.wealth = Math.round(household.wealth / Math.max(1, household.memberIds.length) + character.wallet);
     const missing = Math.max(0, dueWage - paid);
     contract.arrears = missing;
+    setFinancialObligation(world, {
+      debtor: { kind: 'establishment', id: establishment.id }, creditor: { kind: 'household', id: household.id }, kind: 'wageArrears', amount: missing,
+      purpose: `невыплаченное жалование по договору ${contract.id}`, dueTick: worldTick(world) + 1, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    establishment.debt = Math.max(0, establishment.debt + missing - previousArrears);
     if (missing > 0) {
-      establishment.debt += missing;
-      household.debt += missing;
       household.needs.safety = Math.min(100, household.needs.safety + 3);
       if (missing >= contract.wage * 3) {
         contract.active = false;
@@ -1464,20 +1502,27 @@ function payWagesAndTaxes(world: WorldState, settlement: Settlement, establishme
   const ownerHousehold = owner?.householdId ? activeRuntime?.householdById.get(owner.householdId) ?? world.households.find(item => item.id === owner.householdId) : undefined;
   if (ownerHousehold && establishment.cash > 8) {
     const ownerDraw = Math.min(establishment.cash * .08, (4 + establishment.reputation / 30) * elapsedMonths);
-    establishment.cash -= ownerDraw;
-    establishment.monthlyExpenses += ownerDraw;
-    ownerHousehold.wealth += ownerDraw;
-    ownerHousehold.monthlyIncome += ownerDraw;
+    const payment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee: { kind: 'household', id: ownerHousehold.id }, amount: ownerDraw,
+      kind: 'ownerDraw', purpose: `доход владельца ${establishment.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    establishment.monthlyExpenses += payment.paid;
+    ownerHousehold.monthlyIncome += payment.paid;
     if (owner) owner.wealth = Math.round(ownerHousehold.wealth / Math.max(1, ownerHousehold.memberIds.length));
   }
   const profit = Math.max(0, establishment.monthlyRevenue - establishment.monthlyExpenses);
   const tax = Math.min(establishment.cash, profit * settlement.economy.taxRate);
   if (tax > 0) {
-    establishment.cash -= tax;
-    establishment.monthlyExpenses += tax;
-    const kingdom = activeRuntime?.kingdomById.get(settlement.kingdomId) ?? world.kingdoms.find(item => item.id === settlement.kingdomId);
-    if (kingdom) kingdom.treasury += tax;
+    const localGovernment = world.settlementGovernments.find(item => item.settlementId === settlement.id);
+    const payee = localGovernment ? { kind: 'settlementGovernment' as const, id: localGovernment.id } : { kind: 'kingdom' as const, id: settlement.kingdomId };
+    const payment = transferMoney(world, {
+      payer: { kind: 'establishment', id: establishment.id }, payee, amount: tax,
+      kind: 'tax', purpose: `налог с прибыли ${establishment.name}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    establishment.monthlyExpenses += payment.paid;
+    if (localGovernment) localGovernment.monthlyTaxIncome += payment.paid;
   }
+  establishment.debt = Math.max(establishment.debt, outstandingFinancialDebt(world, { kind: 'establishment', id: establishment.id }));
   const inventoryValue = establishment.inventoryItemIds.reduce((sum, id) => {
     const item = activeRuntime?.itemById.get(id) ?? world.items.find(candidate => candidate.id === id);
     return sum + (item && item.condition > 0 ? item.quantity * item.baseValue : 0);
@@ -1630,11 +1675,13 @@ function createShipments(world: WorldState, settlementIds: ReadonlySet<number>):
     const unitPrice = regionalDeliveredUnitPrice(world, route, from, to, templateId, sellerUnitPrice);
     if (contract && unitPrice > contract.maxUnitPrice) continue;
     const value = quantity * unitPrice;
-    const paid = Math.min(buyer.cash, value);
+    const payment = transferMoney(world, {
+      payer: { kind: 'establishment', id: buyer.id }, payee: { kind: 'establishment', id: sellerFound.establishment.id }, amount: value,
+      kind: 'trade', purpose: `межпоселенческая поставка ${templateId}`, settlementId: to.id, kingdomId: to.kingdomId,
+    });
+    const paid = payment.paid;
     const actualQuantity = quantity * (paid / Math.max(.01, value));
     if (actualQuantity < .2) continue;
-    buyer.cash -= paid;
-    sellerFound.establishment.cash += paid;
     sellerFound.item.quantity -= actualQuantity;
     from.economy.exports[templateId] = (from.economy.exports[templateId] ?? 0) + actualQuantity;
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
@@ -1719,6 +1766,8 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
       const lastTick = world.simulation.economyLastTickBySettlement[key] ?? Math.max(0, tick - 1);
       const elapsedMonths = Math.max(1, Math.min(12, tick - lastTick));
       settlement.economy.lastMonthlyTrade = 0;
+      const localGovernment = world.settlementGovernments.find(item => item.settlementId === settlement.id);
+      if (localGovernment) localGovernment.monthlyTaxIncome = 0;
       for (const establishmentId of settlement.establishmentIds) {
         const establishment = indexes.establishmentById.get(establishmentId);
         if (establishment) { establishment.monthlyRevenue = 0; establishment.monthlyExpenses = 0; }
@@ -1747,9 +1796,13 @@ export function advanceMaterialEconomy(world: WorldState, rng: RNG, indexes: Wor
         if (!household) continue;
         const householdTax = Math.min(household.wealth, Math.max(0, household.monthlyIncome * settlement.economy.taxRate * .35));
         if (householdTax <= 0) continue;
-        household.wealth -= householdTax;
-        const kingdom = indexes.kingdomById.get(settlement.kingdomId);
-        if (kingdom) kingdom.treasury += householdTax;
+        const government = world.settlementGovernments.find(item => item.settlementId === settlement.id);
+        const payee = government ? { kind: 'settlementGovernment' as const, id: government.id } : { kind: 'kingdom' as const, id: settlement.kingdomId };
+        const payment = transferMoney(world, {
+          payer: { kind: 'household', id: household.id }, payee, amount: householdTax,
+          kind: 'tax', purpose: `налог с дохода семьи ${household.id}`, settlementId: settlement.id, kingdomId: settlement.kingdomId,
+        });
+        if (government) government.monthlyTaxIncome += payment.paid;
       }
       // Сначала жители и заведения получают шанс купить, приготовить и съесть товар.
       // Старение в начале тика делало добычу, собранную после прошлого хозяйственного

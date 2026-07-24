@@ -135,6 +135,57 @@ export interface MarketTransaction {
 }
 
 
+export type FinancialAccountKind = 'character' | 'household' | 'establishment' | 'settlementGovernment' | 'kingdom' | 'travelingMerchant' | 'politicalCommunity' | 'courtFaction';
+export type FinancialTransactionKind = 'trade' | 'wage' | 'ownerDraw' | 'tax' | 'fine' | 'servicePayroll' | 'militaryPayroll' | 'courtPayroll' | 'governmentTransfer' | 'debtPayment' | 'capitalContribution' | 'maintenance' | 'relief' | 'loss' | 'other';
+export type FinancialObligationKind = 'tradeCredit' | 'wageArrears' | 'taxArrears' | 'stateDebt' | 'other';
+
+export interface FinancialAccountRef {
+  kind: FinancialAccountKind;
+  id: number;
+}
+
+export interface FinancialTransaction {
+  id: number;
+  tick: number;
+  settlementId?: number;
+  kingdomId?: number;
+  kind: FinancialTransactionKind;
+  payer?: FinancialAccountRef;
+  payee?: FinancialAccountRef;
+  requestedAmount: number;
+  amount: number;
+  unpaidAmount: number;
+  purpose: string;
+  relatedMarketTransactionId?: number;
+  relatedObligationId?: number;
+}
+
+export interface FinancialObligation {
+  id: number;
+  createdTick: number;
+  dueTick: number;
+  debtor: FinancialAccountRef;
+  creditor: FinancialAccountRef;
+  kind: FinancialObligationKind;
+  originalAmount: number;
+  outstandingAmount: number;
+  status: 'open' | 'partial' | 'paid' | 'defaulted';
+  purpose: string;
+  settlementId?: number;
+  kingdomId?: number;
+  lastPaymentTick?: number;
+}
+
+export interface FinancialAuditState {
+  lastTick: number;
+  totalMoney: number;
+  expectedExternalDelta: number;
+  unexplainedDelta: number;
+  transactionCount: number;
+  openObligationTotal: number;
+}
+
+
 
 
 export type KnowledgeTopic = 'событие' | 'чудовище' | 'личность' | 'государство' | 'поселение' | 'дорога' | 'война' | 'торговля' | 'тайна' | 'место' | 'закон';
@@ -1166,6 +1217,8 @@ export interface SimulationRuntimeState {
   regionalEconomyVersion?: 1;
   worldLawVersion?: 1;
   institutionSystemVersion?: 1;
+  financialSystemVersion?: 1;
+  financeAudit?: FinancialAuditState;
   economyLastTickBySettlement?: Record<string, number>;
   agricultureLastTickBySettlement?: Record<string, number>;
   cemeteryPlacementVersion?: 1;
@@ -1961,6 +2014,8 @@ export interface WorldState {
   shipments: TradeShipment[];
   travelingMerchants: TravelingMerchant[];
   marketTransactions: MarketTransaction[];
+  financialTransactions: FinancialTransaction[];
+  financialObligations: FinancialObligation[];
   knowledgeFacts: KnowledgeFact[];
   memories: PersonalMemory[];
   rumors: Rumor[];

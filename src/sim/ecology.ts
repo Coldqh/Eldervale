@@ -4,6 +4,7 @@ import { RNG } from './rng';
 import type { WorldIndexes } from './indexes';
 import { addAnimalPopulationToIndexes, coordinateKey, nearbyTileKeys, rebuildAnimalIndexes, workers } from './indexes';
 import { addMaterialItem, refreshSettlementMaterialSummary } from './materialEconomy';
+import { transferMoney } from './financialSystem';
 
 interface AnimalDefinition {
   species: string;
@@ -306,21 +307,30 @@ function hunterHouseholdShares(hunters: Character[]): { householdId: number; wei
   return [...counts.entries()].map(([householdId, count]) => ({ householdId, weight: count / total }));
 }
 
-function payHunters(indexes: WorldIndexes, hunters: Character[], amount: number): void {
-  if (amount <= .0001) return;
+function payHunters(world: WorldState, indexes: WorldIndexes, buyer: Establishment, hunters: Character[], amount: number, settlementId: number): number {
+  if (amount <= .0001) return 0;
+  const settlement = indexes.settlementById.get(settlementId);
+  let paidTotal = 0;
   const shares = hunterHouseholdShares(hunters);
   if (shares.length) {
     for (const share of shares) {
       const household = indexes.householdById.get(share.householdId);
       if (!household) continue;
-      const payment = amount * share.weight;
-      household.wealth += payment;
-      household.monthlyIncome += payment;
+      const payment = transferMoney(world, {
+        payer: { kind: 'establishment', id: buyer.id }, payee: { kind: 'household', id: household.id }, amount: amount * share.weight,
+        kind: 'trade', purpose: 'оплата физической охотничьей добычи', settlementId, kingdomId: settlement?.kingdomId,
+      });
+      household.monthlyIncome += payment.paid;
+      paidTotal += payment.paid;
     }
-    return;
+    return paidTotal;
   }
   const leadHunter = hunters[0];
-  if (leadHunter) leadHunter.wallet += amount;
+  if (!leadHunter) return 0;
+  return transferMoney(world, {
+    payer: { kind: 'establishment', id: buyer.id }, payee: { kind: 'character', id: leadHunter.id }, amount,
+    kind: 'trade', purpose: 'оплата физической охотничьей добычи', settlementId, kingdomId: settlement?.kingdomId,
+  }).paid;
 }
 
 function storeUnsoldHuntYield(
@@ -345,14 +355,15 @@ function sellOrStoreHuntYield(
   const purchased = buyer ? Math.min(quantity, buyer.cash / Math.max(.01, procurementUnitPrice)) : 0;
   let payment = 0;
   if (buyer && purchased > .0001) {
-    payment = purchased * procurementUnitPrice;
-    buyer.cash -= payment;
+    const requested = purchased * procurementUnitPrice;
+    payment = payHunters(world, indexes, buyer, hunters, requested, settlementId);
+    const paidQuantity = purchased * (payment / Math.max(.01, requested));
     buyer.monthlyExpenses += payment;
-    payHunters(indexes, hunters, payment);
-    addMaterialItem(world, templateId, purchased, settlementId, { establishmentId: buyer.id, buildingId: buyer.buildingId },
+    addMaterialItem(world, templateId, paidQuantity, settlementId, { establishmentId: buyer.id, buildingId: buyer.buildingId },
       `куплено у охотников после добычи ${species}`, quality, indexes.itemById);
   }
-  const remainder = quantity - purchased;
+  const actualPurchased = payment > .0001 ? payment / Math.max(.01, procurementUnitPrice) : 0;
+  const remainder = quantity - actualPurchased;
   if (remainder > .0001) storeUnsoldHuntYield(world, indexes, hunters, settlementId, templateId, remainder, quality,
     `доля охотников после добычи ${species}`);
   return payment;

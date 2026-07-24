@@ -15,6 +15,7 @@ import { markCityDirty } from './cityState';
 import { pendingCityDevelopmentRequests } from './cityDevelopment';
 import { expandSettlementDistrict } from './cityExpansion';
 import { availableRecipesForSettlement } from './civilizationSystem';
+import { transferMoney } from './financialSystem';
 
 interface CropDefinition {
   crop: CropKind;
@@ -577,27 +578,24 @@ function createEstablishmentForBuilding(world: WorldState, building: Building, s
   if (!owner) return undefined;
 
   const startupRequired = Math.max(6, Math.min(80, Math.round(building.capacity * (publicService ? .12 : .22))));
-  let startupCapital = 0;
+  const household = owner.householdId ? indexes.householdById.get(owner.householdId) : undefined;
+  let walletContribution = 0;
+  let householdContribution = 0;
   if (publicService) {
     if (!government || government.treasury + .0001 < startupRequired) {
       building.history.push(`Здание готово, но служба «${type}» не открылась: в местной казне нет ${startupRequired} крон на запуск.`);
       return undefined;
     }
-    government.treasury -= startupRequired;
-    startupCapital = startupRequired;
   } else {
-    const household = owner.householdId ? indexes.householdById.get(owner.householdId) : undefined;
     const available = Math.max(0, owner.wallet ?? 0) + Math.max(0, household?.wealth ?? 0);
     if (available + .0001 < startupRequired) {
       building.history.push(`Здание готово, но частное дело «${type}» не открылось: ни один подходящий житель не смог вложить ${startupRequired} крон.`);
       return undefined;
     }
-    const walletContribution = Math.min(owner.wallet ?? 0, startupRequired);
-    owner.wallet = Math.max(0, (owner.wallet ?? 0) - walletContribution);
-    const householdContribution = startupRequired - walletContribution;
-    if (household && householdContribution > 0) household.wealth = Math.max(0, household.wealth - householdContribution);
-    startupCapital = startupRequired;
+    walletContribution = Math.min(owner.wallet ?? 0, startupRequired);
+    householdContribution = startupRequired - walletContribution;
   }
+  const startupCapital = startupRequired;
 
   const workerBudget = Math.max(0, startupCapital - 4);
   const maxPaidWorkers = Math.max(0, Math.floor(workerBudget / 6));
@@ -607,11 +605,29 @@ function createEstablishmentForBuilding(world: WorldState, building: Building, s
     id: world.nextIds.establishment++, settlementId: settlement.id, buildingId: building.id, name: building.name, type, ownerCharacterId: owner.id,
     workerIds: workers.map(worker => worker.id), supplierEstablishmentIds: [], customerHouseholdIds: [], inventoryItemIds: [],
     recipeIds: availableRecipesForSettlement(world, settlement.id, type).map(recipe => recipe.id), openHour: 7, closeHour: 19,
-    reputation: rng.int(35, 65), cash: startupCapital, debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {},
+    reputation: rng.int(35, 65), cash: 0, debt: 0, monthlyRevenue: 0, monthlyExpenses: 0, active: true, menu: {},
     history: [publicService ? `Открыто на средства местной казны после завершения строительства в ${world.year} году.` : `${owner.name} вложил ${startupCapital} крон и открыл дело после завершения строительства в ${world.year} году.`],
   };
   world.establishments.push(establishment); settlement.establishmentIds.push(establishment.id); building.establishmentId = establishment.id; building.ownerCharacterId = owner.id; building.workerIds = [...establishment.workerIds];
   indexes.establishmentById.set(establishment.id, establishment); const list = indexes.establishmentsBySettlement.get(settlement.id) ?? []; list.push(establishment); indexes.establishmentsBySettlement.set(settlement.id, list);
+  if (publicService && government) {
+    transferMoney(world, {
+      payer: { kind: 'settlementGovernment', id: government.id }, payee: { kind: 'establishment', id: establishment.id },
+      amount: startupCapital, kind: 'capitalContribution', purpose: `запуск службы ${establishment.name}`,
+      settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+  } else {
+    if (walletContribution > 0) transferMoney(world, {
+      payer: { kind: 'character', id: owner.id }, payee: { kind: 'establishment', id: establishment.id },
+      amount: walletContribution, kind: 'capitalContribution', purpose: `личный вклад в открытие ${establishment.name}`,
+      settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+    if (household && householdContribution > 0) transferMoney(world, {
+      payer: { kind: 'household', id: household.id }, payee: { kind: 'establishment', id: establishment.id },
+      amount: householdContribution, kind: 'capitalContribution', purpose: `семейный вклад в открытие ${establishment.name}`,
+      settlementId: settlement.id, kingdomId: settlement.kingdomId,
+    });
+  }
   for (const worker of workers) {
     if (worker.id !== owner.id && worker.employmentContractId) continue;
     worker.employerEstablishmentId = establishment.id; worker.workplaceBuildingId = building.id; worker.workplace = establishment.name;

@@ -3,7 +3,7 @@ import { RNG } from './rng';
 import { personName } from './names';
 import { appendCausalEvent } from './causality';
 import { advanceEcology } from './ecology';
-import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems, synchronizeSettlementMaterialLinks } from './materialEconomy';
+import { advanceMaterialEconomy, ensureEstablishmentOwners, ensureHouseholdPhysicalCapacity, invalidateMaterialRuntime, pruneEmptyMaterialItems, refreshSettlementMaterialSummary, synchronizeSettlementMaterialLinks } from './materialEconomy';
 import { advanceAgriculture, advanceConstruction, requestConstructionProject } from './agricultureConstruction';
 import { advanceLivestockSystem } from './livestockSystem';
 import { advanceLivingEconomy, detailedPopulationContext, synchronizeEmploymentLinks } from './livingEconomy';
@@ -40,7 +40,8 @@ import { advanceSettlementLifecycle, initializeSettlementLifecycle, reconcileSet
 import { advanceStateFormation, initializeStateFormation } from './stateFormation';
 import { advanceRegionalEconomy, initializeRegionalEconomy } from './regionalEconomy';
 import { initializeWorldLaw, reconcileWorldLawStates } from './worldLaw';
-import { advanceInstitutionSystem, initializeInstitutionSystem } from './institutionSystem';
+import { advanceInstitutionSystem, initializeInstitutionSystem, reconcileInstitutionReferences } from './institutionSystem';
+import { beginFinancialAudit, completeFinancialAudit, initializeFinancialSystem, transferMoney } from './financialSystem';
 
 function addEvent(world: WorldState, data: CausalEventInput): WorldEvent {
   const event = appendCausalEvent(world, data);
@@ -293,12 +294,15 @@ function relocateMarriagePartner(
   const originMemberCount = Math.max(1, originHousehold?.memberIds.length ?? 1);
   const wealthShare = originHousehold ? originHousehold.wealth / originMemberCount : 0;
   if (originHousehold) {
-    originHousehold.wealth = Math.max(0, originHousehold.wealth - wealthShare);
+    transferMoney(world, {
+      payer: { kind: 'household', id: originHousehold.id }, payee: { kind: 'household', id: destinationHousehold.id },
+      amount: wealthShare, kind: 'other', purpose: `доля имущества ${mover.name} при брачном переезде`,
+      settlementId: destination.id, kingdomId: destination.kingdomId,
+    });
     originHousehold.memberIds = originHousehold.memberIds.filter(id => id !== mover.id);
     if (originHousehold.headCharacterId === mover.id) originHousehold.headCharacterId = originHousehold.memberIds[0] ?? 0;
     originHousehold.history.push(`${world.year}: ${mover.name} покинул дом после брака и переехал в ${destination.name}.`);
   }
-  destinationHousehold.wealth += wealthShare;
   if (!destinationHousehold.memberIds.includes(mover.id)) destinationHousehold.memberIds.push(mover.id);
   destinationHousehold.history.push(`${world.year}: ${mover.name} вошёл в дом после брака.`);
 
@@ -822,7 +826,14 @@ function dispatchHero(world: WorldState, monsterId: number, kingdomId: number, r
     const lair = world.dungeons.find(dungeon => dungeon.id === monster.lairDungeonId);
     hero.renown = Math.min(100, hero.renown + (monster.species === 'dragon' ? 35 : 18));
     hero.kills += 1;
-    hero.wealth += monster.hoard;
+    transferMoney(world, {
+      payee: { kind: 'character', id: hero.id },
+      amount: monster.hoard,
+      kind: 'other',
+      purpose: `монеты из логова ${monsterName}`,
+      settlementId: hero.settlementId,
+      kingdomId: hero.kingdomId,
+    });
     hero.titles.push(monster.species === 'dragon' ? 'Драконоборец' : 'Убийца чудовищ');
     hero.biography.push(`Убил ${monsterName} в ${world.year} году.`);
     monster.history.push(`Убит героем ${hero.name}.`);
@@ -1064,6 +1075,7 @@ export function advanceOneMonth(
   world.year = Math.floor(absoluteMonth / 12);
   world.month = absoluteMonth % 12 + 1;
   const rng = new RNG(`${world.config.seed}:${world.year}:${world.month}`);
+  const financeCheckpoint = beginFinancialAudit(world);
   const schedule = prepareMonthSchedule(world, indexes, { fastForward });
   const detailed = detailedPopulationContext(world, indexes, schedule.activeSettlementIds);
 
@@ -1134,6 +1146,11 @@ export function advanceOneMonth(
     refreshDynamicWorldIndexes(indexes, world);
   });
 
+  // Late phases can create, consume or move physical goods after the main market pass.
+  // Rebuild legacy settlement summaries from the final physical inventories so reports
+  // and integrity checks cannot observe stale grain, food or resource counters.
+  for (const settlement of world.settlements) refreshSettlementMaterialSummary(world, settlement.id);
+
   synchronizeSettlementGovernmentLeaders(world, indexes);
   synchronizeStateMachineReferences(world, new RNG(`${world.config.seed}:state-references:${world.year}:${world.month}`), indexes);
   synchronizeEmploymentLinks(world, indexes);
@@ -1143,6 +1160,7 @@ export function advanceOneMonth(
   // демографический snapshot, даже без внешней обвязки advanceWorldSystems.
   advanceRaceDemography(world, { elapsedMonths: 0, indexes, recordHistory: false });
   if (!options.deferCitySimulation) advanceCitySimulation(world);
+  completeFinancialAudit(world, financeCheckpoint);
   engine.processedTasks += schedule.processedTasks;
   return schedule.processedTasks;
 }
@@ -1170,6 +1188,7 @@ export function initializeWorldSystems(world: WorldState): void {
   initializeWorldLaw(world);
   initializeInstitutionSystem(world);
   initializeRegionalEconomy(world);
+  initializeFinancialSystem(world);
   initializeSettlementLifecycle(world);
   initializeStateFormation(world);
   initializeCitySimulation(world);
@@ -1200,6 +1219,7 @@ export function advanceWorldSystems(
   const fastForward = Boolean(options.fastForward);
   const monthStep = Math.max(1, Math.min(3, Math.floor(options.monthStep ?? 1)));
   const onPhase = options.onPhase;
+  const fullFinanceCheckpoint = beginFinancialAudit(engine.world);
 
   advanceOneMonth(engine, onPhase, { fastForward, monthStep, deferCitySimulation: true });
 
@@ -1247,7 +1267,10 @@ export function advanceWorldSystems(
   // Последняя граница хода: никакая поздняя система не должна оставить человека
   // одновременно заключённым, путешествующим или служащим и гражданским работником.
   reconcileWorldLawStates(engine.world);
+  reconcileInstitutionReferences(engine.world);
   synchronizeEmploymentLinks(engine.world, engine.indexes);
+  for (const settlement of engine.world.settlements) refreshSettlementMaterialSummary(engine.world, settlement.id);
+  completeFinancialAudit(engine.world, fullFinanceCheckpoint);
   return monthStep;
 }
 

@@ -10,6 +10,8 @@ import { archiveCharactersBatch } from './mortality';
 import { hashSeed, RNG } from './rng';
 import { controlledCapital, normalizeKingdomCapitals } from './kingdomState';
 import { availableRecipesForSettlement } from './civilizationSystem';
+import { setFinancialObligation, transferMoney } from './financialSystem';
+import { worldTick } from './scheduler';
 
 const MILITARY_VERSION = 1;
 const ACTIVE_STATUSES = new Set<Army['status']>(['marching', 'hunting', 'raiding', 'battle']);
@@ -388,17 +390,31 @@ function payArmy(world: WorldState, army: Army, kingdom: WorldState['kingdoms'][
   for (const soldier of soldiers) due += payForRole(soldier.militaryRole ?? 'ополченец');
   army.monthlyPayroll = due;
   const paidRatio = due > 0 ? Math.min(1, kingdom.treasury / due) : 1;
-  const paidTotal = due * paidRatio;
-  kingdom.treasury = Math.max(0, kingdom.treasury - paidTotal);
-  army.logistics.payrollDebt += due - paidTotal;
+  let paidTotal = 0;
   for (const soldier of soldiers) {
     const personalDue = payForRole(soldier.militaryRole ?? 'ополченец');
-    const paid = personalDue * paidRatio;
-    soldier.wallet += paid * .35;
+    const targetPayment = personalDue * paidRatio;
     const household = soldier.householdId ? world.households.find(item => item.id === soldier.householdId) : undefined;
-    if (household) { household.wealth += paid * .65; household.monthlyIncome += paid; }
+    const walletTarget = household ? targetPayment * .35 : targetPayment;
+    const walletPayment = transferMoney(world, {
+      payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'character', id: soldier.id }, amount: walletTarget,
+      kind: 'militaryPayroll', purpose: `военное жалование: ${army.name}`, settlementId: soldier.settlementId, kingdomId: kingdom.id,
+    });
+    const householdPayment = household ? transferMoney(world, {
+      payer: { kind: 'kingdom', id: kingdom.id }, payee: { kind: 'household', id: household.id }, amount: targetPayment - walletPayment.paid,
+      kind: 'militaryPayroll', purpose: `семейная часть военного жалования: ${army.name}`, settlementId: household.settlementId, kingdomId: kingdom.id,
+    }) : { paid: 0 };
+    const paid = walletPayment.paid + householdPayment.paid;
+    paidTotal += paid;
+    if (household) household.monthlyIncome += paid;
     soldier.servicePayArrears = Math.max(0, (soldier.servicePayArrears ?? 0) + personalDue - paid);
+    setFinancialObligation(world, {
+      debtor: { kind: 'kingdom', id: kingdom.id }, creditor: household ? { kind: 'household', id: household.id } : { kind: 'character', id: soldier.id },
+      kind: 'stateDebt', amount: soldier.servicePayArrears, purpose: `задолженность по военному жалованию: солдат ${soldier.id}`,
+      dueTick: worldTick(world) + 1, settlementId: soldier.settlementId, kingdomId: kingdom.id,
+    });
   }
+  army.logistics.payrollDebt += due - paidTotal;
   if (paidRatio < .65 && rng.chance(.18)) {
     appendCausalEvent(world, {
       kind: 'military', title: `${army.name} не получило полного жалования`, description: `Казна выплатила только ${Math.round(paidRatio * 100)}% причитающихся денег.`,
